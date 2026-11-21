@@ -50,12 +50,34 @@
 
 不内置推理引擎、不分发权重、不做云账号、不遥测、不做移动端。
 
+## 快速开始（Linux x64）
+
+要求 Rust 1.80+，无其他运行时依赖。
+
+```bash
+cargo build --release --bins
+./target/release/featheragent serve --root .          # 内核 + UDS
+./target/release/featheragent-tui --root .            # TUI（另开终端）
+./target/release/featheragent-gui --root . --app      # GUI（Chromium --app 独立窗口）
+```
+
+出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。
+
+三产物打包：`scripts/package.sh`，输出 `dist/*.tar.gz` + `sha256` + manifest；体积门禁（内核 ≤ 8 MiB）在脚本内断言。
+
+运行时会在安装根下生成 `data/`、`workspace/`、`runtime/`；可用 `--data/--workspace/--runtime` 分别外置。
+
 ## 文档
 
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
+- **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 
 > 文档中所有「目标值」必须经 Spike / 阶段门禁实测后回填，未测不写数字。
 
 ## 状态
 
-设计阶段（`v1.1.1`，待评审）。尚无代码实现。
+`v1.1.1` 已实现并通过本机实测门禁：内核 0.93 MiB、进程内启动 1.34 ms、空闲 RSS 2.63 MiB、事件写入 P95 3.40 µs、上下文组装 P95 0.12 ms、RPC P95 0.047 ms；52 个自动化测试全绿。
+
+已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、GUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、三产物打包与解压运行、1000 次日志随机截断恢复。
+未实测：真实 Ollama / 7B 模型指标（S3）、Windows 命名管道、macOS、四平台 × 双架构矩阵。详见验证报告。
+

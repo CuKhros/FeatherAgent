@@ -8,6 +8,9 @@
 /workspace
 /runtime
 
+# 打包产物（由 scripts/package.sh 生成，哈希见验证报告）
+/dist
+
 # 编辑器 / 系统
 .DS_Store
 .idea/

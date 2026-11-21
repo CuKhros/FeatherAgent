@@ -1,0 +1,406 @@
+//! 容错解析（设计文档 §5.3）：JSON 修复 → markdown 提取 → 正则回退。
+//!
+//! 小模型最常见的失败是"工具调用格式不对"：多一层解释文字、尾逗号、单引号、
+//! 参数被序列化成字符串。这里的顺序是硬性的：能修就修，修不了才回退。
+
+use serde_json::{json, Value};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCall {
+    pub name: String,
+    pub arguments: Value,
+}
+
+/// 从模型输出中提取工具调用；解析不出就返回空（绝不抛错）。
+pub fn extract(text: &str) -> Vec<ToolCall> {
+    let mut out = Vec::new();
+
+    // 1) 直接整体解析
+    if let Ok(v) = serde_json::from_str::<Value>(text.trim()) {
+        collect_from_value(&v, &mut out);
+    }
+
+    // 2) markdown 围栏
+    for block in fenced_blocks(text) {
+        for candidate in [block.as_str(), &repair(&block)] {
+            if let Ok(v) = serde_json::from_str::<Value>(candidate) {
+                collect_from_value(&v, &mut out);
+            }
+        }
+    }
+
+    // 3) 扫描平衡的 `{...}` 片段（先原文，再修复）
+    for frag in balanced_fragments(text) {
+        for candidate in [frag.as_str(), &repair(&frag)] {
+            if let Ok(v) = serde_json::from_str::<Value>(candidate) {
+                collect_from_value(&v, &mut out);
+            }
+        }
+    }
+
+    // 4) 正则回退：`name` + `arguments` 手工抽取
+    if out.is_empty() {
+        if let Some(c) = regex_fallback(text) {
+            out.push(c);
+        }
+    }
+
+    // 5) `<tool_call>` XML 伪标签
+    if out.is_empty() {
+        for frag in tag_fragments(text, "tool_call") {
+            if let Some(c) = regex_fallback(&frag) {
+                out.push(c);
+            }
+        }
+    }
+
+    dedup(out)
+}
+
+fn collect_from_value(v: &Value, out: &mut Vec<ToolCall>) {
+    match v {
+        Value::Array(arr) => {
+            for x in arr {
+                collect_from_value(x, out);
+            }
+        }
+        Value::Object(map) => {
+            // OpenAI 风格：{"name": "...", "arguments": {...}} 或 {"function": {...}}
+            let name = map
+                .get("name")
+                .or_else(|| map.get("tool"))
+                .or_else(|| map.get("tool_name"))
+                .and_then(|n| n.as_str());
+            if let Some(name) = name {
+                let args = map
+                    .get("arguments")
+                    .or_else(|| map.get("parameters"))
+                    .or_else(|| map.get("args"))
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                match args {
+                    Value::String(s) => {
+                        let parsed = serde_json::from_str(&s).unwrap_or_else(|_| json!({ "raw": s }));
+                        out.push(ToolCall {
+                            name: name.to_string(),
+                            arguments: parsed,
+                        });
+                    }
+                    other => out.push(ToolCall {
+                        name: name.to_string(),
+                        arguments: other,
+                    }),
+                }
+            }
+            if let Some(func) = map.get("function") {
+                collect_from_value(func, out);
+            }
+            // tool_calls 数组
+            if let Some(Value::Array(calls)) = map.get("tool_calls") {
+                for c in calls {
+                    collect_from_value(c, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn fenced_blocks(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("```") {
+        let after = &rest[start + 3..];
+        let body_start = after.find('\n').map(|i| i + 1).unwrap_or(0);
+        let body = &after[body_start..];
+        if let Some(end) = body.find("```") {
+            let mut s = body[..end].trim();
+            // 去掉语言标记行
+            if let Some(first_nl) = s.find('\n') {
+                let first = &s[..first_nl];
+                if first.starts_with("json") || first.starts_with("JSON") || first.starts_with("tool") {
+                    s = s[first_nl + 1..].trim();
+                }
+            }
+            out.push(s.to_string());
+            rest = &body[end + 3..];
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+fn tag_fragments(text: &str, tag: &str) -> Vec<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(s) = rest.find(&open) {
+        let after = &rest[s + open.len()..];
+        if let Some(e) = after.find(&close) {
+            out.push(after[..e].trim().to_string());
+            rest = &after[e + close.len()..];
+        } else {
+            out.push(after.trim().to_string());
+            break;
+        }
+    }
+    out
+}
+
+/// 取出所有顶层平衡的 `{...}` 片段（忽略字符串内的括号）。
+fn balanced_fragments(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'{' {
+            if let Some(end) = balanced_end(text, i) {
+                out.push(text[i..end].to_string());
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+fn balanced_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut escape = false;
+    for i in start..bytes.len() {
+        let b = bytes[i];
+        if in_str {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// JSON 修复：尾逗号、单引号、裸键、中文引号。
+pub fn repair(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut chars = s.chars().peekable();
+    let mut in_str = false;
+    let mut quote_char = '"';
+    while let Some(c) = chars.next() {
+        match c {
+            '“' | '”' if !in_str => {
+                quote_char = '"';
+                in_str = true;
+                out.push('"');
+            }
+            '‘' | '’' if !in_str => {
+                quote_char = '\'';
+                in_str = true;
+                out.push('"');
+            }
+            '\'' if !in_str => {
+                quote_char = '\'';
+                in_str = true;
+                out.push('"');
+            }
+            '"' if !in_str => {
+                quote_char = '"';
+                in_str = true;
+                out.push('"');
+            }
+            c if in_str && c == quote_char => {
+                in_str = false;
+                out.push('"');
+            }
+            '\\' if in_str => {
+                out.push('\\');
+                if let Some(n) = chars.next() {
+                    out.push(n);
+                }
+            }
+            ',' if !in_str => {
+                // 尾逗号：后面跳过空白后若是 } 或 ] 则不写
+                let mut look = chars.clone();
+                let mut next = None;
+                while let Some(x) = look.next() {
+                    if !x.is_whitespace() {
+                        next = Some(x);
+                        break;
+                    }
+                }
+                if matches!(next, Some('}') | Some(']')) {
+                    continue;
+                }
+                out.push(',');
+            }
+            _ => out.push(c),
+        }
+    }
+    quote_bare_keys(&out)
+}
+
+fn quote_bare_keys(s: &str) -> String {
+    // { name: ... } → { "name": ... }
+    // 注意：必须按字节操作但**保留原始 UTF-8 字节**，不能把每个字节当 char push（中文会变乱码）。
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() + 8);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'{' || bytes[i] == b',' {
+            out.push(bytes[i]);
+            i += 1;
+            // 跳过空白，找裸键
+            let mut j = i;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                out.push(bytes[j]);
+                j += 1;
+            }
+            let start = j;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            if j > start && j < bytes.len() && bytes[j] == b':' {
+                out.push(b'"');
+                out.extend_from_slice(&bytes[start..j]);
+                out.push(b'"');
+                out.push(b':');
+                i = j + 1;
+                continue;
+            }
+            i = j;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn regex_fallback(text: &str) -> Option<ToolCall> {
+    let name = find_string_after(text, "\"name\"")?;
+    if name.is_empty() {
+        return None;
+    }
+    let args = find_after(text, "\"arguments\"").or_else(|| find_after(text, "\"parameters\""))?;
+    let args_trim = args.trim_start();
+    let value = if args_trim.starts_with('{') {
+        // 参数对象必须闭合；半截 JSON 直接放弃（宁可漏一次调用，也不发错参数）
+        let end = balanced_end(args_trim, 0)?;
+        let raw = &args_trim[..end];
+        serde_json::from_str::<Value>(raw)
+            .or_else(|_| serde_json::from_str::<Value>(&repair(raw)))
+            .ok()?
+    } else if args_trim.starts_with('"') {
+        let s = find_string_after(text, "\"arguments\"").unwrap_or_default();
+        serde_json::from_str(&s).unwrap_or_else(|_| json!({"raw": s}))
+    } else {
+        json!({"raw": args_trim})
+    };
+    Some(ToolCall {
+        name,
+        arguments: value,
+    })
+}
+
+fn find_after<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let idx = text.find(key)?;
+    let after = &text[idx + key.len()..];
+    let colon = after.find(':')?;
+    Some(&after[colon + 1..])
+}
+
+fn find_string_after(text: &str, key: &str) -> Option<String> {
+    let rest = find_after(text, key)?;
+    let rest = rest.trim_start();
+    let quote = rest.find('"')?;
+    let body = &rest[quote + 1..];
+    let end = body.find('"')?;
+    Some(body[..end].to_string())
+}
+
+fn dedup(calls: Vec<ToolCall>) -> Vec<ToolCall> {
+    let mut out: Vec<ToolCall> = Vec::new();
+    for c in calls {
+        if !out.iter().any(|x| x.name == c.name && x.arguments == c.arguments) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_json_and_openai_shape() {
+        let text = r#"{"name":"tool.fs.read","arguments":{"path":"/tmp/a"}}"#;
+        let c = extract(text);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].name, "tool.fs.read");
+        assert_eq!(c[0].arguments["path"], "/tmp/a");
+    }
+
+    #[test]
+    fn fenced_block_with_chatter() {
+        let text = "我来读取文件。\n```json\n{\"name\":\"tool.fs.read\",\"arguments\":{\"path\":\"/etc/hosts\"}}\n```\n完成。";
+        let c = extract(text);
+        assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn repair_trailing_comma_and_single_quotes() {
+        let text = "```\n{ 'name': 'tool.shell', 'arguments': {'cmd': 'ls',}, }\n```";
+        let c = extract(text);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].name, "tool.shell");
+        assert_eq!(c[0].arguments["cmd"], "ls");
+    }
+
+    #[test]
+    fn args_as_json_string() {
+        let text = r#"{"name":"tool.fs.write","arguments":"{\"path\":\"a\",\"content\":\"b\"}"}"#;
+        let c = extract(text);
+        assert_eq!(c[0].arguments["path"], "a");
+    }
+
+    #[test]
+    fn xml_tag_fallback() {
+        let text = "<tool_call>{\"name\": \"tool.fs.read\", \"arguments\": {\"path\": \"x\"}}</tool_call>";
+        let c = extract(text);
+        assert_eq!(c.len(), 1);
+    }
+
+    #[test]
+    fn garbage_returns_empty() {
+        assert!(extract("我今天不想调用工具，只想聊聊。").is_empty());
+        assert!(extract("{\"name\": \"tool.fs.read\", \"arguments\": {").is_empty());
+    }
+
+    #[test]
+    fn nested_objects_balance() {
+        let text = r#"{"name":"tool.shell","arguments":{"cmd":"echo {a:1}","env":{"A":"b"},"n":3}}"#;
+        let c = extract(text);
+        assert_eq!(c[0].arguments["env"]["A"], "b");
+        assert_eq!(c[0].arguments["n"], 3);
+    }
+}

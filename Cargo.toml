@@ -1,0 +1,60 @@
+[package]
+name = "featheragent"
+version = "1.1.1"
+edition = "2021"
+description = "FeatherAgent（轻羽）：面向 1B~14B 本地小模型的上下文引擎 + 极轻量可移植 Agent 内核"
+
+[lib]
+name = "featheragent"
+path = "src/lib.rs"
+
+[[bin]]
+name = "featheragent"
+path = "src/bin/kernel.rs"
+
+[[bin]]
+name = "featheragent-tui"
+path = "src/bin/tui.rs"
+
+[[bin]]
+name = "featheragent-gui"
+path = "src/bin/gui.rs"
+
+[[bin]]
+name = "feather-storage"
+path = "src/bin/storage.rs"
+
+[[bin]]
+name = "feather-plugin"
+path = "src/bin/plugin.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"
+crc32c = "0.6"
+blake3 = "1"
+parking_lot = "0.12"
+zstd = "0.13"
+wasmi = "0.31"
+rusqlite = { version = "0.31", features = ["bundled"] }
+libc = "0.2"
+ratatui = "0.26"
+crossterm = "0.27"
+
+[dev-dependencies]
+proptest = "1"
+wat = "1"
+tempfile = "3"
+
+# 体积手法见设计文档 §2.3 / §10.1
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+
+[profile.release.package."*"]
+opt-level = "z"
