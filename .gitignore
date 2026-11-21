@@ -1,0 +1,19 @@
+# Rust 构建产物
+/target
+**/*.rs.bk
+*.pdb
+
+# 运行时目录（按设计文档 §7.1 三类路径，不入库）
+/data
+/workspace
+/runtime
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 日志与临时文件
+*.log
+*.tmp
