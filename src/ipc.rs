@@ -71,24 +71,52 @@ mod imp {
 mod imp {
     use super::*;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_BROKEN_PIPE, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ,
-        GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
+        ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
+        GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
     };
-    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, ReadFile, WriteFile, OPEN_EXISTING};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, ReadFile, WriteFile, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW};
+    use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcess};
 
     const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
     const PIPE_TYPE_BYTE: u32 = 0x0000_0000;
     const PIPE_READMODE_BYTE: u32 = 0x0000_0000;
     const PIPE_WAIT: u32 = 0x0000_0000;
     const PIPE_UNLIMITED_INSTANCES: u32 = 255;
+    /// Windows 7+：拒绝远程客户端，只允许本机连接。
+    const PIPE_REJECT_REMOTE_CLIENTS: u32 = 0x0000_0008;
+
+    struct Event(HANDLE);
+
+    impl Event {
+        fn new() -> io::Result<Self> {
+            let h = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+            if h == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(h))
+        }
+    }
+
+    impl Drop for Event {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
 
     struct PipeHandle {
         handle: HANDLE,
     }
+
     unsafe impl Send for PipeHandle {}
     unsafe impl Sync for PipeHandle {}
+
     impl Drop for PipeHandle {
         fn drop(&mut self) {
             unsafe { CloseHandle(self.handle) };
@@ -100,7 +128,6 @@ mod imp {
         pending: Option<HANDLE>,
     }
 
-    #[derive(Clone)]
     pub struct Stream {
         inner: Arc<PipeHandle>,
     }
@@ -121,8 +148,8 @@ mod imp {
         let h = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,
@@ -136,6 +163,49 @@ mod imp {
         Ok(h)
     }
 
+    /// 等待一个重叠 I/O 完成；句柄必须是 FILE_FLAG_OVERLAPPED 打开的。
+    fn complete(handle: HANDLE, ov: &OVERLAPPED, immediate: i32, bytes: u32) -> io::Result<u32> {
+        if immediate != 0 {
+            return Ok(bytes);
+        }
+        let err = unsafe { GetLastError() };
+        if err != ERROR_IO_PENDING {
+            return Err(io::Error::from_raw_os_error(err as i32));
+        }
+        let mut transferred = 0u32;
+        let ok = unsafe { GetOverlappedResult(handle, ov, &mut transferred, 1) };
+        if ok == 0 {
+            let err = unsafe { GetLastError() };
+            return Err(io::Error::from_raw_os_error(err as i32));
+        }
+        Ok(transferred)
+    }
+
+    /// 重叠 ConnectNamedPipe。客户端可能已经提前连上（ERROR_PIPE_CONNECTED），也算成功。
+    fn connect_instance(handle: HANDLE) -> io::Result<()> {
+        let ev = Event::new()?;
+        let mut ov: OVERLAPPED = unsafe { std::mem::zeroed() };
+        ov.hEvent = ev.0;
+        let ok = unsafe { ConnectNamedPipe(handle, &mut ov) };
+        if ok != 0 {
+            return Ok(());
+        }
+        let err = unsafe { GetLastError() };
+        if err == ERROR_PIPE_CONNECTED {
+            return Ok(());
+        }
+        if err != ERROR_IO_PENDING {
+            return Err(io::Error::from_raw_os_error(err as i32));
+        }
+        let mut n = 0u32;
+        let done = unsafe { GetOverlappedResult(handle, &ov, &mut n, 1) };
+        if done == 0 {
+            let err = unsafe { GetLastError() };
+            return Err(io::Error::from_raw_os_error(err as i32));
+        }
+        Ok(())
+    }
+
     impl Listener {
         pub fn bind(path: &Path) -> io::Result<Self> {
             if let Some(dir) = path.parent() {
@@ -147,57 +217,93 @@ mod imp {
         }
 
         pub fn accept(&mut self) -> io::Result<Stream> {
-            let handle = match self.pending.take() {
-                Some(h) => h,
-                None => fresh_instance(&self.name)?,
-            };
-            let ok = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) };
-            if ok == 0 {
-                let err = unsafe { GetLastError() };
-                // ERROR_PIPE_CONNECTED：客户端在 ConnectNamedPipe 之前就连上了
-                if err != ERROR_PIPE_CONNECTED {
-                    unsafe { CloseHandle(handle) };
-                    // 立即补一个新实例，避免后续连接无人接
-                    self.pending = fresh_instance(&self.name).ok();
-                    return Err(io::Error::from_raw_os_error(err as i32));
+            loop {
+                let handle = match self.pending.take() {
+                    Some(h) => h,
+                    None => fresh_instance(&self.name)?,
+                };
+                match connect_instance(handle) {
+                    Ok(()) => {
+                        // 先补下一个监听实例，允许 TUI/GUI/观察者并发连接。
+                        // 补实例失败也不丢弃已建立的连接；下一次 accept 会再补。
+                        self.pending = fresh_instance(&self.name).ok();
+                        return Ok(Stream { inner: Arc::new(PipeHandle { handle }) });
+                    }
+                    Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => {
+                        // 客户端连上后立刻断开：复位实例并把错误交回 accept 循环。
+                        // 不能在这里无限 continue，否则 Server::stop 的唤醒连接
+                        // 被当成 ERROR_NO_DATA 后，accept 会再次阻塞、stop 永远收不到。
+                        unsafe { CloseHandle(handle) };
+                        self.pending = fresh_instance(&self.name).ok();
+                        return Err(e);
+                    }
+                    Err(e) => {
+                        unsafe { CloseHandle(handle) };
+                        self.pending = fresh_instance(&self.name).ok();
+                        return Err(e);
+                    }
                 }
             }
-            // 交给调用方前先建好下一个实例，允许并发连接
-            self.pending = Some(fresh_instance(&self.name)?);
-            Ok(Stream { inner: Arc::new(PipeHandle { handle }) })
         }
     }
 
     impl Stream {
         pub fn try_clone(&self) -> io::Result<Stream> {
-            Ok(Stream { inner: self.inner.clone() })
+            // 关键：DuplicateHandle，而不是 Arc 共享同一个 HANDLE。
+            // Windows 对同步句柄的挂起 Read 会阻塞同一句柄上的 Write；
+            // 独立句柄 + OVERLAPPED 才能让读写线程真正并发。
+            let mut dup: HANDLE = 0;
+            let ok = unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    self.inner.handle,
+                    GetCurrentProcess(),
+                    &mut dup,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            };
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Stream { inner: Arc::new(PipeHandle { handle: dup }) })
         }
+
         pub fn shutdown(&self, _how: std::net::Shutdown) -> io::Result<()> {
-            // 句柄由 Arc 最后一个引用关闭；这里不做半关闭（命名管道不支持）
+            // 命名管道不支持半关闭；由内核在连接线程结束时关闭句柄。
             Ok(())
         }
     }
 
     impl Read for Stream {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let mut n: u32 = 0;
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            let ev = Event::new()?;
+            let mut ov: OVERLAPPED = unsafe { std::mem::zeroed() };
+            ov.hEvent = ev.0;
+            let mut n = 0u32;
             let ok = unsafe {
                 ReadFile(
                     self.inner.handle,
                     buf.as_mut_ptr() as *mut _,
                     buf.len() as u32,
                     &mut n,
-                    std::ptr::null_mut(),
+                    &mut ov,
                 )
             };
-            if ok == 0 {
-                let err = unsafe { GetLastError() };
-                if err == ERROR_BROKEN_PIPE {
-                    return Ok(0);
+            match complete(self.inner.handle, &ov, ok, n) {
+                Ok(n) => Ok(n as usize),
+                Err(e)
+                    if e.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32)
+                        || e.raw_os_error() == Some(ERROR_PIPE_NOT_CONNECTED as i32) =>
+                {
+                    Ok(0)
                 }
-                return Err(io::Error::from_raw_os_error(err as i32));
+                Err(e) => Err(e),
             }
-            Ok(n as usize)
         }
     }
 
@@ -205,20 +311,20 @@ mod imp {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut written = 0usize;
             while written < buf.len() {
-                let mut n: u32 = 0;
+                let ev = Event::new()?;
+                let mut ov: OVERLAPPED = unsafe { std::mem::zeroed() };
+                ov.hEvent = ev.0;
+                let mut n = 0u32;
                 let ok = unsafe {
                     WriteFile(
                         self.inner.handle,
                         buf[written..].as_ptr() as *const _,
                         (buf.len() - written) as u32,
                         &mut n,
-                        std::ptr::null_mut(),
+                        &mut ov,
                     )
                 };
-                if ok == 0 {
-                    let err = unsafe { GetLastError() };
-                    return Err(io::Error::from_raw_os_error(err as i32));
-                }
+                let n = complete(self.inner.handle, &ov, ok, n)?;
                 if n == 0 {
                     break;
                 }
@@ -226,6 +332,7 @@ mod imp {
             }
             Ok(written)
         }
+
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
@@ -233,7 +340,9 @@ mod imp {
 
     pub fn connect(path: &Path) -> io::Result<Stream> {
         let name = wide(&pipe_name(path));
-        for _ in 0..50 {
+        // GUI/TUI 不应无限等待：3s 内没有可用实例就明确失败，交给上层打印。
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
             let h = unsafe {
                 CreateFileW(
                     name.as_ptr(),
@@ -241,7 +350,7 @@ mod imp {
                     0,
                     std::ptr::null(),
                     OPEN_EXISTING,
-                    0,
+                    FILE_FLAG_OVERLAPPED,
                     0,
                 )
             };
@@ -250,13 +359,31 @@ mod imp {
             }
             let err = unsafe { GetLastError() };
             if err == ERROR_PIPE_BUSY {
-                unsafe { WaitNamedPipeW(name.as_ptr(), 1000) };
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, "named pipe busy"));
+                }
+                let wait = (deadline - now).as_millis().max(1) as u32;
+                unsafe { WaitNamedPipeW(name.as_ptr(), wait) };
                 continue;
             }
             return Err(io::Error::from_raw_os_error(err as i32));
         }
-        Err(io::Error::new(io::ErrorKind::TimedOut, "named pipe busy"))
     }
 }
 
 pub use imp::{connect, Listener, Stream};
+#[cfg(windows)]
+pub use imp::pipe_name;
+
+/// 前端可读的实际端点：Unix 是 socket 路径，Windows 是 `\\.\pipe\...`。
+pub fn endpoint(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        imp::pipe_name(path)
+    }
+    #[cfg(unix)]
+    {
+        path.to_string_lossy().into_owned()
+    }
+}

@@ -54,8 +54,11 @@ fn main() {
             std::process::exit(1);
         }
     };
-    if let Err(e) = conn.client.call("initialize", json!({})) {
-        eprintln!("初始化失败: {e}");
+    if let Err(e) = conn
+        .client
+        .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
+    {
+        eprintln!("初始化失败（3s 超时/内核未就绪）: {e}");
         std::process::exit(1);
     }
 
@@ -77,7 +80,14 @@ fn main() {
         app.resume(id);
     }
 
-    let mut terminal = setup();
+    let mut terminal = match setup() {
+        Ok(t) => t,
+        Err(e) => {
+            restore();
+            eprintln!("TUI 初始化失败: {e}");
+            std::process::exit(1);
+        }
+    };
     let res = run(&mut terminal, &mut app);
     restore();
     if let Err(e) = res {
@@ -85,12 +95,12 @@ fn main() {
     }
 }
 
-fn setup() -> Terminal<CrosstermBackend<Stdout>> {
-    enable_raw_mode().expect("raw mode");
+fn setup() -> std::io::Result<Terminal<CrosstermBackend<Stdout>>> {
+    enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen).expect("alt screen");
+    execute!(out, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(out);
-    Terminal::new(backend).expect("terminal")
+    Terminal::new(backend)
 }
 
 fn restore() {

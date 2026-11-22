@@ -14,18 +14,28 @@ use featheragent::governance::paths::{Overrides, Paths};
 use featheragent::governance::volume::{self, Purpose, Verdict};
 use featheragent::log::{LogConfig, LogStore, SyncMode};
 use featheragent::proto::types::{Event, EventKind};
+use featheragent::proto::Codec;
 use featheragent::server::{self, client::Client, Server};
 use featheragent::util::{human_bytes, percentile};
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = featheragent::util::Args::parse(argv);
+    let want_help = args.has("--help") || args.positional.iter().any(|p| p == "-h");
+    if want_help {
+        print_help(args.positional.first().map(|s| s.as_str()));
+        return;
+    }
     let cmd = args
         .positional
         .first()
         .cloned()
         .unwrap_or_else(|| "serve".into());
     let result = match cmd.as_str() {
+        "help" => {
+            print_help(None);
+            Ok(())
+        }
         "version" | "-v" | "--version" => {
             println!("featheragent {} (contract {})", featheragent::VERSION, featheragent::proto::CONTRACT_API);
             Ok(())
@@ -34,14 +44,54 @@ fn main() {
         "doctor" => doctor(&args),
         "bench" => bench(&args),
         "gui" => launch_gui(&args),
+        "chat" => chat(&args),
         other => {
-            eprintln!("未知子命令 {other}；可用: serve | doctor | bench | version");
+            eprintln!("未知子命令 {other}；可用: serve | doctor | bench | gui | chat | version | help");
             std::process::exit(2);
         }
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(1);
+    }
+}
+
+fn print_help(topic: Option<&str>) {
+    let topic = topic.unwrap_or("");
+    println!("FeatherAgent {} (contract {})", featheragent::VERSION, featheragent::proto::CONTRACT_API);
+    println!("用法: featheragent <serve|doctor|bench|gui|chat|version|help> [选项]");
+    println!();
+    if topic.is_empty() || topic == "help" {
+        println!("  serve    启动内核（命名管道/UDS）");
+        println!("  doctor   自检：verify-log / --check-storage / --stress-log N");
+        println!("  bench    本机体积、启动、RSS、写入、组装、RPC 指标");
+        println!("  gui      拉起同目录的 featheragent-gui[.exe]");
+        println!("  chat     用内核契约发一条消息并打印事件（S3/脚本用）");
+        println!("  version  打印版本与契约版本");
+        println!();
+    }
+    if topic.is_empty() || topic == "serve" {
+        println!("serve 选项:");
+        println!("  --root <dir>        安装根（默认 exe 所在目录）");
+        println!("  --data/--workspace/--runtime <dir>  分别外置三类路径");
+        println!("  --provider <plugin> 默认 provider-mock；Ollama 用 provider-ollama");
+        println!("  --model <name>      模型名（如 qwen2.5:7b）");
+        println!("  --base-url <url>    默认 http://127.0.0.1:11434");
+        println!("  --sync <mode>       always | interval | never");
+        println!("  --codec <mode>      msgpack（默认）| json（第三方调试）");
+        println!("  --force             覆盖网络盘/同步盘拒绝");
+    }
+    if topic.is_empty() || topic == "doctor" {
+        println!("doctor 选项: --root <dir> / --check-storage / --stress-log <N>");
+    }
+    if topic.is_empty() || topic == "bench" {
+        println!("bench 选项: --json（只输出 JSON）");
+    }
+    if topic.is_empty() || topic == "gui" {
+        println!("gui 选项: --root <dir> / --app（独立浏览器窗口）");
+    }
+    if topic.is_empty() || topic == "chat" {
+        println!("chat 选项: --root <dir> / --session <id> / --text <文本> / --timeout <秒>");
     }
 }
 
@@ -72,6 +122,67 @@ fn launch_gui(args: &featheragent::util::Args) -> Result<(), String> {
         return Err(format!("GUI 退出码 {status}"));
     }
     Ok(())
+}
+
+/// `featheragent chat`：不依赖 TUI/GUI 的最小契约客户端，用于脚本 / S3 真机测试。
+fn chat(args: &featheragent::util::Args) -> Result<(), String> {
+    let paths = paths_from(args)?;
+    let socket = args.path("socket").unwrap_or_else(|| paths.socket());
+    let session = args.flag("session").unwrap_or("cli");
+    let text = args.flag("text").ok_or("chat 需要 --text <文本>")?;
+    let timeout = args
+        .flag("timeout")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(180);
+
+    let conn = Client::connect(&socket)
+        .map_err(|e| format!("连接内核失败（{}）: {e}", socket.display()))?;
+    conn.client
+        .call_with_timeout("initialize", serde_json::json!({}), Duration::from_secs(3))
+        .map_err(|e| format!("initialize 失败: {e}"))?;
+    let created = conn
+        .client
+        .call("session.create", serde_json::json!({"id": session}))
+        .map_err(|e| format!("session.create 失败: {e}"))?;
+    eprintln!(
+        "session {} state={}",
+        created.get("id").and_then(|x| x.as_str()).unwrap_or(session),
+        created.get("state").and_then(|x| x.as_str()).unwrap_or("?")
+    );
+    conn.client
+        .call("event.subscribe", serde_json::json!({"kinds": []}))
+        .map_err(|e| format!("event.subscribe 失败: {e}"))?;
+    conn.client
+        .call("chat.send", serde_json::json!({"session": session, "text": text}))
+        .map_err(|e| format!("chat.send 失败: {e}"))?;
+
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(format!("{timeout}s 内未收到 chat.finished"));
+        }
+        let wait = (deadline - now).min(Duration::from_secs(1));
+        match conn.events.recv_timeout(wait) {
+            Ok(v) => {
+                let kind = v
+                    .get("params")
+                    .and_then(|p| p.get("kind"))
+                    .and_then(|k| k.as_str());
+                if kind == Some("chat.finished") {
+                    println!("{}", serde_json::to_string(&v).unwrap_or_default());
+                    return Ok(());
+                }
+                if v.get("method").and_then(|m| m.as_str()) == Some("event") {
+                    println!("{}", serde_json::to_string(&v).unwrap_or_default());
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("事件通道断开（内核退出？）".into());
+            }
+        }
+    }
 }
 
 fn paths_from(args: &featheragent::util::Args) -> Result<Paths, String> {
@@ -124,15 +235,21 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         });
     }
 
-    let srv: Arc<Server> = Server::new(kernel.clone(), socket.clone(), featheragent::proto::Codec::MsgPack);
+    let codec = match args.flag("codec").unwrap_or("msgpack") {
+        "json" => Codec::Json,
+        "msgpack" | "" => Codec::MsgPack,
+        other => return Err(format!("未知 --codec {other}；可用: msgpack | json")),
+    };
+    let srv: Arc<Server> = Server::new(kernel.clone(), socket.clone(), codec);
     let mut err = std::io::stderr();
     let _ = writeln!(
         err,
-        "featheragent {}  socket={}  data={}  provider={}",
+        "featheragent {}  socket={}  data={}  provider={}  codec={}",
         featheragent::VERSION,
         socket.display(),
         paths.data.display(),
-        cfg.provider_plugin
+        cfg.provider_plugin,
+        match codec { Codec::Json => "json", Codec::MsgPack => "msgpack" }
     );
     for w in kernel.warnings.read().iter() {
         let _ = writeln!(err, "warn: {w}");
@@ -287,10 +404,16 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
+    if !json_only {
+        eprintln!("bench[1/6] 二进制体积");
+    }
     // 1) 二进制体积
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let size_bytes = std::fs::metadata(&exe).map(|m| m.len()).unwrap_or(0);
 
+    if !json_only {
+        eprintln!("bench[2/6] 进程内启动 / RSS");
+    }
     // 2) 进程内启动到 socket 可连接
     let mut boot_ms = Vec::new();
     let mut rss_kb = 0u64;
@@ -322,6 +445,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&bdir);
     }
 
+    if !json_only {
+        eprintln!("bench[3/6] spawn serve / 冷启动");
+    }
     // 3) 真实冷启动：spawn 自身 serve，等 socket
     let mut spawn_ms = Vec::new();
     for i in 0..3 {
@@ -339,6 +465,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let sock = bdir.join("runtime").join("ipc").join("featheragent.sock");
         let ok = server::wait_ready(&sock, Duration::from_secs(10)).is_ok();
+        if !ok && !json_only {
+            eprintln!("bench: spawn serve 第 {i} 次未在 10s 内就绪");
+        }
         if ok {
             spawn_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
             rss_kb = rss_kb.max(read_rss_kb(child.id()));
@@ -348,6 +477,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&bdir);
     }
 
+    if !json_only {
+        eprintln!("bench[4/6] 事件写入");
+    }
     // 4) 事件写入 P95（不含 fsync）
     let store = LogStore::open(&dir.join("log"), LogConfig {
         sync: SyncMode::Never,
@@ -362,6 +494,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     }
     lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
+    if !json_only {
+        eprintln!("bench[5/6] 上下文组装");
+    }
     // 5) 上下文组装 P95
     let eng = ContextEngine::new(CtxConfig::default());
     let mut events = Vec::new();
@@ -378,6 +513,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     }
     asm_lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
+    if !json_only {
+        eprintln!("bench[6/6] RPC 往返");
+    }
     // 6) RPC 往返 P95
     let rdir = dir.join("rpc");
     let paths = Paths::resolve(&exe, &Overrides { install_root: Some(rdir.clone()), ..Default::default() });
@@ -439,6 +577,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         println!("  RPC 往返 P95    {:.3} ms   (< 1 ms)", percentile(&rpc, 0.95));
         println!("门禁: {}", serde_json::to_string_pretty(&gates).unwrap());
         let _ = human_bytes(size_bytes);
+        let _ = std::io::stdout().flush();
     }
     Ok(())
 }

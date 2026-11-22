@@ -43,13 +43,25 @@ impl Server {
 
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
-        // 触发一次连接，唤醒阻塞中的 accept（Unix: connect UDS；Windows: 连命名管道）
-        let _ = crate::ipc::connect(&self.socket);
+        // 触发一次连接，唤醒阻塞中的 accept（Unix: connect UDS；Windows: 连命名管道）。
+        // Windows 上实例可能尚未就绪，重试几次；连接本身很快断开是刻意的，
+        // accept 侧会把 ERROR_NO_DATA 交回外层检查 stop，不会永久卡住。
+        for _ in 0..5 {
+            if let Ok(s) = crate::ipc::connect(&self.socket) {
+                drop(s);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// 阻塞运行；返回即表示停止。
     pub fn run(self: Arc<Self>) -> std::io::Result<()> {
         let mut listener = crate::ipc::Listener::bind(&self.socket)?;
+        // 把实际端点落盘，第三方前端无需自行复刻命名管道哈希。
+        if let Some(dir) = self.socket.parent() {
+            let _ = std::fs::write(dir.join("endpoint"), crate::ipc::endpoint(&self.socket));
+        }
         loop {
             if self.stop.load(Ordering::SeqCst) {
                 break;
@@ -93,7 +105,7 @@ fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) ->
     let mut wstream = stream.try_clone()?;
     let writer = thread::spawn(move || {
         while let Ok(v) = rx.recv() {
-            if write_frame(&mut wstream, &v, Codec::MsgPack).is_err() {
+            if write_frame(&mut wstream, &v, codec).is_err() {
                 break;
             }
         }
@@ -157,7 +169,7 @@ fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) ->
                             continue;
                         }
                         let id = req.id.unwrap();
-                        let resp = match dispatch(&kernel, conn_id, &kinds, &req.method, &req.params) {
+                        let resp = match dispatch(&kernel, conn_id, &kinds, codec, &req.method, &req.params) {
                             Ok(result) => rpc::success(id, result),
                             Err((code, msg)) => rpc::error(Some(id), code, msg),
                         };
@@ -192,6 +204,7 @@ fn dispatch(
     kernel: &Arc<Kernel>,
     conn_id: u64,
     kinds: &Arc<Mutex<Vec<EventKind>>>,
+    codec: Codec,
     method: &str,
     params: &Value,
 ) -> RpcResult {
@@ -200,7 +213,7 @@ fn dispatch(
             "version": crate::VERSION,
             "contract": crate::proto::CONTRACT_API,
             "transport": if cfg!(windows) { "pipe" } else { "uds" },
-            "codec": "msgpack",
+            "codec": match codec { Codec::MsgPack => "msgpack", Codec::Json => "json" },
             "paths": {
                 "install_root": kernel.paths.install_root,
                 "data": kernel.paths.data,

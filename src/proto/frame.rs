@@ -58,3 +58,41 @@ pub fn read_frame<R: Read>(r: &mut R, codec: Codec) -> io::Result<Option<Value>>
     };
     Ok(Some(v))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn json_frame_is_u32_le_prefix_plus_utf8() {
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &json!({"jsonrpc":"2.0","id":1}), Codec::Json).unwrap();
+        assert_eq!(&buf[..4], &(buf.len() as u32 - 4).to_le_bytes());
+        let body = std::str::from_utf8(&buf[4..]).unwrap();
+        assert!(body.contains("\"jsonrpc\":\"2.0\""));
+        let mut r = &buf[..];
+        let v = read_frame(&mut r, Codec::Json).unwrap().unwrap();
+        assert_eq!(v["id"], 1);
+    }
+
+    #[test]
+    fn msgpack_frame_is_named_map_and_roundtrips() {
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &json!({"a":1,"b":"x"}), Codec::MsgPack).unwrap();
+        assert_eq!(&buf[..4], &(buf.len() as u32 - 4).to_le_bytes());
+        assert_eq!(buf[4], 0x82, "fixmap with two named fields");
+        let mut r = &buf[..];
+        let v = read_frame(&mut r, Codec::MsgPack).unwrap().unwrap();
+        assert_eq!(v["a"], 1);
+        assert_eq!(v["b"], "x");
+    }
+
+    #[test]
+    fn oversized_frame_is_rejected() {
+        let mut hdr = (64u32 * 1024 * 1024 + 1).to_le_bytes().to_vec();
+        hdr.extend_from_slice(&[]);
+        let err = read_frame(&mut &hdr[..], Codec::Json).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+}

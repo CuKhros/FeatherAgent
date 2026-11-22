@@ -99,6 +99,7 @@ impl Registry {
                 entry.category = m.category;
             }
             if let Some(p) = v.get("program").and_then(|p| p.as_str()) {
+                #[allow(unused_mut)]
                 let mut prog = source.join(p);
                 #[cfg(windows)]
                 {

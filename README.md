@@ -69,12 +69,14 @@ cargo build --release --bins
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.1.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.1.2-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
+.\featheragent.exe help                       # 先看命令表
 .\featheragent.exe serve --root .
 .\featheragent-tui.exe --root .              # 另开终端
 .\featheragent-gui.exe --root . --app          # 自动找 Chrome/Edge
+.\featheragent.exe chat --root . --text "hello"   # 无 GUI/TUI 的脚本通道
 ```
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.md)。
@@ -83,16 +85,18 @@ cargo build --release --bins
 
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
+- **[前端契约 · Wire Format](docs/前端契约-WireFormat.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.1.2 Windows 修复对照](docs/v1.1.2-Windows修复说明.md)** —— 真机报告 BUG-1～BUG-9 的根因、修法与验证状态
 
 > 文档中所有「目标值」必须经 Spike / 阶段门禁实测后回填，未测不写数字。
 
 ## 状态
 
-`v1.1.1` 已实现并通过本机实测门禁：内核 0.93 MiB、进程内启动 1.34 ms、空闲 RSS 2.63 MiB、事件写入 P95 3.40 µs、上下文组装 P95 0.12 ms、RPC P95 0.047 ms；52 个自动化测试全绿。
+`v1.1.2` 是针对 Windows 真机报告的修复版：命名管道改为 overlapped I/O + 独立句柄，修复并发连接/断连占死；随机 token 改用系统 CSPRNG；卷类型用 `GetDriveTypeW` 判定；GUI/TUI 初始化 3 秒超时；新增 `help`、`chat` 与 `serve --codec json`；补 `runtime/ipc/endpoint` 与 Wire Format 文档。Linux 自动化测试全绿。
 
 已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、GUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、三产物打包与解压运行、1000 次日志随机截断恢复。
 
-Windows x64：已完成 `x86_64-pc-windows-gnu` 交叉编译，Wine 冒烟通过（`version` / `doctor` / `serve` / GUI 桥 / 命名管道 RPC / 配置重写 / 50 次截断恢复），exe 仅依赖系统 DLL；**真实 Windows 机器与 Windows 性能数字尚未实测**。
+Windows x64：v1.1.1 已在你方真机跑通二进制/`doctor`/`serve`，但暴露 GUI/TUI/协议/性能问题；v1.1.2 已按报告修复并重新交叉编译，待真机复测。Wine 只能做基本冒烟，不能复现 Windows 同步管道死锁。
 
 未实测：真实 Ollama / 7B 模型指标（S3）、Windows 实机、macOS、四平台 × 双架构矩阵。详见验证报告。
 

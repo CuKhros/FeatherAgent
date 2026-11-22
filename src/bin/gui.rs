@@ -12,7 +12,9 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(windows)]
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -58,7 +60,10 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if let Err(e) = rpc_conn.client.call("initialize", json!({})) {
+    if let Err(e) = rpc_conn
+        .client
+        .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
+    {
         eprintln!("内核未就绪（{socket:?}）: {e}");
         std::process::exit(2);
     }

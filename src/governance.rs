@@ -159,9 +159,37 @@ pub mod volume {
         None
     }
 
+    /// Windows 盘类型：固定盘放行、网络盘拒绝、可移动盘告警。
+    #[cfg(windows)]
+    fn win_drive_kind(path: &Path) -> Option<VolumeKind> {
+        use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+        let s = path.to_string_lossy();
+        let s = s.strip_prefix(r"\?\").unwrap_or(&s);
+        if s.starts_with(r"\\") {
+            return Some(VolumeKind::Network); // UNC 共享
+        }
+        let bytes = s.as_bytes();
+        if bytes.len() >= 2 && bytes[1] == b':' {
+            let leaf = format!("{}:\\", &s[..1]);
+            let w: Vec<u16> = leaf.encode_utf16().chain(std::iter::once(0)).collect();
+            let t = unsafe { GetDriveTypeW(w.as_ptr()) };
+            return Some(match t {
+                2 => VolumeKind::Removable,
+                3 | 6 => VolumeKind::Fixed,
+                4 => VolumeKind::Network,
+                _ => VolumeKind::Unknown,
+            });
+        }
+        None
+    }
+
     pub fn classify(path: &Path, extra_sync: &[String]) -> VolumeKind {
         if is_sync_path(path, extra_sync) {
             return VolumeKind::Sync;
+        }
+        #[cfg(windows)]
+        if let Some(k) = win_drive_kind(path) {
+            return k;
         }
         let Some(t) = statfs_type(path) else {
             return VolumeKind::Unknown;

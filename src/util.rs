@@ -2,6 +2,7 @@
 //!
 //! 刻意不引入 clap / rand / serde_yaml 等，控制内核体积（§2.3）。
 
+#[cfg(unix)]
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -53,12 +54,32 @@ impl Args {
     }
 }
 
-/// 从 `/dev/urandom` 取随机字节，用于 GUI 一次性 token。
-pub fn random_token(nbytes: usize) -> String {
-    let mut buf = vec![0u8; nbytes];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut buf);
+/// 取密码学随机字节，用于 GUI 一次性 token / 会话 ID。
+/// 随机源失败必须硬失败，绝不静默回退成全 0。
+fn fill_random(buf: &mut [u8]) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Security::Cryptography::ProcessPrng;
+        let ok = unsafe { ProcessPrng(buf.as_mut_ptr(), buf.len()) };
+        assert!(ok != 0, "ProcessPrng 失败：Windows 随机源不可用");
     }
+    #[cfg(unix)]
+    {
+        let mut f = std::fs::File::open("/dev/urandom")
+            .expect("打开 /dev/urandom 失败：随机源不可用");
+        f.read_exact(buf).expect("读取 /dev/urandom 失败：随机源不可用");
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        panic!("当前平台没有实现随机源");
+    }
+}
+
+pub fn random_token(nbytes: usize) -> String {
+    assert!(nbytes > 0, "random_token 长度必须大于 0");
+    let mut buf = vec![0u8; nbytes];
+    fill_random(&mut buf);
+    assert!(buf.iter().any(|b| *b != 0), "随机源返回全 0");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -209,6 +230,15 @@ mod tests {
 
     fn hex20(b: &[u8; 20]) -> String {
         b.iter().map(|x| format!("{x:02x}")).collect()
+    }
+
+    #[test]
+    fn random_token_is_hex_and_nonzero() {
+        let t = random_token(24);
+        assert_eq!(t.len(), 48);
+        assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(t.chars().any(|c| c != '0'));
+        assert_ne!(random_token(24), random_token(24));
     }
 
     #[test]

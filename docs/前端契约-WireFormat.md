@@ -1,0 +1,188 @@
+# FeatherAgent 前端契约 · Wire Format v1.0
+
+> 适用版本：FeatherAgent **1.1.2**（契约 API `1.0`）  
+> 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
+
+## 1. 传输端点
+
+| 平台 | 端点 | 说明 |
+|---|---|---|
+| Windows | 命名管道 `\\.\pipe\featheragent-<hash>` | 默认 DACL 同用户可访问；`PIPE_REJECT_REMOTE_CLIENTS` |
+| Linux / macOS | Unix domain socket `<root>/runtime/ipc/featheragent.sock` | 权限 `0600` |
+
+服务端启动成功后会把**实际端点**写入：
+
+```
+<root>/runtime/ipc/endpoint
+```
+
+内容示例：
+
+- Windows：`\\.\pipe\featheragent-a49fcfef058c3da5`
+- Unix：`/home/user/fa/runtime/ipc/featheragent.sock`
+
+第三方前端应优先读这个文件，不要自己复刻 `blake3` 管道名派生规则。
+
+## 2. 分帧：4 字节小端长度 + 消息体
+
+**每一帧**（请求、响应、事件通知都一样）：
+
+```
++----------------+--------------------------------+
+| u32 LE length  | body (length bytes)            |
++----------------+--------------------------------+
+```
+
+- `length` 是**消息体字节数**，不含这 4 字节帧头。
+- 上限 **64 MiB**（67,108,864 B）。超过即断连，错误 `frame too large`。
+- 没有 newline 分隔，没有 `Content-Length:` LSP 头，没有 u32-BE。  
+  报告里用这四种方式探测全部失败，是因为分帧/编码都不匹配，不是服务端“没响应”。
+
+### 2.1 消息体编码
+
+由服务端启动参数决定，**整个连接生命周期内固定**：
+
+```bash
+featheragent serve --codec msgpack   # 默认
+featheragent serve --codec json      # 调试/第三方参考客户端
+```
+
+| codec | body 编码 | 典型首字节 |
+|---|---|---|
+| `msgpack`（默认） | MessagePack **named map**（字段名做 key，不是数组） | `0x83` / `0x84` 等 `fixmap` |
+| `json` | UTF-8 JSON 对象 | `0x7b`（`{`） |
+
+> 关键：**响应使用什么编码，由服务端 `--codec` 决定；客户端必须用同一种编码发请求，并按同一种编码解响应。**  
+> v1.1.1 的 bug 是 `--codec json` 只影响读、写仍硬编码 MsgPack；1.1.2 已修复，`initialize.result.codec` 会如实返回 `json` 或 `msgpack`。
+
+`initialize` 返回示例（JSON codec）：
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{
+  "version":"1.1.2","contract":"1.0","transport":"pipe",
+  "codec":"json",
+  "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
+}}
+```
+
+## 3. JSON-RPC 2.0 信封
+
+请求：
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+```
+
+成功响应：
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{...}}
+```
+
+错误响应：
+
+```json
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"..."}}
+```
+
+事件通知（无 `id`，服务端主动推送）：
+
+```json
+{"jsonrpc":"2.0","method":"event","params":{
+  "kind":"model.delta","payload":{"session":"cli","text":"...","first":true},
+  "seq":4,"ts":1795331532077826435
+}}
+```
+
+- `seq` 是连接内事件序号，单调递增。
+- `ts` 是 Unix 纳秒时间戳（整数）。
+
+## 4. 握手顺序（必须按这个来）
+
+1. 连接端点。
+2. 发 `initialize`，等响应；建议客户端 3 秒超时。
+   - 超时通常表示内核未启动、端点文件过期，或 codec 不匹配导致服务端解帧失败。
+3. 发 `session.create`（`params.session` 可省略，默认 `cli`）。
+4. 发 `event.subscribe`（可选 `kinds` 数组；不传表示全部）。
+5. 发 `chat.send`（`params.text` 必填，`params.session` 与第 3 步一致）。
+6. 循环读帧，处理 `method == "event"` 的通知，直到 `params.kind == "chat.finished"`。
+
+### 4.1 最小 Python 片段（JSON codec）
+
+```python
+import socket, struct, json
+
+def send(sock, obj):
+    body = json.dumps(obj, ensure_ascii=False).encode()
+    sock.sendall(struct.pack("<I", len(body)) + body)
+
+def recv_exact(sock, n):
+    out = b""
+    while len(out) < n:
+        b = sock.recv(n - len(out))
+        if not b:
+            raise EOFError
+        out += b
+    return out
+
+def recv(sock):
+    n = struct.unpack("<I", recv_exact(sock, 4))[0]
+    return json.loads(recv_exact(sock, n))
+
+s = socket.socket(socket.AF_UNIX)
+s.connect("/path/to/runtime/ipc/featheragent.sock")
+send(s, {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})
+print(recv(s))
+```
+
+Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+b', buffering=0)`；读写同样是「4 字节小端长度 + body」，但**不要**用 `readline()`。
+
+## 5. 方法集（契约 1.0）
+
+| 方法 | 作用 | 关键参数 |
+|---|---|---|
+| `initialize` | 握手、返回版本/路径/实际 codec | 无 |
+| `system.info` | 内核状态、告警、门禁 | 无 |
+| `session.create` | 创建/复用会话 | `session`（可选） |
+| `session.list` | 列出会话 | 无 |
+| `session.resume` | 恢复已有会话 | `session` |
+| `session.fork` | 从某会话分叉 | `session`、`from_seq` 等 |
+| `event.subscribe` | 订阅事件 | `kinds`（可选字符串数组） |
+| `chat.send` | 发送用户消息，流式返回事件 | `text` 必填、`session` |
+| `chat.cancel` | 取消当前生成 | `session` |
+| `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `tool_call_id` |
+| `ctx.inspect` | 查看上下文组装细节 | 见实现 |
+| `config.get` / `config.set` | 读取/修改运行配置 | 见实现 |
+| `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
+| `plugin.list` | 插件清单 | 无 |
+| `plugin.enable` / `plugin.disable` | 启停插件 | `name` |
+| `plugin.install` | 安装插件 | 见实现 |
+
+完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。
+
+## 6. 错误码
+
+| code | 含义 |
+|---|---|
+| `-32601` | 方法不存在 |
+| `-32602` | 参数非法 |
+| `-32603` | 内核内部错误 |
+| `40301` | 观察者只读，禁止写操作 |
+| `40401` | 会话不存在 |
+| `42901` | 预算/配额超限 |
+| `50201` | 插件调用失败 |
+| `40901` | 资源被占用（如单客户端能力被占） |
+
+## 7. 多客户端与断连语义（1.1.2）
+
+- Windows 命名管道使用 **overlapped I/O + 每连接独立句柄**，读写互不阻塞。
+- `accept` 遇到客户端连上后立即断开（`ERROR_NO_DATA`）会复位实例并返回错误，由 `Server::run` 继续 `accept`；不会永久占死实例。
+- 客户端读线程看到 `ERROR_BROKEN_PIPE` / `ERROR_PIPE_NOT_CONNECTED` 按 EOF 处理。
+- GUI / TUI / 第三方客户端可以并发连接；事件总线按连接独立推送。
+- 单客户端写操作（如某些治理动作）仍可能返回 `40901`，这是契约语义，不是管道死锁。
+
+## 8. 兼容性边界
+
+- `--codec json` 是**调试/参考实现**能力；GUI 与 TUI 内置客户端固定使用 MsgPack，默认 `serve` 即可。
+- 第三方若选 JSON，必须让服务端也用 `--codec json`，并在 `initialize.result.codec` 校验一致；不一致时不要继续发请求。
+- 帧头/上限/方法集属于契约 `1.0`；新增方法只增不改，破坏性变更才升 `CONTRACT_API`。
