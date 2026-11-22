@@ -445,7 +445,7 @@ chat.send / cancel
 event.subscribe(kinds)            // 服务端推送，SSE 或 WS
 tool.confirm / deny
 ctx.inspect                       // 预算占用、压缩摘要、召回条目
-config.get / set(patch)           // 整体配置；provider.models 单独发现模型
+config.get / set(path,value)      // 单字段原子更新；set(patch) 合并、replace 整份替换；provider.models 单独发现模型
 storage.stats / gc(run|dry)
 plugin.list / enable / disable / install
 ```
@@ -510,14 +510,14 @@ plugin.list / enable / disable / install
 - GUI 迭代节奏与内核解耦（改 UI 不必发内核）
 - 第三方可基于前端契约做自己的前端（VS Code 插件、Web 面板、移动端）
 
-### 7.4 WebUI 功能（v1.1.5）
+### 7.4 WebUI 功能（v1.1.6）
 
 三栏布局：
 - 左：会话列表 + preset 切换
 - 中：对话流（Markdown、工具卡片可展开看参数/结果、耗时与 token 角标）
 - 右：**上下文面板**（预算占用条、压缩摘要可 pin、记忆召回、**存储占用与配额**）
 
-设置页（v1.1.5）：Provider 插件、Base URL、模型（`provider.models` 发现，可手填）、温度、上下文窗口、`max_turns`、`auto_allow_safe`；保存经 `config.set` 原子写 `data/config.json` 并即时应用。TUI 同样提供 `/settings` 页面。三类路径迁移、配额、卷类型健康检查、插件管理仍待后续。
+设置页（v1.1.6）：Provider 插件、Base URL、模型（`provider.models` 发现，下拉列出全部模型，可手填）、温度、上下文窗口、`max_turns`、`auto_allow_safe`；保存经 `config.set` 原子写 `data/config.json` 并即时应用。TUI 同样提供 `/settings` 页面。三类路径迁移、配额、卷类型健康检查、插件管理仍待后续。
 
 ---
 

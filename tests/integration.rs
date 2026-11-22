@@ -565,6 +565,10 @@ fn leading_slash_workspace_and_business_error_are_not_fatal() {
 #[test]
 fn config_api_applies_and_lists_models() {
     let (h, conn) = start("config", |_| {});
+    assert!(
+        h.root.join("runtime/ipc/ready").is_file(),
+        "serve 就绪后必须写 ready 标记"
+    );
     let cfg = conn.client.call("config.get", json!({})).unwrap();
     assert_eq!(cfg["temperature"].as_f64(), Some(0.7));
 
@@ -604,4 +608,54 @@ fn config_api_applies_and_lists_models() {
         .call("config.set", json!({"patch": {"temperature": 3.0}}))
         .unwrap_err();
     assert!(bad.contains("temperature"), "非法配置应被拒绝: {bad}");
+
+    // 单字段原子更新：不必先 get 再整体覆盖。
+    let one = conn
+        .client
+        .call("config.set", json!({"path": "temperature", "value": 0.45}))
+        .unwrap();
+    assert_eq!(one["config"]["temperature"].as_f64(), Some(0.45));
+    let read = conn
+        .client
+        .call("config.get", json!({"path": "temperature"}))
+        .unwrap();
+    assert_eq!(read["value"].as_f64(), Some(0.45));
+    let slash = conn
+        .client
+        .call("config.set", json!({"path": "/temperature", "value": 0.46}))
+        .unwrap();
+    assert_eq!(
+        slash["config"]["temperature"].as_f64(),
+        Some(0.46),
+        "/temperature 应等同于 temperature"
+    );
+    let slash_read = conn
+        .client
+        .call("config.get", json!({"path": "/temperature"}))
+        .unwrap();
+    assert_eq!(slash_read["value"].as_f64(), Some(0.46));
+    let missing = conn
+        .client
+        .call("config.set", json!({"path": "no_such_field", "value": 1}))
+        .unwrap_err();
+    assert!(missing.contains("不存在"), "未知字段应被拒绝: {missing}");
+
+    // 两个并发保存不应互相覆盖：锁保证最终值是其中一个完整结果。
+    let k1 = h.kernel.clone();
+    let k2 = h.kernel.clone();
+    let t1 = thread::spawn(move || k1.set_config_path("max_turns", json!(5)).is_ok());
+    let t2 = thread::spawn(move || k2.set_config_path("context_window", json!(4096)).is_ok());
+    assert!(t1.join().unwrap() && t2.join().unwrap());
+    let now = conn.client.call("config.get", json!({})).unwrap();
+    assert_eq!(now["max_turns"].as_u64(), Some(5));
+    assert_eq!(now["context_window"].as_u64(), Some(4096));
+
+    // 整份替换保留为独立方法，普通 set 不会被误当成 replace。
+    let mut full = now;
+    full["temperature"] = json!(0.55);
+    let replaced = conn
+        .client
+        .call("config.replace", json!({"config": full}))
+        .unwrap();
+    assert_eq!(replaced["config"]["temperature"].as_f64(), Some(0.55));
 }

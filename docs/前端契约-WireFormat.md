@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.5**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.1.6**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -22,6 +22,15 @@
 - Unix：`/home/user/fa/runtime/ipc/featheragent.sock`
 
 第三方前端应优先读这个文件，不要自己复刻 `blake3` 管道名派生规则。
+
+启动期还有两个状态文件：
+
+```
+<root>/runtime/ipc/starting   # serve 已开始初始化，JSON 含 pid/version/started_at_unix_ms
+<root>/runtime/ipc/ready      # 已成功绑定端点，可连接；JSON 含 endpoint/pid/version
+```
+
+`starting` 存在而 `ready` 不存在 = 内核启动中，不是通道故障。`chat` 会等待最多 5 s 并输出“内核未就绪（启动中，约 Ns）”；第三方前端也应这样提示，不要直接报 `ENOENT`。启动失败/退出时 `starting`、`ready`、`endpoint` 会被清理。
 
 ## 2. 分帧：4 字节小端长度 + 消息体
 
@@ -59,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.5","contract":"1.0","transport":"pipe",
+  "version":"1.1.6","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -152,7 +161,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `chat.cancel` | 取消当前生成 | `session` |
 | `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `token`（来自 `tool.confirm_request`）、`allow` |
 | `ctx.inspect` | 查看上下文组装细节 | 见实现 |
-| `config.get` / `config.set` | 读取/修改运行配置 | `config.get`：无参数返回完整配置；`path` 返回 `{value, config}`。`config.set`：`{patch}`，返回 `{config}` |
+| `config.get` / `config.set` / `config.replace` | 读取/修改运行配置 | `config.get`：无参数返回完整配置；`path` 支持 `temperature` 或 `/temperature`，返回 `{value, config}`。`config.set`：`{patch}` 或 `{path,value}`。`config.replace`：`{config}` 整份替换 |
 | `provider.models` | 读取 provider 的模型列表 | `provider`、`base_url`、`model`（均可选） |
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
 | `plugin.list` | 插件清单 | 无 |
@@ -169,7 +178,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `chat` 命令支持 `--allow <tool,...>` / `--yes` 自动确认；未放行时默认立即 deny（`--confirm-timeout` 可保留人工窗口）。
 - 空响应自动重试一次时写入 `model.retry` 事件（`attempt` / `reason` / `temperature`）；仍失败则 `chat.finished status=failed`。
 
-### 5.2 设置与模型发现（v1.1.5）
+### 5.2 设置与模型发现（v1.1.6）
 
 前端设置页统一走以下链路，不要直接改 `config.json`：
 
@@ -182,17 +191,25 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 // 2) 发现模型（Ollama 读 /api/tags；OpenAI 兼容读 /v1/models）
 {"method":"provider.models","params":{"provider":"provider-ollama","base_url":"http://127.0.0.1:11434","model":"qwen3.5:4b"}}
 // → {"provider":"provider-ollama","models":["qwen3.5:4b","..."],"probe":{...}}
-// 失败时仍返回 200：{"provider":"...","models":[],"error":"..."}，前端应允许手填模型
+// models 已去重；失败时仍返回 200：{"provider":"...","models":[],"error":"..."}，前端应允许手填模型
 
-// 3) 保存（只提交需要改的字段）
+// 3a) 保存单个字段（原子读-改-写，推荐脚本/多前端）
+{"method":"config.set","params":{"path":"temperature","value":0.6}}
+// → {"config":{...完整新配置...}}
+
+// 3b) 保存多个字段（只提交需要改的字段；WebUI/TUI 使用）
 {"method":"config.set","params":{"patch":{
   "provider_plugin":"provider-ollama","model":"qwen3.5:4b","temperature":0.6,
   "context_window":8192,"max_turns":6,"auto_allow_safe":true
 }}}
 // → {"config":{...完整新配置...}}
+
+// 3c) 整份替换（迁移/导入）
+{"method":"config.replace","params":{"config":{...完整 Config...}}}
 ```
 
-- `config.set` 会原子写 `data/config.json`，更新内存配置与权限门的 `auto_allow_safe`，并写 `config.changed` 事件；下一轮 `chat.send` 立即使用新 provider/model/temperature/context_window/max_turns，无需重启内核。
+- `config.set` / `config.replace` 都在内核配置锁内完成“读 → 改 → 校验 → 临时文件 + 原子替换 → 更新内存 → 发 `config.changed`”，因此两个前端并发保存不会后写覆盖前写；`config.set` 的 `path` 支持 `temperature` 或 `/temperature`，未知字段返回 `-32602`。
+- `config.replace` 才表示整份替换；不要把 `config.set` 的 patch 当作 replace。
 - 温度范围 0.0–2.0；`context_window` 512–131072；`max_turns` 1–32；`provider_plugin` 必须是已登记插件，否则服务端返回 `-32602`。
 - 空响应重试仍固定 `temperature=0.7`，与用户设置无关。
 - `ctx.inspect` 是诊断接口，不保证拿到会话锁：锁繁忙时返回 `state:"busy"`、`snapshot:null`，前端不要据此判定回合失败。

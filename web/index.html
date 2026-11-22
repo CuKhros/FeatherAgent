@@ -9,7 +9,7 @@
 </head>
 <body>
   <header>
-    <div class="brand">FeatherAgent <span class="ver">v1.1.5</span></div>
+    <div class="brand">FeatherAgent <span class="ver">v1.1.6</span></div>
     <div class="meta">
       <span id="session-label">未选择会话</span>
       <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
@@ -74,8 +74,10 @@
         <div class="section-title">模型与采样</div>
         <div class="settings-grid">
           <label>模型
-            <input id="cfg-model" list="cfg-model-list" placeholder="qwen2.5:7b" autocomplete="off">
-            <datalist id="cfg-model-list"></datalist>
+            <div class="model-row">
+              <input id="cfg-model" placeholder="qwen2.5:7b" autocomplete="off">
+              <select id="cfg-model-select" title="已发现的模型"></select>
+            </div>
             <span id="cfg-models-hint" class="form-hint"></span>
           </label>
           <label>温度 <span id="cfg-temperature-val" class="value">0.70</span>

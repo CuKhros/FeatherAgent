@@ -711,10 +711,14 @@ mod tests {
         assert!(INDEX_HTML.contains("FeatherAgent"));
         assert!(INDEX_HTML.contains("settings-page"));
         assert!(INDEX_HTML.contains("cfg-temperature"));
+        assert!(INDEX_HTML.contains("cfg-model-select"));
+        assert!(!INDEX_HTML.contains("cfg-model-list"));
         assert!(APP_JS.contains("EventSource"));
         assert!(APP_JS.contains("provider.models"));
         assert!(APP_JS.contains("RPC 超时"));
         assert!(APP_JS.contains("config.set"));
+        assert!(APP_JS.contains("renderModelList"));
+        assert!(APP_JS.contains("cfg-model-select"));
     }
 
     fn masked_frame(opcode: u8, fin: bool, text: &str) -> Vec<u8> {

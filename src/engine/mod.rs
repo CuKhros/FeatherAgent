@@ -172,6 +172,8 @@ pub struct Kernel {
     pub confirms: Mutex<HashMap<String, Sender<bool>>>,
     /// 技术性工具失败计数（业务错误不计数），连续 3 次只熔断该工具。
     tool_failures: Mutex<HashMap<String, u32>>,
+    /// 串行化配置的读-改-写；避免两个前端同时保存时互相覆盖。
+    config_lock: Mutex<()>,
     next_conn: AtomicU64,
     pub started: Instant,
     index_tx: Mutex<Option<Sender<(String, Arc<Event>)>>>,
@@ -294,6 +296,7 @@ impl Kernel {
             broadcasts: RwLock::new(Vec::new()),
             confirms: Mutex::new(HashMap::new()),
             tool_failures: Mutex::new(HashMap::new()),
+            config_lock: Mutex::new(()),
             next_conn: AtomicU64::new(1),
             started: Instant::now(),
             index_tx: Mutex::new(None),
@@ -373,16 +376,52 @@ impl Kernel {
         serde_json::to_value(self.cfg.read().clone()).unwrap_or(Value::Null)
     }
 
+    /// 合并式更新：只提交需要改的字段；整个读-改-写持有配置锁。
     pub fn set_config(&self, patch: &Value) -> Result<Value, String> {
-        let mut cfg = self.cfg.read().clone();
-        let cur = serde_json::to_value(&cfg).map_err(|e| e.to_string())?;
+        if !patch.is_object() {
+            return Err("config.set 的 patch 必须是对象；单字段请用 path/value".into());
+        }
+        let _guard = self.config_lock.lock();
+        let cur = self.config_json();
         let merged = merge_json(cur, patch.clone());
-        cfg = serde_json::from_value(merged).map_err(|e| format!("配置非法: {e}"))?;
+        let cfg = serde_json::from_value(merged).map_err(|e| format!("配置非法: {e}"))?;
+        self.apply_config(cfg, json!({"patch": patch}))
+    }
+
+    /// 单字段原子更新：`path` 支持点号分隔（当前 Config 均为顶层字段）。
+    pub fn set_config_path(&self, path: &str, value: Value) -> Result<Value, String> {
+        let path = path.trim().trim_start_matches('/');
+        if path.is_empty() {
+            return Err("config.set 的 path 不能为空".into());
+        }
+        let _guard = self.config_lock.lock();
+        let mut cur = self.config_json();
+        let pointer = format!("/{}", path.split('.').collect::<Vec<_>>().join("/"));
+        let Some(slot) = cur.pointer_mut(&pointer) else {
+            return Err(format!("配置项不存在: {path}"));
+        };
+        *slot = value.clone();
+        let cfg = serde_json::from_value(cur).map_err(|e| format!("配置非法: {e}"))?;
+        self.apply_config(cfg, json!({"path": path, "value": value}))
+    }
+
+    /// 整份替换：用于迁移/导入；普通设置请用 `set_config` 或 `set_config_path`。
+    pub fn replace_config(&self, full: &Value) -> Result<Value, String> {
+        if !full.is_object() {
+            return Err("config.replace 需要完整配置对象".into());
+        }
+        let _guard = self.config_lock.lock();
+        let cfg: Config =
+            serde_json::from_value(full.clone()).map_err(|e| format!("配置非法: {e}"))?;
+        self.apply_config(cfg, json!({"replace": true}))
+    }
+
+    fn apply_config(&self, cfg: Config, changed: Value) -> Result<Value, String> {
         validate_config(&cfg, &self.plugins)?;
         cfg.save(&self.cfg_path).map_err(|e| e.to_string())?;
         self.gate.set_auto_allow_safe(cfg.auto_allow_safe);
         *self.cfg.write() = cfg.clone();
-        self.emit("_system", EventKind::ConfigChanged, json!({"patch": patch}));
+        self.emit("_system", EventKind::ConfigChanged, changed);
         Ok(serde_json::to_value(cfg).unwrap_or(Value::Null))
     }
 

@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "tool",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "api": ">=1.0 <2.0",
     "capabilities": ["tool.fs.read", "tool.fs.write", "tool.shell", "tool.ping"],
     "permissions": ["fs:read", "fs:write", "exec:shell"],

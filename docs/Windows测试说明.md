@@ -1,15 +1,15 @@
-# FeatherAgent 1.1.5 · Windows x64 修复版测试包
+# FeatherAgent 1.1.6 · Windows x64 修复版测试包
 
 这是给 Windows 10/11 x64 的本地测试包：5 个原生 `.exe` + 出厂插件 + WebUI 资源，**无 Node / Python / JVM / VC++ 运行库依赖**。
 
-> v1.1.5 基于你方《Windows 真机复测报告 v1.1.4》：NEW-A～NEW-D 已真机确认修复；本版处理 NEW-E～NEW-G（工具业务错误与插件崩溃分离、按工具熔断、`/workspace` 路径归一化、S3 严格判定），并在 **WebUI 与 TUI 增加设置页**，可在线切换 Provider、模型、温度等配置，保存后经 `config.set` 即时应用。**v1.1.5 仍需你在真机复测**；Wine 只能验证基本启动，不能复现真实 Windows 的管道并发、ConPTY 与代理环境。
+> v1.1.6 基于你方《Windows 真机复测报告 v1.1.5》：NEW-E～NEW-G 已真机确认修复。本版处理 NEW-H～NEW-J，并修复 WebUI 模型下拉只显示一项的问题。**仍需真机复测**；Wine 只能验证基本启动，不能复现真实 Windows 的管道并发、ConPTY 与代理环境。
 
 ## 1. 解压
 
 解压到一个**有写权限**的普通目录，例如：
 
 ```
-D:\FeatherAgent-1.1.5\
+D:\FeatherAgent-1.1.6\
 ```
 
 不要放在 `C:\Program Files\`（内核默认把 `data/`、`workspace/`、`runtime/` 建在安装根下，只读目录会失败）。
@@ -19,19 +19,36 @@ D:\FeatherAgent-1.1.5\
 ## 2. 启动内核（PowerShell）
 
 ```powershell
-cd D:\FeatherAgent-1.1.5
+cd D:\FeatherAgent-1.1.6
 .\featheragent.exe help
 .\featheragent.exe serve --root .
 ```
 
-看到 `featheragent 1.1.5  socket=...  data=...  provider=provider-mock  codec=msgpack` 即已监听命名管道。首次运行会在当前目录生成 `data/`、`workspace/`、`runtime/`。
+启动后会**立即**看到：
 
-服务端会把**实际管道端点**写入 `runtime\ipc\endpoint`，第三方客户端直接读它，不要自己算哈希。
+```
+featheragent 1.1.6 starting  socket=...  data=...  provider=provider-mock  codec=msgpack
+serve: 初始化内核（首次启动需登记内置插件，Windows 首次可能 30–60s）
+```
+
+随后出现：
+
+```
+serve: 内核初始化完成（... ms）
+serve: 开始监听 ...（等待 runtime/ipc/ready）
+serve ready: 1.1.6
+  endpoint=\\.\pipe\featheragent-...
+```
+
+- 首次启动可能 30–60 s（内置插件登记 + Windows 实时防护扫描），这是启动等待，不是挂死。
+- 进入可用状态的标志：输出 `serve ready`，且 `runtime\ipc\ready` 出现；此前 `chat` 会明确提示“内核未就绪（启动中，约 Ns）”，不会再报误导性的“找不到 .sock 文件”。
+- 服务端会把实际命名管道端点写入 `runtime\ipc\endpoint`；第三方客户端直接读它，不要自己算哈希。
+- 如果 `runtime\ipc\starting` 存在超过 180 s 且没有 `ready`，`chat` 会提示进程可能已退出，请检查 `serve` 日志。
 
 ## 3. TUI（另开一个 PowerShell）
 
 ```powershell
-cd D:\FeatherAgent-1.1.5
+cd D:\FeatherAgent-1.1.6
 .\featheragent-tui.exe --root .
 ```
 
@@ -42,7 +59,7 @@ TUI 初始化最多等 3 秒；如果内核没起或管道不通，会明确打�
 ## 4. WebUI（浏览器形态）
 
 ```powershell
-cd D:\FeatherAgent-1.1.5
+cd D:\FeatherAgent-1.1.6
 .\featheragent-webui.exe --root . --app
 ```
 
@@ -50,8 +67,9 @@ cd D:\FeatherAgent-1.1.5
 - 不加 `--app` 时只起 HTTP 桥并打印带 token 的 `http://127.0.0.1:<port>/#token=...`。
 - WebUI 连接内核最多等 3 秒；内核未启动会报错退出，不再静默挂起。token 由系统 CSPRNG 生成。
 - 右上角 `⚙ 设置` 打开设置页；可配置 Provider、Base URL、模型、温度、上下文窗口、单轮回合上限与“自动放行安全工具”。
-- 模型列表来自 `provider.models`（Ollama `/api/tags`，OpenAI 兼容 `/v1/models`）；读取失败时可手填模型名。
-- 点“保存并应用”后，WebUI 调用 `config.set`，内核写入 `data/config.json` 并立即用于下一轮推理；不需要重启内核。
+- **模型控件现在是一个真正的下拉列表**，列出 `provider.models` 返回的全部模型（Ollama `/api/tags`，OpenAI 兼容 `/v1/models`）；左侧输入框仍可手填。不会因为当前值已填好而只显示一项。
+- 点“保存并应用”后，WebUI 调用 `config.set`（`{patch}`），内核写入 `data/config.json` 并立即用于下一轮推理；不需要重启内核。
+- 若两个前端同时保存，内核用配置锁串行化读-改-写；只改一个字段时也可用 `config.set {path,value}`，避免整份覆盖。
 - 旧命令 `featheragent gui` 仍保留兼容别名；**真正的原生 GUI 计划作为独立插件**，不与当前 WebUI 混名。
 
 ## 5. 无 WebUI/TUI 的脚本通道
@@ -124,13 +142,34 @@ ollama list
 
 包内 `tools\s3_batch.py` 已适配新版 `chat`，默认通过 `--allow tool.fs.write,tool.shell` 放行写盘与 shell；如需改白名单，设置环境变量 `FEATHER_ALLOW=tool.fs.read` 后再运行。
 
-脚本已改为严格口径：`工具执行成功 = 有 tool.result 且 !denied 且无 tool.error/tool.failed`，不会再出现“执行无错但文件不存在”的自相矛盾。
+脚本采用**三档口径**：
+
+- `OK`：有 `tool.result`、未被 denied、result 无 error，且无 `tool.error`/`tool.failed`。
+- `预期失败`：负样本（如读不存在的文件）产生业务错误，且模型最终答复正确。
+- `ERR`：其余情况，包括真失败与“预期错误但没有正确报告”。
+
+因此 t6 不会再被错误计入“真失败”；统计会同时给出“工具执行成功 4/5、预期业务错误 1/1、真失败 0/5”。
+
+## 8. 设置 API（脚本/第三方）
+
+```json
+// 单字段原子更新
+{"method":"config.set","params":{"path":"temperature","value":0.42}}
+
+// 只提交需要改的字段（推荐前端使用）
+{"method":"config.set","params":{"patch":{"model":"qwen3.5:4b","temperature":0.4}}}
+
+// 整份替换（迁移/导入）
+{"method":"config.replace","params":{"config":{...完整 Config...}}}
+```
+
+`config.get` 的 `path` 支持 `temperature` 或 `/temperature`。所有写路径都在内核配置锁内完成，写盘为临时文件 + 原子替换。
 
 ## 已知边界
 
-- **v1.1.5 真机未测**：NEW-E～NEW-G 与设置页在本机 mock/HTTP 验证，Windows 真机需复测；NEW-4 断连取消在 v1.1.3/1.1.4 报告中标为“未复测”，本版未改该路径。
+- **v1.1.6 真机未测**：NEW-H/I/J、WebUI 多模型下拉、设置页在 Windows 真机需复测；NEW-4 断连取消在 v1.1.3/1.1.4 报告中标为“未复测”，本版未改该路径。
 - **工具错误语义**：`tool.error` 是业务错误（路径越界/缺参数/文件不存在），不熔断；`tool.failed` 才代表插件崩溃/超时/IO 故障。连续 3 次技术失败只熔断对应工具。
-- **Wine 冒烟**：v1.1.5 的 `version` / `help` / `doctor` / `bench` 在 Wine 6.0.3 通过；boot P50 152.76 ms（Wine 开销，超过 100 ms 门禁），write P95 4.568 ms、RSS 14,848 KB。Wine 6 的命名管道重叠 I/O 与真实 Windows 不同，`serve`/ConPTY 不作结论；Wine 通过不等于真机通过。
+- **Wine 冒烟**：v1.1.6 的 `version` / `help` / `doctor` / `bench` 在 Wine 6.0.3 通过；在同一包目录下 `serve` 5 s 内输出 banner/`ready`，单客户端 `chat` 返回 `echo: hello` / `status=ok`。boot 142–160 ms、RSS 17,152–17,280 KiB 两项受 Wine 开销影响未过 Windows 门禁，write P95 4.5–4.7 ms、assemble P95 0.146–0.160 ms、RPC P95 0.212–0.278 ms 通过。并发命名管道、ConPTY、真实代理/杀进程不作 Windows 结论；Wine 通过不等于真机通过。
 - **工具调用**：同时兼容 Ollama 原生 `message.tool_calls`（`arguments` 为对象）与 OpenAI 兼容 `/v1` 的 `delta.tool_calls`（`arguments` 为 JSON 字符串）；`workspace/xxx`、`/workspace/xxx`、`\workspace\xxx` 均按安装根解析，普通相对路径按会话工作区解析。
 - **代理**：插件子进程会保留已有 `NO_PROXY` 并补齐 `127.0.0.1,localhost,::1`；HTTP 客户端本身是直连 TCP，不读取 `HTTP_PROXY`。
 - `tool.shell` 在 Windows 用 `cmd.exe /C`，超时用 `taskkill /F /T /PID` 杀进程树。

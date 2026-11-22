@@ -790,7 +790,7 @@ fn draw(f: &mut Frame, app: &App) {
         .split(f.size());
 
     let head = format!(
-        " FeatherAgent v1.1.5  会话: {}  状态: {}  |  {}",
+        " FeatherAgent v1.1.6  会话: {}  状态: {}  |  {}",
         app.session.as_deref().unwrap_or("-"),
         app.state,
         app.status
@@ -961,7 +961,7 @@ fn draw_settings(f: &mut Frame, app: &App) {
 
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            " FeatherAgent v1.1.5 设置 ",
+            " FeatherAgent v1.1.6 设置 ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)

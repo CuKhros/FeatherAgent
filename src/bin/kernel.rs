@@ -3,7 +3,7 @@
 //! 体积目标 ≤ 8 MB 的正是这个二进制；TUI 与 WebUI 是独立前端，不参与链接。
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -163,6 +163,74 @@ fn tool_matches(allow: &str, tool: &str) -> bool {
         || format!("tool.{allow}") == tool
 }
 
+fn ipc_ready_path(socket: &Path) -> PathBuf {
+    socket
+        .parent()
+        .map(|p| p.join("ready"))
+        .unwrap_or_else(|| PathBuf::from("runtime/ipc/ready"))
+}
+
+fn welcome_connect(
+    paths: &Paths,
+    socket: &Path,
+) -> Result<featheragent::server::client::Connect, String> {
+    let ready = ipc_ready_path(socket);
+    let starting = ready.with_file_name("starting");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last;
+    loop {
+        match Client::connect(socket) {
+            Ok(c) => return Ok(c),
+            Err(e) => {
+                last = e.to_string();
+                if Instant::now() >= deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+    if ready.exists() {
+        return Err(format!(
+            "连接内核失败（{}）：{last}；ready 标记存在，端点可能繁忙或内核正在重启",
+            socket.display()
+        ));
+    }
+    if let Ok(raw) = std::fs::read(&starting) {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw) {
+            let started = v
+                .get("started_at_unix_ms")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0) as u128;
+            let age_s = if started > 0 {
+                featheragent::util::now_ms().saturating_sub(started) / 1000
+            } else {
+                0
+            };
+            if age_s > 180 {
+                return Err(format!(
+                    "内核未就绪（启动标记已存在 {}s，进程可能已退出）：{}\n请检查 serve 日志与 {}；若已退出，重新运行 featheragent serve。",
+                    age_s,
+                    socket.display(),
+                    starting.display()
+                ));
+            }
+            return Err(format!(
+                "内核未就绪（启动中，约 {}s）：{}\n请等 serve 输出“serve ready”或 {} 出现后重试；Windows 首次启动可能 30–60s。",
+                age_s,
+                socket.display(),
+                ready.display()
+            ));
+        }
+    }
+    let _ = paths;
+    Err(format!(
+        "内核未就绪：未发现 {} 或启动标记。\n请先运行 featheragent serve --root {}，等输出“serve ready”后再执行 chat。",
+        ready.display(),
+        paths.install_root.display()
+    ))
+}
+
 /// `featheragent chat`：不依赖 TUI/WebUI 的最小契约客户端，用于脚本 / S3 真机测试。
 fn chat(args: &featheragent::util::Args) -> Result<(), String> {
     let paths = paths_from(args)?;
@@ -181,8 +249,7 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
         .unwrap_or(0)
         .min(30);
 
-    let conn = Client::connect(&socket)
-        .map_err(|e| format!("连接内核失败（{}）: {e}", socket.display()))?;
+    let conn = welcome_connect(&paths, &socket)?;
     conn.client
         .call_with_timeout("initialize", serde_json::json!({}), Duration::from_secs(3))
         .map_err(|e| format!("initialize 失败: {e}"))?;
@@ -291,6 +358,7 @@ fn load_cfg(paths: &Paths) -> Config {
 }
 
 fn serve(args: &featheragent::util::Args) -> Result<(), String> {
+    let t0 = Instant::now();
     let paths = paths_from(args)?;
     let mut cfg = load_cfg(&paths);
     if let Some(s) = args.flag("sync") {
@@ -310,8 +378,63 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
     }
     let force = args.has("--force");
     let socket = args.path("socket").unwrap_or_else(|| paths.socket());
+    let codec = match args.flag("codec").unwrap_or("msgpack") {
+        "json" => Codec::Json,
+        "msgpack" | "" => Codec::MsgPack,
+        other => return Err(format!("未知 --codec {other}；可用: msgpack | json")),
+    };
+    if featheragent::ipc::connect(&socket).is_ok() {
+        return Err(format!(
+            "同一端点已有内核在运行（{}）；请先停止旧进程，或换 --socket",
+            socket.display()
+        ));
+    }
+    let ipc_dir = socket
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| paths.runtime.join("ipc"));
+    let _ = std::fs::create_dir_all(&ipc_dir);
+    // 清掉上一次异常退出留下的标记，避免 chat 把旧 ready 当成本次可用。
+    let _ = std::fs::remove_file(ipc_dir.join("ready"));
+    let _ = std::fs::remove_file(ipc_dir.join("endpoint"));
+    let starting_path = ipc_dir.join("starting");
+    let starting = serde_json::json!({
+        "state": "starting",
+        "version": featheragent::VERSION,
+        "contract": featheragent::proto::CONTRACT_API,
+        "pid": std::process::id(),
+        "started_at_unix_ms": featheragent::util::now_ms() as u64,
+        "socket": socket.display().to_string(),
+    });
+    let _ = std::fs::write(
+        &starting_path,
+        serde_json::to_vec_pretty(&starting).unwrap_or_default(),
+    );
 
-    let kernel = Kernel::new(paths.clone(), cfg.clone(), force)?;
+    // 先输出再初始化：Windows 首次启动登记内置插件可能很慢，不能等内核构造完才打 banner。
+    println!(
+        "featheragent {} starting  socket={}  data={}  provider={}  codec={}",
+        featheragent::VERSION,
+        socket.display(),
+        paths.data.display(),
+        cfg.provider_plugin,
+        match codec {
+            Codec::Json => "json",
+            Codec::MsgPack => "msgpack",
+        }
+    );
+    println!("serve: 初始化内核（首次启动需登记内置插件，Windows 首次可能 30–60s）");
+    let _ = std::io::stdout().flush();
+
+    let kernel = match Kernel::new(paths.clone(), cfg.clone(), force) {
+        Ok(k) => k,
+        Err(e) => {
+            let _ = std::fs::remove_file(&starting_path);
+            return Err(e);
+        }
+    };
+    println!("serve: 内核初始化完成（{} ms）", t0.elapsed().as_millis());
+    let _ = std::io::stdout().flush();
     // 组提交 flusher（§3.1：默认 5 ms 触发 fdatasync）
     {
         let k = kernel.clone();
@@ -322,32 +445,21 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         });
     }
 
-    let codec = match args.flag("codec").unwrap_or("msgpack") {
-        "json" => Codec::Json,
-        "msgpack" | "" => Codec::MsgPack,
-        other => return Err(format!("未知 --codec {other}；可用: msgpack | json")),
-    };
     let srv: Arc<Server> = Server::new(kernel.clone(), socket.clone(), codec);
     let mut err = std::io::stderr();
-    let _ = writeln!(
-        err,
-        "featheragent {}  socket={}  data={}  provider={}  codec={}",
-        featheragent::VERSION,
-        socket.display(),
-        paths.data.display(),
-        cfg.provider_plugin,
-        match codec {
-            Codec::Json => "json",
-            Codec::MsgPack => "msgpack",
-        }
-    );
     for w in kernel.warnings.read().iter() {
         let _ = writeln!(err, "warn: {w}");
     }
+    println!(
+        "serve: 开始监听 {}（等待 runtime/ipc/ready）",
+        socket.display()
+    );
+    let _ = std::io::stdout().flush();
 
-    let r = srv.clone().run();
+    let r = srv.clone().run_verbose();
     kernel.stop();
     let _ = kernel.store.flush();
+    let _ = std::fs::remove_file(&starting_path);
     r.map_err(|e| e.to_string())
 }
 

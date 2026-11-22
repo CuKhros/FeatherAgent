@@ -8,7 +8,7 @@
 pub mod client;
 
 use std::collections::HashMap;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -55,12 +55,47 @@ impl Server {
         }
     }
 
-    /// 阻塞运行；返回即表示停止。
+    /// 阻塞运行；返回即表示停止。库/bench 使用，不向 stdout 打印。
     pub fn run(self: Arc<Self>) -> std::io::Result<()> {
+        self.run_impl(false)
+    }
+
+    /// `serve` CLI 使用：额外把就绪信息打印到 stdout（bench 的 JSON 输出不受污染）。
+    pub fn run_verbose(self: Arc<Self>) -> std::io::Result<()> {
+        self.run_impl(true)
+    }
+
+    fn run_impl(self: Arc<Self>, announce: bool) -> std::io::Result<()> {
         let mut listener = crate::ipc::Listener::bind(&self.socket)?;
-        // 把实际端点落盘，第三方前端无需自行复刻命名管道哈希。
+        // 把实际端点落盘，第三方前端无需自行复刻命名管道哈希；
+        // ready 是“内核已开始监听”的显式标记，前端可据此区分启动中与真失败。
         if let Some(dir) = self.socket.parent() {
             let _ = std::fs::write(dir.join("endpoint"), crate::ipc::endpoint(&self.socket));
+            let ready = json!({
+                "state": "ready",
+                "version": crate::VERSION,
+                "contract": crate::proto::CONTRACT_API,
+                "endpoint": crate::ipc::endpoint(&self.socket),
+                "pid": std::process::id(),
+                "ready_at_unix_ms": crate::util::now_ms() as u64,
+            });
+            let _ = std::fs::write(
+                dir.join("ready"),
+                serde_json::to_vec_pretty(&ready).unwrap_or_default(),
+            );
+            let _ = std::fs::remove_file(dir.join("starting"));
+            if announce {
+                // 显式 flush：Windows 下 stdout 重定向到日志文件时不能等进程退出。
+                let mut out = std::io::stdout();
+                let _ = writeln!(
+                    out,
+                    "serve ready: {}\n  endpoint={}\n  runtime={}",
+                    crate::VERSION,
+                    crate::ipc::endpoint(&self.socket),
+                    dir.display()
+                );
+                let _ = out.flush();
+            }
         }
         loop {
             if self.stop.load(Ordering::SeqCst) {
@@ -98,6 +133,10 @@ impl Server {
         #[cfg(unix)]
         {
             let _ = std::fs::remove_file(&self.socket);
+        }
+        if let Some(dir) = self.socket.parent() {
+            let _ = std::fs::remove_file(dir.join("ready"));
+            let _ = std::fs::remove_file(dir.join("endpoint"));
         }
         Ok(())
     }
@@ -491,20 +530,54 @@ fn dispatch(
         "config.get" => {
             let cfg = kernel.config_json();
             match params.get("path").and_then(|x| x.as_str()) {
-                Some(p) => Ok(
-                    json!({"value": cfg.pointer(p).cloned().unwrap_or(Value::Null), "config": cfg}),
-                ),
+                Some(p) => {
+                    let pointer = if p.starts_with('/') {
+                        p.to_string()
+                    } else {
+                        format!("/{}", p.split('.').collect::<Vec<_>>().join("/"))
+                    };
+                    Ok(json!({
+                        "value": cfg.pointer(&pointer).cloned().unwrap_or(Value::Null),
+                        "config": cfg
+                    }))
+                }
                 None => Ok(cfg),
             }
         }
         "config.set" => {
+            if let Some(path) = params.get("path").and_then(|x| x.as_str()) {
+                let value = params
+                    .get("value")
+                    .cloned()
+                    .ok_or_else(|| invalid("config.set 的 path 与 value 必须同时提供"))?;
+                let cfg = kernel
+                    .set_config_path(path, value)
+                    .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
+                return Ok(json!({"config": cfg}));
+            }
             let patch = params
                 .get("patch")
                 .cloned()
                 .or_else(|| params.get("value").cloned())
-                .unwrap_or(Value::Null);
+                .ok_or_else(|| invalid("config.set 需要 patch，或 path + value"))?;
+            if !patch.is_object() {
+                return Err(invalid(
+                    "config.set 的 patch 必须是对象；单字段请用 path + value",
+                ));
+            }
             let cfg = kernel
                 .set_config(&patch)
+                .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
+            Ok(json!({"config": cfg}))
+        }
+        "config.replace" => {
+            let full = params
+                .get("config")
+                .cloned()
+                .or_else(|| params.get("value").cloned())
+                .ok_or_else(|| invalid("config.replace 需要完整 config 对象"))?;
+            let cfg = kernel
+                .replace_config(&full)
                 .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
             Ok(json!({"config": cfg}))
         }
@@ -543,13 +616,18 @@ fn dispatch(
             };
             match p.call("probe", json!({"base_url": base_url, "model": model})) {
                 Ok(v) => {
-                    let models: Vec<String> = v
+                    let mut models: Vec<String> = Vec::new();
+                    for m in v
                         .get("models")
                         .and_then(|x| x.as_array())
                         .into_iter()
                         .flatten()
-                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                        .collect();
+                        .filter_map(|x| x.as_str())
+                    {
+                        if !models.iter().any(|x| x == m) {
+                            models.push(m.to_string());
+                        }
+                    }
                     Ok(json!({"provider": provider, "models": models, "probe": v}))
                 }
                 Err(e) => Ok(json!({"provider": provider, "models": [], "error": e.to_string()})),

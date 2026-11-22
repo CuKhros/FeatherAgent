@@ -60,16 +60,20 @@ TASKS = [
     ("t3-shell", "请用 shell 工具执行命令 echo S3SHELL 并把输出告诉我。", "shell", "S3SHELL"),
     ("t4-notool", "1 加 1 等于几？直接回答。", None, "2"),
     ("t5-multi", "先读 workspace/s3-probe.txt，然后用一句话总结它的内容。", "read", "FEATHER"),
-    ("t6-missing", "请读取 workspace/no-such-file-xyz.txt 并告诉我内容。", "read", "不存在"),
+    ("t6-missing", "请读取 workspace/no-such-file-xyz.txt 并告诉我内容。", "read", "不存在", True),
 ]
 
-print(f"{'任务':12s} {'触发工具':22s} {'参数':28s} {'工具OK':7s} {'答复正确':8s} {'耗时':>6s}")
+print(f"{'任务':12s} {'触发工具':22s} {'参数':28s} {'工具执行':10s} {'答复正确':8s} {'耗时':>6s}")
 print("-" * 95)
 
 stat = {"tool_expected": 0, "tool_fired": 0, "args_ok": 0, "result_ok": 0,
+        "expected_cases": 0, "expected_error": 0, "expected_error_ok": 0, "real_failed": 0,
         "final_ok": 0, "no_tool_ok": 0, "no_tool_cases": 0}
 
-for tid, prompt, exp_tool, exp_text in TASKS:
+for tid, prompt, exp_tool, exp_text, *flags in TASKS:
+    expect_error = bool(flags and flags[0])
+    if expect_error:
+        stat["expected_cases"] += 1
     try:
         evs, out, dt = run(tid, prompt)
     except subprocess.TimeoutExpired:
@@ -99,22 +103,36 @@ for tid, prompt, exp_tool, exp_text in TASKS:
     final_ok = (exp_text in (final or "")) if exp_text else None
 
     if exp_tool is None:
+        # 不应调用工具：只看是否被误触发，不参与工具执行成功率。
+        status = "未调用" if not fired else "ERR"
         stat["no_tool_cases"] += 1
         if not fired:
             stat["no_tool_ok"] += 1
     else:
+        # 三档口径：成功 / 预期业务错误且模型正确报告 / 真失败。
+        if res_ok:
+            status = "OK"
+        elif expect_error and errors and final_ok:
+            status = "预期失败"
+        else:
+            status = "ERR"
         stat["tool_expected"] += 1
         if fired:
             stat["tool_fired"] += 1
         if fired and any(exp_tool in n for n in names):
             stat["args_ok"] += 1
-        if res_ok:
+        if status == "OK":
             stat["result_ok"] += 1
+        elif status == "预期失败":
+            stat["expected_error"] += 1
+            stat["expected_error_ok"] += 1
+        else:
+            stat["real_failed"] += 1
         if final_ok:
             stat["final_ok"] += 1
 
     print(f"{tid:12s} {(','.join(names) if names else '(无)'):22s} {args_s:28s} "
-          f"{('OK' if res_ok else ('ERR' if res_ok is False else '-')):7s} "
+          f"{status:10s} "
           f"{('OK' if final_ok else ('NO' if final_ok is False else '-')):8s} {dt:5.1f}s")
 
 print("-" * 95)
@@ -122,6 +140,8 @@ print(f"应触发工具的任务数      : {stat['tool_expected']}")
 print(f"  实际触发              : {stat['tool_fired']}  ({stat['tool_fired']}/{stat['tool_expected']})")
 print(f"  工具名命中（未校验参数值）: {stat['args_ok']}  ({stat['args_ok']}/{stat['tool_expected']})")
 print(f"  工具执行成功（严格口径）  : {stat['result_ok']}  ({stat['result_ok']}/{stat['tool_expected']})")
+print(f"  预期业务错误且答复正确     : {stat['expected_error_ok']}  (预期负样本 {stat['expected_cases']} 个)")
+print(f"  真失败                    : {stat['real_failed']}  ({stat['real_failed']}/{stat['tool_expected']})")
 print(f"  最终答复正确          : {stat['final_ok']}  ({stat['final_ok']}/{stat['tool_expected']})")
 print(f"不应调用工具的任务     : {stat['no_tool_cases']}，正确未调用 {stat['no_tool_ok']}")
 

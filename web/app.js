@@ -264,20 +264,31 @@
     $("#cfg-temperature-val").textContent = n.toFixed(2);
   }
 
+  function syncModelSelect() {
+    const sel = $("#cfg-model-select");
+    if (!sel) return;
+    const current = ($("#cfg-model").value || "").trim();
+    sel.value = cfgModels.includes(current) ? current : "";
+  }
+
   function renderModelList() {
-    const list = $("#cfg-model-list");
-    list.innerHTML = "";
+    const sel = $("#cfg-model-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = cfgModels.length
+      ? `选择已发现模型（${cfgModels.length}）`
+      : "未发现模型（可手填）";
+    sel.appendChild(ph);
+    // 原生 datalist 会按当前输入值过滤，导致只显示一项；这里用真正的 select 列全量。
     for (const m of cfgModels) {
       const o = document.createElement("option");
       o.value = m;
-      list.appendChild(o);
+      o.textContent = m;
+      sel.appendChild(o);
     }
-    const current = ($("#cfg-model").value || "").trim();
-    if (current && !cfgModels.includes(current)) {
-      const o = document.createElement("option");
-      o.value = current;
-      list.appendChild(o);
-    }
+    syncModelSelect();
   }
 
   async function loadProviders() {
@@ -300,7 +311,7 @@
     $("#cfg-models-hint").textContent = "正在读取模型列表…";
     try {
       const v = await rpc("provider.models", { provider, base_url: baseUrl, model }, 45000);
-      cfgModels = v.models || [];
+      cfgModels = [...new Set(Array.isArray(v.models) ? v.models : [])].sort();
       renderModelList();
       if (v.error) {
         $("#cfg-models-hint").textContent = "无法读取模型列表（可手动填写模型名）";
@@ -337,6 +348,7 @@
       sel.value = cfg.provider_plugin || "provider-mock";
       $("#cfg-base-url").value = cfg.base_url || "http://127.0.0.1:11434";
       $("#cfg-model").value = cfg.model || "qwen2.5:7b";
+      syncModelSelect();
       $("#cfg-temperature").value = String(cfg.temperature ?? 0.7);
       $("#cfg-context-window").value = String(cfg.context_window ?? 8192);
       $("#cfg-max-turns").value = String(cfg.max_turns ?? 6);
@@ -447,6 +459,11 @@
     $("#cfg-provider").onchange = refreshModels;
     $("#cfg-base-url").onchange = refreshModels;
     $("#cfg-temperature").oninput = syncTemperature;
+    $("#cfg-model-select").onchange = () => {
+      const v = $("#cfg-model-select").value;
+      if (v) $("#cfg-model").value = v;
+    };
+    $("#cfg-model").addEventListener("input", syncModelSelect);
     $("#btn-allow").onclick = () => answerConfirm(true);
     $("#btn-deny").onclick = () => answerConfirm(false);
     $("#input").addEventListener("keydown", (e) => {
