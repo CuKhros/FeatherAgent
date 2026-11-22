@@ -32,6 +32,7 @@ pub enum EventKind {
     MemoryRecalled,
     ConfigChanged,
     ChatFinished,
+    ModelRetry,
 }
 
 impl EventKind {
@@ -58,6 +59,7 @@ impl EventKind {
             MemoryRecalled => 18,
             ConfigChanged => 19,
             ChatFinished => 20,
+            ModelRetry => 21,
         }
     }
 
@@ -84,6 +86,7 @@ impl EventKind {
             18 => MemoryRecalled,
             19 => ConfigChanged,
             20 => ChatFinished,
+            21 => ModelRetry,
             _ => return None,
         })
     }
@@ -111,6 +114,7 @@ impl EventKind {
             MemoryRecalled => "memory.recalled",
             ConfigChanged => "config.changed",
             ChatFinished => "chat.finished",
+            ModelRetry => "model.retry",
         }
     }
 
@@ -138,6 +142,7 @@ impl EventKind {
             "memory.recalled" => MemoryRecalled,
             "config.changed" => ConfigChanged,
             "chat.finished" => ChatFinished,
+            "model.retry" => ModelRetry,
             _ => return None,
         })
     }
@@ -163,6 +168,7 @@ impl EventKind {
         Self::MemoryRecalled,
         Self::ConfigChanged,
         Self::ChatFinished,
+        Self::ModelRetry,
     ];
 }
 

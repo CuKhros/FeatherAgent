@@ -288,17 +288,25 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
         }
         "chat" => {
             let messages = params.get("messages").cloned().unwrap_or(json!([]));
+            let openai = base.contains("/v1");
             let mut body = json!({"model": model, "messages": messages, "stream": true});
             if let Some(t) = params.get("tools").cloned() {
                 if t.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
                     body["tools"] = t;
                 }
             }
+            // 空响应重试会带 temperature：OpenAI 放顶层，Ollama 放 options。
+            if let Some(t) = params.get("temperature").cloned() {
+                if openai {
+                    body["temperature"] = t;
+                } else {
+                    body["options"] = json!({"temperature": t});
+                }
+            }
             let mut acc = String::new();
             let mut native_calls: Vec<Value> = Vec::new();
             let mut openai_calls: BTreeMap<u64, (String, String)> = BTreeMap::new();
             let mut upstream_finish = "stop".to_string();
-            let openai = base.contains("/v1");
             let url = if openai {
                 format!("{base}/chat/completions")
             } else {

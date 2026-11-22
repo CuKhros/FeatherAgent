@@ -24,7 +24,7 @@ STAGE=$DIST/.stage-$NAME
 
 [ "$SKIP_BUILD" -eq 1 ] || scripts/build-windows.sh
 
-for e in featheragent featheragent-tui featheragent-gui feather-plugin feather-storage; do
+for e in featheragent featheragent-tui featheragent-webui feather-plugin feather-storage; do
   [ -f "$BIN/$e.exe" ] || { echo "缺少 $BIN/$e.exe，先跑 scripts/build-windows.sh" >&2; exit 1; }
 done
 

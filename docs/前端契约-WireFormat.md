@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.3**（契约 API `1.0`）  
+> 适用版本：FeatherAgent **1.1.4**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -35,7 +35,7 @@
 
 - `length` 是**消息体字节数**，不含这 4 字节帧头。
 - 上限 **64 MiB**（67,108,864 B）。超过即断连，错误 `frame too large`。
-- 没有 newline 分隔，没有 `Content-Length:` LSP 头，没有 u32-BE。  
+- 没有 newline 分隔，没有 `Content-Length:` LSP 头，没有 u32-BE。
   报告里用这四种方式探测全部失败，是因为分帧/编码都不匹配，不是服务端“没响应”。
 
 ### 2.1 消息体编码
@@ -52,14 +52,14 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 | `msgpack`（默认） | MessagePack **named map**（字段名做 key，不是数组） | `0x83` / `0x84` 等 `fixmap` |
 | `json` | UTF-8 JSON 对象 | `0x7b`（`{`） |
 
-> 关键：**响应使用什么编码，由服务端 `--codec` 决定；客户端必须用同一种编码发请求，并按同一种编码解响应。**  
+> 关键：**响应使用什么编码，由服务端 `--codec` 决定；客户端必须用同一种编码发请求，并按同一种编码解响应。**
 > v1.1.1 的 bug 是 `--codec json` 只影响读、写仍硬编码 MsgPack；1.1.2 已修复，`initialize.result.codec` 会如实返回 `json` 或 `msgpack`。
 
 `initialize` 返回示例（JSON codec）：
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.3","contract":"1.0","transport":"pipe",
+  "version":"1.1.4","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -150,7 +150,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `event.subscribe` | 订阅事件 | `kinds`（可选字符串数组） |
 | `chat.send` | 发送用户消息，流式返回事件 | `text` 必填、`session` |
 | `chat.cancel` | 取消当前生成 | `session` |
-| `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `tool_call_id` |
+| `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `token`（来自 `tool.confirm_request`）、`allow` |
 | `ctx.inspect` | 查看上下文组装细节 | 见实现 |
 | `config.get` / `config.set` | 读取/修改运行配置 | 见实现 |
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
@@ -159,6 +159,14 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `plugin.install` | 安装插件 | 见实现 |
 
 完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`（失败为 `tool.failed`）；provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
+
+### 5.1 工具确认与拒绝（v1.1.4）
+
+- dangerous 工具需要确认时，内核广播 **notification** `tool.confirm_request`，参数为 `session` / `token` / `tool` / `risk`；它不是 `event`，不写入事件日志。
+- 前端用 `tool.confirm`（`{"token":"...","allow":true}`）或 `tool.deny`（`{"token":"..."}`）响应。
+- 拒绝时除 `permission.denied` 外，还会写入一条结构化 `tool.result`：`{"denied":true,"result":{"error":"permission_denied","reason":"user_denied|确认超时","tool":"..."}}`，模型下一轮可据此解释。
+- `chat` 命令支持 `--allow <tool,...>` / `--yes` 自动确认；未放行时默认立即 deny（`--confirm-timeout` 可保留人工窗口）。
+- 空响应自动重试一次时写入 `model.retry` 事件（`attempt` / `reason` / `temperature`）；仍失败则 `chat.finished status=failed`。
 
 ## 6. 错误码
 
@@ -173,17 +181,17 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `50201` | 插件调用失败 |
 | `40901` | 资源被占用（如单客户端能力被占） |
 
-## 7. 多客户端与断连语义（1.1.2 起，1.1.3 补取消）
+## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认语义）
 
 - Windows 命名管道使用 **overlapped I/O + 每连接独立句柄**，读写互不阻塞。
 - `accept` 遇到客户端连上后立即断开（`ERROR_NO_DATA`）会复位实例并返回错误，由 `Server::run` 继续 `accept`；不会永久占死实例。
 - 客户端读线程看到 `ERROR_BROKEN_PIPE` / `ERROR_PIPE_NOT_CONNECTED` 按 EOF 处理。
-- GUI / TUI / 第三方客户端可以并发连接；事件总线按连接独立推送。
+- WebUI / TUI / 第三方客户端可以并发连接；事件总线按连接独立推送。
 - 单客户端写操作（如某些治理动作）仍可能返回 `40901`，这是契约语义，不是管道死锁。
 - 1.1.3 起，连接断开时若会话正处于 `Assembling` / `Generating` / `ToolExecuting`，内核会取消当前请求、发 `tool.cancelled`（`reason=client_disconnect`）并释放会话 holder；`Cancelled` / `Failed` 状态允许下一次 `chat.send` 重新进入。
 
 ## 8. 兼容性边界
 
-- `--codec json` 是**调试/参考实现**能力；GUI 与 TUI 内置客户端固定使用 MsgPack，默认 `serve` 即可。
+- `--codec json` 是**调试/参考实现**能力；WebUI 与 TUI 内置客户端固定使用 MsgPack，默认 `serve` 即可。
 - 第三方若选 JSON，必须让服务端也用 `--codec json`，并在 `initialize.result.codec` 校验一致；不一致时不要继续发请求。
 - 帧头/上限/方法集属于契约 `1.0`；新增方法只增不改，破坏性变更才升 `CONTRACT_API`。

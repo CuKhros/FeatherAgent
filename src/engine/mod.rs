@@ -476,12 +476,19 @@ impl Kernel {
 
             // ---- 模型 ----
             *session.state.write() = SessionState::Generating;
-            let mut model_res = self.run_model(session, &cfg, &assembled.messages);
+            let mut model_res = self.run_model(session, &cfg, &assembled.messages, None);
+            if let Err(e) = &model_res {
+                // 空响应通常是采样抖动：换一点温度重试一次，仍空则硬失败。
+                if e.contains("空响应") && !session.cancel.load(Ordering::SeqCst) {
+                    self.emit(&session.id, EventKind::ModelRetry, json!({"attempt": 1, "reason": "empty", "temperature": 0.7}));
+                    model_res = self.run_model(session, &cfg, &assembled.messages, Some(0.7));
+                }
+            }
             if let Err(e) = &model_res {
                 // §4.5：插件崩溃 → 重启后重试一次
                 if e.contains("崩溃") {
                     let _ = self.plugins.restart(&cfg.provider_plugin);
-                    model_res = self.run_model(session, &cfg, &assembled.messages);
+                    model_res = self.run_model(session, &cfg, &assembled.messages, None);
                 }
             }
             let reply = model_res?;
@@ -526,10 +533,38 @@ impl Kernel {
                             EventKind::PermissionDenied,
                             json!({"tool": call.name, "reason": "user_denied"}),
                         );
+                        self.emit(
+                            &session.id,
+                            EventKind::ToolResult,
+                            json!({
+                                "name": call.name,
+                                "denied": true,
+                                "result": {
+                                    "error": "permission_denied",
+                                    "reason": "user_denied",
+                                    "tool": call.name,
+                                },
+                            }),
+                        );
+                        executed += 1;
                         continue;
                     }
                     Err(e) => {
                         self.emit(&session.id, EventKind::PermissionDenied, json!({"tool": call.name, "reason": e}));
+                        self.emit(
+                            &session.id,
+                            EventKind::ToolResult,
+                            json!({
+                                "name": call.name,
+                                "denied": true,
+                                "result": {
+                                    "error": "permission_denied",
+                                    "reason": e,
+                                    "tool": call.name,
+                                },
+                            }),
+                        );
+                        executed += 1;
                         continue;
                     }
                 }
@@ -588,15 +623,19 @@ impl Kernel {
         session: &Arc<Session>,
         cfg: &Config,
         messages: &[crate::context::Message],
+        temperature: Option<f64>,
     ) -> Result<ModelReply, String> {
         let proc = self.plugins.get(&cfg.provider_plugin).map_err(|e| e.to_string())?;
-        let params = json!({
+        let mut params = json!({
             "model": cfg.model,
             "messages": messages,
             "tools": session.locked_tools,
             "stream": true,
             "base_url": cfg.base_url,
         });
+        if let Some(t) = temperature {
+            params["temperature"] = json!(t);
+        }
         let (req, rx) = proc.start_stream("chat", params).map_err(|e| e.to_string())?;
         *session.active_req.lock() = Some((cfg.provider_plugin.clone(), req));
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 三产物打包（设计文档 §8）：core / gui / plugins。
+# 三产物打包（设计文档 §8）：core / webui / plugins。
 # 用法: scripts/package.sh [--skip-build]
 # 产物: dist/featheragent-<product>-<version>-linux-x64.tar.gz + MANIFEST + sha256
 set -euo pipefail
@@ -36,13 +36,13 @@ cp README.md "$CORE/"
 mkdir -p "$CORE/docs"
 cp docs/*.md "$CORE/docs/" 2>/dev/null || true
 
-# ---------- gui ----------
-GUI="$STAGE/featheragent-gui"
-mkdir -p "$GUI/web"
-cp "$BIN/featheragent-gui" "$GUI/"
-cp web/index.html web/app.js web/style.css "$GUI/web/"
-cp README.md "$GUI/"
-mkdir -p "$GUI/docs" && cp docs/*.md "$GUI/docs/" 2>/dev/null || true
+# ---------- webui ----------
+WEBUI="$STAGE/featheragent-webui"
+mkdir -p "$WEBUI/web"
+cp "$BIN/featheragent-webui" "$WEBUI/"
+cp web/index.html web/app.js web/style.css "$WEBUI/web/"
+cp README.md "$WEBUI/"
+mkdir -p "$WEBUI/docs" && cp docs/*.md "$WEBUI/docs/" 2>/dev/null || true
 
 # ---------- plugins ----------
 PLUG="$STAGE/featheragent-plugins"
@@ -69,7 +69,7 @@ manifest="$DIST/featheragent-manifest-$VERSION-$ARCH.json"
   echo "  \"core_bin_bytes\": $CORE_BIN_BYTES,"
   echo "  \"products\": ["
   first=1
-  for name in featheragent-core featheragent-gui featheragent-plugins; do
+  for name in featheragent-core featheragent-webui featheragent-plugins; do
     d="$STAGE/$name"
     sz=$(du -sb "$d" | cut -f1)
     tar -C "$STAGE" -czf "$DIST/$name-$VERSION-$ARCH.tar.gz" "$name"
@@ -85,7 +85,7 @@ manifest="$DIST/featheragent-manifest-$VERSION-$ARCH.json"
   echo "}"
 } > "$manifest"
 
-for name in featheragent-core featheragent-gui featheragent-plugins; do
+for name in featheragent-core featheragent-webui featheragent-plugins; do
   echo "$name: $(du -sh "$STAGE/$name" | cut -f1) unpacked, $(stat -c %s "$DIST/$name-$VERSION-$ARCH.tar.gz") bytes tar.gz"
 done
 echo "kernel bin: $CORE_BIN_BYTES bytes (limit $CORE_LIMIT)"

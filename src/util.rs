@@ -54,7 +54,7 @@ impl Args {
     }
 }
 
-/// 取密码学随机字节，用于 GUI 一次性 token / 会话 ID。
+/// 取密码学随机字节，用于 WebUI 一次性 token / 会话 ID。
 /// 随机源失败必须硬失败，绝不静默回退成全 0。
 fn fill_random(buf: &mut [u8]) {
     #[cfg(windows)]

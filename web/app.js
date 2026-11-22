@@ -1,4 +1,4 @@
-// FeatherAgent GUI：默认 WebSocket（同连接 RPC + 事件推送），失败回退 HTTP + SSE。
+// FeatherAgent WebUI：默认 WebSocket（同连接 RPC + 事件推送），失败回退 HTTP + SSE。
 // token 从 URL fragment 读取后立刻从地址栏抹掉（不进 Referer、不进历史标题）。
 
 (() => {
@@ -11,7 +11,7 @@
     if (token) history.replaceState(null, "", location.pathname + location.search);
   }
   if (!token) {
-    token = (prompt("请输入终端输出的 GUI token（URL # 后的部分）") || "").trim();
+    token = (prompt("请输入终端输出的 WebUI token（URL # 后的部分）") || "").trim();
     if (!token) {
       $("#conn").textContent = "缺少 token，无法连接";
       return;
@@ -139,7 +139,7 @@
   }
 
   async function createSession() {
-    const id = ($("#new-id").value || "").trim() || "s-gui-" + Date.now().toString(36);
+    const id = ($("#new-id").value || "").trim() || "s-webui-" + Date.now().toString(36);
     try {
       await rpc("session.create", { id });
       $("#new-id").value = "";

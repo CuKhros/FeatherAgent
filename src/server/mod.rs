@@ -1,7 +1,7 @@
 //! 前端契约服务（设计文档 §7.2）。
 //!
-//! 传输分层是硬约束：**内核只提供 UDS / 命名管道**；HTTP/WS 归 GUI 包的
-//! `featheragent-gui` 桥接器，内核不实现任何 HTTP 服务（否则 8 MB 预算破功）。
+//! 传输分层是硬约束：**内核只提供 UDS / 命名管道**；HTTP/WS 归 WebUI 包的
+//! `featheragent-webui` 桥接器，内核不实现任何 HTTP 服务（否则 8 MB 预算破功）。
 //!
 //! 最小方法集见文档 §7.2；帧为长度前缀 msgpack（v1 可退 JSON）。
 

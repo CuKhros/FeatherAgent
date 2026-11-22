@@ -1,6 +1,6 @@
 //! `featheragent`：内核 CLI（serve / doctor / bench）。
 //!
-//! 体积目标 ≤ 8 MB 的正是这个二进制；TUI 与 GUI 是独立前端，不参与链接。
+//! 体积目标 ≤ 8 MB 的正是这个二进制；TUI 与 WebUI 是独立前端，不参与链接。
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -43,10 +43,10 @@ fn main() {
         "serve" => serve(&args),
         "doctor" => doctor(&args),
         "bench" => bench(&args),
-        "gui" => launch_gui(&args),
+        "webui" | "gui" => launch_webui(&args),
         "chat" => chat(&args),
         other => {
-            eprintln!("未知子命令 {other}；可用: serve | doctor | bench | gui | chat | version | help");
+            eprintln!("未知子命令 {other}；可用: serve | doctor | bench | webui | chat | version | help");
             std::process::exit(2);
         }
     };
@@ -59,14 +59,14 @@ fn main() {
 fn print_help(topic: Option<&str>) {
     let topic = topic.unwrap_or("");
     println!("FeatherAgent {} (contract {})", featheragent::VERSION, featheragent::proto::CONTRACT_API);
-    println!("用法: featheragent <serve|doctor|bench|gui|chat|version|help> [选项]");
+    println!("用法: featheragent <serve|doctor|bench|webui|chat|version|help> [选项]");
     println!();
     if topic.is_empty() || topic == "help" {
         println!("  serve    启动内核（命名管道/UDS）");
         println!("  doctor   自检：verify-log / --check-storage / --stress-log N");
         println!("  bench    本机体积、启动、RSS、写入、组装、RPC 指标");
-        println!("  gui      拉起同目录的 featheragent-gui[.exe]");
-        println!("  chat     用内核契约发一条消息并打印事件（S3/脚本用）");
+        println!("  webui    拉起同目录的 featheragent-webui[.exe]（兼容旧名 gui）");
+        println!("  chat     用内核契约发一条消息并打印事件（S3/脚本用；可 --allow/--yes）");
         println!("  version  打印版本与契约版本");
         println!();
     }
@@ -87,26 +87,31 @@ fn print_help(topic: Option<&str>) {
     if topic.is_empty() || topic == "bench" {
         println!("bench 选项: --json（只输出 JSON）");
     }
-    if topic.is_empty() || topic == "gui" {
-        println!("gui 选项: --root <dir> / --app（独立浏览器窗口）");
+    if topic.is_empty() || topic == "webui" || topic == "gui" {
+        println!("webui 选项: --root <dir> / --app（独立浏览器窗口）");
     }
     if topic.is_empty() || topic == "chat" {
         println!("chat 选项: --root <dir> / --session <id> / --text <文本> / --timeout <秒>");
+        println!("  --allow <tool,...>  自动确认指定 dangerous 工具（如 tool.fs.write,tool.shell）");
+        println!("  --yes               自动确认所有 dangerous 工具（仅限受信脚本）");
+        println!("  --confirm-timeout <秒> 未放行时等待多久再拒绝（默认 0，立即拒绝）");
     }
 }
 
-/// `featheragent gui`：找到同目录或 plugins/ 下的 GUI 桥并拉起（§8 安装建议）。
-fn launch_gui(args: &featheragent::util::Args) -> Result<(), String> {
+/// `featheragent webui`：找到同目录或 plugins/ 下的 WebUI 桥并拉起（§8 安装建议）。
+fn launch_webui(args: &featheragent::util::Args) -> Result<(), String> {
     let paths = paths_from(args)?;
-    let exe = if cfg!(windows) { "featheragent-gui.exe" } else { "featheragent-gui" };
+    let exe = if cfg!(windows) { "featheragent-webui.exe" } else { "featheragent-webui" };
+    let legacy = if cfg!(windows) { "featheragent-gui.exe" } else { "featheragent-gui" };
     let candidates = [
         paths.install_root.join(exe),
-        paths.install_root.join("featheragent-gui").join(exe),
-        paths.install_root.join("plugins").join("featheragent-gui").join(exe),
+        paths.install_root.join("featheragent-webui").join(exe),
+        paths.install_root.join("plugins").join("featheragent-webui").join(exe),
+        paths.install_root.join(legacy),
     ];
     let Some(bin) = candidates.iter().find(|p| p.is_file()) else {
         return Err(format!(
-            "未找到 featheragent-gui；请下载 gui 包并解压到 {} 或 {}/plugins/featheragent-gui/",
+            "未找到 featheragent-webui；请下载 webui 包并解压到 {} 或 {}/plugins/featheragent-webui/",
             paths.install_root.display(),
             paths.install_root.display()
         ));
@@ -117,14 +122,24 @@ fn launch_gui(args: &featheragent::util::Args) -> Result<(), String> {
     if args.has("--app") {
         cmd.arg("--app");
     }
-    let status = cmd.status().map_err(|e| format!("启动 GUI 失败: {e}"))?;
+    let status = cmd.status().map_err(|e| format!("启动 WebUI 失败: {e}"))?;
     if !status.success() {
-        return Err(format!("GUI 退出码 {status}"));
+        return Err(format!("WebUI 退出码 {status}"));
     }
     Ok(())
 }
 
-/// `featheragent chat`：不依赖 TUI/GUI 的最小契约客户端，用于脚本 / S3 真机测试。
+fn tool_matches(allow: &str, tool: &str) -> bool {
+    if allow.is_empty() {
+        return false;
+    }
+    allow == "*"
+        || allow == tool
+        || allow.strip_prefix("tool.") == Some(tool)
+        || format!("tool.{allow}") == tool
+}
+
+/// `featheragent chat`：不依赖 TUI/WebUI 的最小契约客户端，用于脚本 / S3 真机测试。
 fn chat(args: &featheragent::util::Args) -> Result<(), String> {
     let paths = paths_from(args)?;
     let socket = args.path("socket").unwrap_or_else(|| paths.socket());
@@ -134,6 +149,13 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
         .flag("timeout")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(180);
+    let allow = args.flag("allow").unwrap_or("").to_string();
+    let allow_all = args.has("--yes");
+    let confirm_wait = args
+        .flag("confirm-timeout")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0)
+        .min(30);
 
     let conn = Client::connect(&socket)
         .map_err(|e| format!("连接内核失败（{}）: {e}", socket.display()))?;
@@ -165,6 +187,26 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
         let wait = (deadline - now).min(Duration::from_secs(1));
         match conn.events.recv_timeout(wait) {
             Ok(v) => {
+                if v.get("method").and_then(|m| m.as_str()) == Some("tool.confirm_request") {
+                    let params = v.get("params").cloned().unwrap_or(serde_json::json!({}));
+                    let token = params.get("token").and_then(|x| x.as_str()).unwrap_or("");
+                    let tool = params.get("tool").and_then(|x| x.as_str()).unwrap_or("tool");
+                    if allow_all || allow.split(',').any(|a| tool_matches(a.trim(), tool)) {
+                        conn.client
+                            .call("tool.confirm", serde_json::json!({"token": token, "allow": true}))
+                            .map_err(|e| format!("自动授权失败: {e}"))?;
+                        eprintln!("chat: 已授权 {tool}（--allow/--yes）");
+                    } else {
+                        if confirm_wait > 0 {
+                            thread::sleep(Duration::from_secs(confirm_wait));
+                        }
+                        conn.client
+                            .call("tool.deny", serde_json::json!({"token": token}))
+                            .map_err(|e| format!("自动拒绝失败: {e}"))?;
+                        eprintln!("chat: 已拒绝 {tool}；需要放行请加 --allow {tool} 或 --yes");
+                    }
+                    continue;
+                }
                 let kind = v
                     .get("params")
                     .and_then(|p| p.get("kind"))
@@ -654,5 +696,19 @@ impl XorShift {
         x ^= x << 17;
         self.0 = x;
         x
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_matches;
+
+    #[test]
+    fn chat_allow_matches_full_short_and_wildcard() {
+        assert!(tool_matches("tool.fs.write", "tool.fs.write"));
+        assert!(tool_matches("fs.write", "tool.fs.write"));
+        assert!(tool_matches("*", "tool.shell"));
+        assert!(!tool_matches("", "tool.fs.read"));
+        assert!(!tool_matches("tool.fs.read", "tool.fs.write"));
     }
 }

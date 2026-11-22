@@ -1,10 +1,10 @@
-//! `featheragent-gui`：GUI 桥接器（§7.2/§7.3）。
+//! `featheragent-webui`：WebUI 桥接器（§7.2/§7.3）。
 //!
 //! - 只绑 `127.0.0.1` 的**随机端口**；
 //! - 一次性 token（URL fragment 传递，不进 Referer）；
 //! - 校验 `Host` 与 `Origin`，防 DNS rebinding；
-//! - `--app` 启动时强制 `--user-data-dir=<root>/runtime/gui-profile`；
-//! - 静态资源编译进二进制（GUI 是独立产物，不依赖 core）。
+//! - `--app` 启动时强制 `--user-data-dir=<root>/runtime/webui-profile`；
+//! - 静态资源编译进二进制（WebUI 是独立产物，不依赖 core）。
 //!
 //! 浏览器 ←HTTP/SSE→ 本进程 ←UDS 契约→ 内核。
 
@@ -40,7 +40,7 @@ struct Ctx {
 
 fn main() {
     let args = Args::parse(std::env::args().skip(1));
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-gui"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-webui"));
     let overrides = Overrides {
         install_root: args.flag("root").map(PathBuf::from),
         ..Default::default()
@@ -75,7 +75,7 @@ fn main() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let port = listener.local_addr().unwrap().port();
     let token = random_token(24);
-    let profile = paths.runtime.join("gui-profile");
+    let profile = paths.runtime.join("webui-profile");
     std::fs::create_dir_all(&profile).ok();
     let ctx = Arc::new(Ctx {
         port,
@@ -94,7 +94,7 @@ fn main() {
             "port": ctx.port,
             "bind": "127.0.0.1",
             "token_in_fragment": true,
-            "gui_profile": ctx.profile.display().to_string(),
+            "webui_profile": ctx.profile.display().to_string(),
             "app_mode": args.has("--app"),
         }))
         .unwrap()
@@ -107,7 +107,7 @@ fn main() {
     }
 
     if let Err(e) = serve(listener, ctx) {
-        eprintln!("GUI 桥退出: {e}");
+        eprintln!("WebUI 桥退出: {e}");
     }
 }
 
@@ -352,7 +352,7 @@ fn stream_sse(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     Ok(())
 }
 
-// ---------- WebSocket 桥（§7.2：浏览器 ↔ GUI 桥 = HTTP + WS） ----------
+// ---------- WebSocket 桥（§7.2：浏览器 ↔ WebUI 桥 = HTTP + WS） ----------
 
 fn ws_bridge(mut stream: TcpStream, req: Req, ctx: Arc<Ctx>) -> std::io::Result<()> {
     let key = match req.header("sec-websocket-key") {
@@ -576,7 +576,7 @@ fn launch_browser(url: &str, profile: &PathBuf) {
         }
         match cmd.spawn() {
             Ok(child) => {
-                println!("已启动 GUI（{}，pid {}，profile {}）", bin, child.id(), profile.display());
+                println!("已启动 WebUI（{}，pid {}，profile {}）", bin, child.id(), profile.display());
                 return;
             }
             Err(e) => eprintln!("启动 {bin} 失败: {e}"),

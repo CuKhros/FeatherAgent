@@ -571,6 +571,8 @@ plugin.list / enable / disable / install
 
 > 全部用 `criterion` 基准 + 固定硬件 runner，回归 >10% 即失败。
 
+> **Windows 例外（v1.1.4 起）**：NTFS `FlushFileBuffers` + 实时防护使事件写入天然慢一个数量级，Windows 门禁为启动 P50 **< 100 ms**、事件写 P95 **< 10 ms**；Linux 仍为 20 ms / 100 µs。`bench --json` 返回 `platform` 与对应限值，不把 Windows 固定标红。
+
 ---
 
 ## 10. 技术清单（v1.1 新增，逐层）

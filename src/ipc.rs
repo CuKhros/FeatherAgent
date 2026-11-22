@@ -224,7 +224,7 @@ mod imp {
                 };
                 match connect_instance(handle) {
                     Ok(()) => {
-                        // 先补下一个监听实例，允许 TUI/GUI/观察者并发连接。
+                        // 先补下一个监听实例，允许 TUI/WebUI/观察者并发连接。
                         // 补实例失败也不丢弃已建立的连接；下一次 accept 会再补。
                         self.pending = fresh_instance(&self.name).ok();
                         return Ok(Stream { inner: Arc::new(PipeHandle { handle }) });
@@ -340,7 +340,7 @@ mod imp {
 
     pub fn connect(path: &Path) -> io::Result<Stream> {
         let name = wide(&pipe_name(path));
-        // GUI/TUI 不应无限等待：3s 内没有可用实例就明确失败，交给上层打印。
+        // WebUI/TUI 不应无限等待：3s 内没有可用实例就明确失败，交给上层打印。
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let h = unsafe {
