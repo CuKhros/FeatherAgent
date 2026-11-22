@@ -384,12 +384,21 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
             Ok(json!({"bytes": content.len(), "path": p.strip_prefix(&workspace).unwrap_or(&p).display().to_string()}))
         }
         "tool.shell" => {
-            use std::os::unix::process::CommandExt;
             let cmd = args.get("cmd").and_then(|x| x.as_str()).ok_or("缺少 cmd")?;
-            let mut c = Command::new("/bin/sh");
-            c.arg("-c")
-                .arg(cmd)
-                .current_dir(&workspace)
+            #[cfg(unix)]
+            let mut c = {
+                let mut c = Command::new("/bin/sh");
+                c.arg("-c").arg(cmd);
+                c
+            };
+            #[cfg(windows)]
+            let mut c = {
+                // Windows 无 /bin/sh：用 cmd.exe；超时用 taskkill /T 杀进程树
+                let mut c = Command::new("cmd.exe");
+                c.arg("/C").arg(cmd);
+                c
+            };
+            c.current_dir(&workspace)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -399,13 +408,17 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
             c.env("HOME", workspace.join(".home"));
             // 让 shell 成为新进程组组长：超时杀 -pid，连带杀掉 sleep 等子孙进程。
             // 只 kill shell 会让子进程继续持有 stdout 管道，wait_with_output 会挂住。
-            unsafe {
-                c.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    c.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
             }
             let mut child = c.spawn().map_err(|e| e.to_string())?;
             let start = Instant::now();
@@ -415,8 +428,20 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
                     break;
                 }
                 if start.elapsed() > Duration::from_secs(15) {
-                    let pid = child.id() as i32;
-                    unsafe { libc::kill(-pid, libc::SIGKILL) };
+                    let pid = child.id();
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL)
+                    };
+                    #[cfg(windows)]
+                    {
+                        // 杀整棵进程树，避免 cmd 的子进程继续持有 stdout 管道
+                        let _ = Command::new("taskkill")
+                            .args(["/F", "/T", "/PID", &pid.to_string()])
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status();
+                    }
                     let _ = child.kill();
                     timed_out = true;
                     break;

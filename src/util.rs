@@ -159,6 +159,27 @@ pub fn percentile(sorted: &[f64], p: f64) -> f64 {
     sorted[idx]
 }
 
+/// 跨平台原子替换：Windows 上 `rename` 不能覆盖已存在目标，
+/// 用 `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`；Unix 仍是 `rename(2)`。
+pub fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING};
+        let f: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let t: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let ok = unsafe { MoveFileExW(f.as_ptr(), t.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
+        if ok != 0 {
+            return Ok(());
+        }
+        return Err(std::io::Error::last_os_error());
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to)
+    }
+}
+
 pub fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

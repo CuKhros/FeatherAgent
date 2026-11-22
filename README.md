@@ -67,6 +67,18 @@ cargo build --release --bins
 
 运行时会在安装根下生成 `data/`、`workspace/`、`runtime/`；可用 `--data/--workspace/--runtime` 分别外置。
 
+## 快速开始（Windows x64 测试包）
+
+`FeatherAgent-1.1.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+
+```powershell
+.\featheragent.exe serve --root .
+.\featheragent-tui.exe --root .              # 另开终端
+.\featheragent-gui.exe --root . --app          # 自动找 Chrome/Edge
+```
+
+5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.md)。
+
 ## 文档
 
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
@@ -79,5 +91,8 @@ cargo build --release --bins
 `v1.1.1` 已实现并通过本机实测门禁：内核 0.93 MiB、进程内启动 1.34 ms、空闲 RSS 2.63 MiB、事件写入 P95 3.40 µs、上下文组装 P95 0.12 ms、RPC P95 0.047 ms；52 个自动化测试全绿。
 
 已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、GUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、三产物打包与解压运行、1000 次日志随机截断恢复。
-未实测：真实 Ollama / 7B 模型指标（S3）、Windows 命名管道、macOS、四平台 × 双架构矩阵。详见验证报告。
+
+Windows x64：已完成 `x86_64-pc-windows-gnu` 交叉编译，Wine 冒烟通过（`version` / `doctor` / `serve` / GUI 桥 / 命名管道 RPC / 配置重写 / 50 次截断恢复），exe 仅依赖系统 DLL；**真实 Windows 机器与 Windows 性能数字尚未实测**。
+
+未实测：真实 Ollama / 7B 模型指标（S3）、Windows 实机、macOS、四平台 × 双架构矩阵。详见验证报告。
 

@@ -69,7 +69,7 @@ impl Registry {
     fn save(&self, f: &RegistryFile) -> std::io::Result<()> {
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(f).unwrap())?;
-        std::fs::rename(&tmp, &self.path)?;
+        crate::util::replace_file(&tmp, &self.path)?;
         Ok(())
     }
 
@@ -99,7 +99,18 @@ impl Registry {
                 entry.category = m.category;
             }
             if let Some(p) = v.get("program").and_then(|p| p.as_str()) {
-                entry.program = source.join(p).to_string_lossy().into_owned();
+                let mut prog = source.join(p);
+                #[cfg(windows)]
+                {
+                    // 清单里的 program 不带扩展名；Windows 包内实际是 .exe
+                    if !prog.exists() {
+                        let cand = prog.with_extension("exe");
+                        if cand.exists() {
+                            prog = cand;
+                        }
+                    }
+                }
+                entry.program = prog.to_string_lossy().into_owned();
             }
             if let Some(a) = v.get("args").and_then(|a| a.as_array()) {
                 entry.args = a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();

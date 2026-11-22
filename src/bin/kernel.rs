@@ -48,10 +48,11 @@ fn main() {
 /// `featheragent gui`：找到同目录或 plugins/ 下的 GUI 桥并拉起（§8 安装建议）。
 fn launch_gui(args: &featheragent::util::Args) -> Result<(), String> {
     let paths = paths_from(args)?;
+    let exe = if cfg!(windows) { "featheragent-gui.exe" } else { "featheragent-gui" };
     let candidates = [
-        paths.install_root.join("featheragent-gui"),
-        paths.install_root.join("featheragent-gui").join("featheragent-gui"),
-        paths.install_root.join("plugins").join("featheragent-gui").join("featheragent-gui"),
+        paths.install_root.join(exe),
+        paths.install_root.join("featheragent-gui").join(exe),
+        paths.install_root.join("plugins").join("featheragent-gui").join(exe),
     ];
     let Some(bin) = candidates.iter().find(|p| p.is_file()) else {
         return Err(format!(
@@ -442,6 +443,29 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn read_rss_kb(pid: u32) -> u64 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if h == 0 {
+            return 0;
+        }
+        let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        let ok = K32GetProcessMemoryInfo(h, &mut c, c.cb);
+        CloseHandle(h);
+        if ok != 0 {
+            (c.WorkingSetSize / 1024) as u64
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(not(windows))]
 fn read_rss_kb(pid: u32) -> u64 {
     let path = format!("/proc/{pid}/statm");
     if let Ok(s) = std::fs::read_to_string(path) {

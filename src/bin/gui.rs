@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -517,25 +517,47 @@ fn write_ws_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) -> std::io
 }
 
 fn launch_browser(url: &str, profile: &PathBuf) {
-    let candidates = [
-        ("chromium", true),
-        ("chromium-browser", true),
-        ("google-chrome", true),
-        ("google-chrome-stable", true),
-        ("microsoft-edge", true),
-        ("firefox", false),
+    #[cfg(unix)]
+    let candidates: Vec<(String, bool)> = vec![
+        ("chromium".into(), true),
+        ("chromium-browser".into(), true),
+        ("google-chrome".into(), true),
+        ("google-chrome-stable".into(), true),
+        ("microsoft-edge".into(), true),
+        ("firefox".into(), false),
+    ];
+    #[cfg(windows)]
+    let candidates: Vec<(String, bool)> = vec![
+        (r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(), true),
+        (r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe".into(), true),
+        (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".into(), true),
+        (r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".into(), true),
+        ("chrome.exe".into(), true),
+        ("msedge.exe".into(), true),
+        ("chromium.exe".into(), true),
+        ("firefox.exe".into(), false),
     ];
     for (bin, chromium_like) in candidates {
+        #[cfg(unix)]
         let ok = Command::new("sh")
             .arg("-c")
             .arg(format!("command -v {bin} >/dev/null 2>&1"))
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
+        #[cfg(windows)]
+        let ok = std::path::Path::new(&bin).is_file()
+            || Command::new("where")
+                .arg(&bin)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
         if !ok {
             continue;
         }
-        let mut cmd = Command::new(bin);
+        let mut cmd = Command::new(&bin);
         if chromium_like {
             cmd.arg(format!("--app={url}"))
                 .arg(format!("--user-data-dir={}", profile.display()))

@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -19,7 +18,7 @@ use crate::proto::rpc;
 use crate::proto::{read_frame, write_frame, Codec};
 
 struct Inner {
-    tx: Mutex<UnixStream>,
+    tx: Mutex<crate::ipc::Stream>,
     pending: Mutex<HashMap<u64, Sender<Value>>>,
     next: AtomicU64,
 }
@@ -35,7 +34,7 @@ pub struct Connect {
 
 impl Client {
     pub fn connect(path: &Path) -> std::io::Result<Connect> {
-        let stream = UnixStream::connect(path)?;
+        let stream = crate::ipc::connect(path)?;
         let mut reader = BufReader::new(stream.try_clone()?);
         let inner = Arc::new(Inner {
             tx: Mutex::new(stream.try_clone()?),

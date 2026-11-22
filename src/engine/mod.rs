@@ -78,7 +78,7 @@ impl Config {
     pub fn save(&self, path: &PathBuf) -> std::io::Result<()> {
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).unwrap())?;
-        std::fs::rename(tmp, path)
+        crate::util::replace_file(&tmp, path)
     }
 }
 

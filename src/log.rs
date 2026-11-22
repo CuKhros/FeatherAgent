@@ -601,7 +601,7 @@ impl LogStore {
         let out = archive_dir.join(format!("{}.fadb", safe_session_id(session)));
         let tmp = out.with_extension("fadb.tmp");
         fs::write(&tmp, &compressed)?;
-        fs::rename(&tmp, &out)?;
+        crate::util::replace_file(&tmp, &out)?;
 
         self.inner.lock().unwrap().remove(session);
         for s in &segs {

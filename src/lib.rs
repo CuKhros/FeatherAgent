@@ -13,6 +13,7 @@ pub mod bus;
 pub mod context;
 pub mod engine;
 pub mod governance;
+pub mod ipc;
 pub mod log;
 pub mod net;
 pub mod proto;

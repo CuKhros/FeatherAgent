@@ -43,61 +43,48 @@ impl Server {
 
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
-        // 触发一次连接，唤醒 accept 循环
-        let _ = std::os::unix::net::UnixStream::connect(&self.socket);
+        // 触发一次连接，唤醒阻塞中的 accept（Unix: connect UDS；Windows: 连命名管道）
+        let _ = crate::ipc::connect(&self.socket);
     }
 
     /// 阻塞运行；返回即表示停止。
     pub fn run(self: Arc<Self>) -> std::io::Result<()> {
+        let mut listener = crate::ipc::Listener::bind(&self.socket)?;
+        loop {
+            if self.stop.load(Ordering::SeqCst) {
+                break;
+            }
+            match listener.accept() {
+                Ok(stream) => {
+                    if self.stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let k = self.kernel.clone();
+                    let codec = self.codec;
+                    thread::spawn(move || {
+                        if let Err(e) = handle_conn(k, stream, codec) {
+                            eprintln!("conn error: {e}");
+                        }
+                    });
+                }
+                Err(e) => {
+                    if self.stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    eprintln!("accept error: {e}");
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            if self.socket.exists() {
-                let _ = std::fs::remove_file(&self.socket);
-            }
-            if let Some(dir) = self.socket.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let listener = std::os::unix::net::UnixListener::bind(&self.socket)?;
-            let _ = std::fs::set_permissions(&self.socket, std::fs::Permissions::from_mode(0o600));
-            listener.set_nonblocking(true)?;
-            loop {
-                if self.stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        if self.stop.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        let k = self.kernel.clone();
-                        let codec = self.codec;
-                        thread::spawn(move || {
-                            if let Err(e) = handle_conn(k, stream, codec) {
-                                eprintln!("conn error: {e}");
-                            }
-                        });
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(20));
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
             let _ = std::fs::remove_file(&self.socket);
-            Ok(())
         }
-        #[cfg(not(unix))]
-        {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Windows 命名管道后端尚未实现（见 docs/验证报告.md 未测项）",
-            ))
-        }
+        Ok(())
     }
 }
 
-fn handle_conn(kernel: Arc<Kernel>, stream: std::os::unix::net::UnixStream, codec: Codec) -> std::io::Result<()> {
+fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) -> std::io::Result<()> {
     let conn_id = kernel.next_conn_id();
     let (tx, rx): (Sender<Value>, Receiver<Value>) = mpsc::channel();
     kernel.broadcasts.write().push((conn_id, tx.clone()));
@@ -212,7 +199,7 @@ fn dispatch(
         "initialize" => Ok(json!({
             "version": crate::VERSION,
             "contract": crate::proto::CONTRACT_API,
-            "transport": "uds",
+            "transport": if cfg!(windows) { "pipe" } else { "uds" },
             "codec": "msgpack",
             "paths": {
                 "install_root": kernel.paths.install_root,
@@ -435,7 +422,7 @@ pub fn spawn_server(kernel: Arc<Kernel>, socket: PathBuf, codec: Codec) -> std::
 pub fn wait_ready(socket: &Path, timeout: Duration) -> std::io::Result<()> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
-        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+        if crate::ipc::connect(socket).is_ok() {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(1));

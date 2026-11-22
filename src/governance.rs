@@ -29,6 +29,9 @@ pub mod paths {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from("."));
             let install_root = ov.install_root.clone().unwrap_or_else(|| exe_dir.clone());
+            // 统一成绝对路径：Windows 命名管道名由 socket 路径哈希得到，
+            // 若一端用 `.`、另一端用安装根的绝对路径，会算出不同的管道名。
+            let install_root = std::path::absolute(&install_root).unwrap_or(install_root);
             let data = ov.data.clone().unwrap_or_else(|| install_root.join("data"));
             let workspace = ov
                 .workspace

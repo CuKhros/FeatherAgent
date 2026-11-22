@@ -38,9 +38,25 @@ parking_lot = "0.12"
 zstd = "0.13"
 wasmi = "0.31"
 rusqlite = { version = "0.31", features = ["bundled"] }
-libc = "0.2"
 ratatui = "0.26"
 crossterm = "0.27"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# 交叉编译到 windows-gnu 时 blake3 的汇编静态库会被 rustc 当作损坏的 .drectve 丢弃，
+# 链接期报 undefined reference；Windows 目标改用纯 Rust 实现。
+blake3 = { version = "1", features = ["pure"] }
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 proptest = "1"
