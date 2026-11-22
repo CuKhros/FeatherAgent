@@ -117,6 +117,8 @@ ollama list
 
 写盘 / shell 类任务按 §5 加 `--allow tool.fs.write,tool.shell`。空响应会自动重试一次（`model.retry` 事件）；仍为空则 `chat.finished status=failed`，不会假成功。
 
+包内 `tools\s3_batch.py` 已适配新版 `chat`，默认通过 `--allow tool.fs.write,tool.shell` 放行写盘与 shell；如需改白名单，设置环境变量 `FEATHER_ALLOW=tool.fs.read` 后再运行。
+
 ## 已知边界
 
 - **v1.1.4 真机未测**：NEW-A～NEW-D 在本机 mock 验证，Windows 真机需复测；NEW-4 断连取消在 v1.1.3 报告中标为“未复测”，本版未改该路径。

@@ -34,7 +34,7 @@ cp "$BIN"/*.exe "$STAGE/$NAME/"
 cp -r plugins "$STAGE/$NAME/plugins"
 cp -r web "$STAGE/$NAME/web"
 mkdir -p "$STAGE/$NAME/tools"
-cp tools/feather_client.py "$STAGE/$NAME/tools/" 2>/dev/null || true
+cp tools/*.py "$STAGE/$NAME/tools/" 2>/dev/null || true
 mkdir -p "$STAGE/$NAME/docs"
 cp docs/*.md "$STAGE/$NAME/docs/" 2>/dev/null || true
 cp README.md "$STAGE/$NAME/"
