@@ -11,6 +11,14 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
+/// 从已解析的结构化值（如 provider 的 `tool_calls` 数组）提取工具调用。
+/// 与文本解析共用同一套归一化逻辑，兼容 Ollama 的 arguments 对象和 OpenAI 的 JSON 字符串。
+pub fn from_value(v: &Value) -> Vec<ToolCall> {
+    let mut out = Vec::new();
+    collect_from_value(v, &mut out);
+    dedup(out)
+}
+
 /// 从模型输出中提取工具调用；解析不出就返回空（绝不抛错）。
 pub fn extract(text: &str) -> Vec<ToolCall> {
     let mut out = Vec::new();
@@ -350,6 +358,23 @@ fn dedup(calls: Vec<ToolCall>) -> Vec<ToolCall> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structured_ollama_tool_calls() {
+        let v = json!([{"function":{"name":"tool.fs.read","arguments":{"path":"workspace/a.txt"}}}]);
+        let c = from_value(&v);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].name, "tool.fs.read");
+        assert_eq!(c[0].arguments["path"], "workspace/a.txt");
+    }
+
+    #[test]
+    fn structured_openai_tool_calls_string_arguments() {
+        let v = json!([{"id":"call_1","function":{"name":"tool.fs.read","arguments":"{\"path\":\"a.txt\"}"}}]);
+        let c = from_value(&v);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].arguments["path"], "a.txt");
+    }
 
     #[test]
     fn plain_json_and_openai_shape() {

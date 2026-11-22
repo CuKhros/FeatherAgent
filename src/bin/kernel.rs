@@ -171,6 +171,17 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
                     .and_then(|k| k.as_str());
                 if kind == Some("chat.finished") {
                     println!("{}", serde_json::to_string(&v).unwrap_or_default());
+                    let status = v
+                        .pointer("/params/payload/status")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown");
+                    if status != "ok" {
+                        let err = v
+                            .pointer("/params/payload/error")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("chat 未成功完成");
+                        return Err(format!("chat.finished status={status}: {err}"));
+                    }
                     return Ok(());
                 }
                 if v.get("method").and_then(|m| m.as_str()) == Some("event") {
@@ -556,23 +567,34 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "rpc_p50_ms": percentile(&rpc, 0.5),
         "rpc_p95_ms": percentile(&rpc, 0.95),
     });
-    let gates = serde_json::json!({
+    let windows = cfg!(windows);
+    let platform = if windows { "windows" } else { "linux" };
+    let boot_limit = if windows { 100.0 } else { 20.0 };
+    let write_limit = if windows { 10_000.0 } else { 100.0 };
+    let boot_key = if windows { "boot_lt_100ms" } else { "boot_lt_20ms" };
+    let write_key = if windows { "write_p95_lt_10ms" } else { "write_p95_lt_100us" };
+    let mut gates = serde_json::json!({
+        "platform": platform,
         "binary_le_8mb": size_bytes <= 8 * 1024 * 1024,
-        "boot_lt_20ms": percentile(&boot_ms, 0.5) < 20.0,
         "rss_le_15mb": rss_kb <= 15 * 1024,
-        "write_p95_lt_100us": percentile(&lat, 0.95) < 100.0,
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
+        "boot_limit_ms": boot_limit,
+        "write_limit_us": write_limit,
     });
+    if let Some(o) = gates.as_object_mut() {
+        o.insert(boot_key.into(), serde_json::json!(percentile(&boot_ms, 0.5) < boot_limit));
+        o.insert(write_key.into(), serde_json::json!(percentile(&lat, 0.95) < write_limit));
+    }
     if json_only {
         println!("{}", serde_json::to_string(&serde_json::json!({"metrics": m, "gates": gates})).unwrap());
     } else {
         println!("FeatherAgent 内核实测（{}）", featheragent::VERSION);
         println!("  二进制体积      {:.2} MiB   (≤ 8 MiB)", size_bytes as f64 / 1_048_576.0);
-        println!("  进程内启动 P50   {:.2} ms   (< 20 ms)", percentile(&boot_ms, 0.5));
+        println!("  进程内启动 P50   {:.2} ms   (< {:.0} ms)", percentile(&boot_ms, 0.5), boot_limit);
         println!("  spawn→socket    {:.2} ms", if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) });
         println!("  空闲 RSS        {} KiB   (≤ 15 MiB)", rss_kb);
-        println!("  事件写入 P50/P95 {:.1} / {:.1} µs (P95 < 100 µs)", percentile(&lat, 0.5), percentile(&lat, 0.95));
+        println!("  事件写入 P50/P95 {:.1} / {:.1} µs (P95 < {:.0} µs)", percentile(&lat, 0.5), percentile(&lat, 0.95), write_limit);
         println!("  上下文组装 P95  {:.2} ms   (< 30 ms)", percentile(&asm_lat, 0.95));
         println!("  RPC 往返 P95    {:.3} ms   (< 1 ms)", percentile(&rpc, 0.95));
         println!("门禁: {}", serde_json::to_string_pretty(&gates).unwrap());

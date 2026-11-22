@@ -69,7 +69,7 @@ cargo build --release --bins
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.1.2-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.1.3-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -86,17 +86,18 @@ cargo build --release --bins
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
-- **[v1.1.2 Windows 修复对照](docs/v1.1.2-Windows修复说明.md)** —— 真机报告 BUG-1～BUG-9 的根因、修法与验证状态
+- **[v1.1.3 Windows 修复对照](docs/v1.1.3-Windows修复说明.md)** —— v1.1.2 复测 NEW-1～NEW-4 的根因、修法与验证状态
+- **[v1.1.2 Windows 修复对照](docs/v1.1.2-Windows修复说明.md)** —— 上一轮 BUG-1～BUG-9 的修复记录
 
 > 文档中所有「目标值」必须经 Spike / 阶段门禁实测后回填，未测不写数字。
 
 ## 状态
 
-`v1.1.2` 是针对 Windows 真机报告的修复版：命名管道改为 overlapped I/O + 独立句柄，修复并发连接/断连占死；随机 token 改用系统 CSPRNG；卷类型用 `GetDriveTypeW` 判定；GUI/TUI 初始化 3 秒超时；新增 `help`、`chat` 与 `serve --codec json`；补 `runtime/ipc/endpoint` 与 Wire Format 文档。Linux 自动化测试全绿。
+`v1.1.3` 是针对 v1.1.2 Windows 复测报告的修复版：原生/OpenAI `tool_calls` 结构化解析并接入工具执行；空响应不再静默 `status=ok`；插件子进程补齐 `NO_PROXY` 回环；bench 门禁按平台分档（Windows 启动 <100 ms、写入 P95 <10 ms）；客户端断开触发取消并释放会话 holder；静音管道收尾的 os error 232。Linux 自动化测试全绿。
 
 已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、GUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、三产物打包与解压运行、1000 次日志随机截断恢复。
 
-Windows x64：v1.1.1 已在你方真机跑通二进制/`doctor`/`serve`，但暴露 GUI/TUI/协议/性能问题；v1.1.2 已按报告修复并重新交叉编译，待真机复测。Wine 只能做基本冒烟，不能复现 Windows 同步管道死锁。
+Windows x64：v1.1.2 在真机复测中 8/9 个旧 BUG 已修复；新暴露的工具调用、空响应、平台门禁与断连取消在 v1.1.3 修复。v1.1.3 仍需真机复测；Wine 只能做基本冒烟，不能复现真实 Windows 的管道/ConPTY/代理环境。
 
 未实测：真实 Ollama / 7B 模型指标（S3）、Windows 实机、macOS、四平台 × 双架构矩阵。详见验证报告。
 

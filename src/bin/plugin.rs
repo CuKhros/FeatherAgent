@@ -3,7 +3,7 @@
 //! 用法：`feather-plugin <role>`，role ∈ {mock, ollama, tool}。
 //! 传输：stdio + 长度前缀 msgpack 帧。所有输出只走 stdout 的帧，日志走 stderr。
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -295,6 +295,9 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                 }
             }
             let mut acc = String::new();
+            let mut native_calls: Vec<Value> = Vec::new();
+            let mut openai_calls: BTreeMap<u64, (String, String)> = BTreeMap::new();
+            let mut upstream_finish = "stop".to_string();
             let openai = base.contains("/v1");
             let url = if openai {
                 format!("{base}/chat/completions")
@@ -318,6 +321,12 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     return false;
                 }
                 let Ok(v) = serde_json::from_str::<Value>(payload) else { return true };
+                if let Some(r) = v.get("done_reason").and_then(|x| x.as_str()) {
+                    upstream_finish = r.to_string();
+                }
+                if let Some(r) = v.pointer("/choices/0/finish_reason").and_then(|x| x.as_str()) {
+                    upstream_finish = r.to_string();
+                }
                 let delta = if openai {
                     v.pointer("/choices/0/delta/content")
                         .and_then(|x| x.as_str())
@@ -333,10 +342,89 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     acc.push_str(&delta);
                     io.emit(req, json!({"kind": "delta", "text": delta}));
                 }
+                if openai {
+                    if let Some(calls) = v
+                        .pointer("/choices/0/delta/tool_calls")
+                        .and_then(|x| x.as_array())
+                    {
+                        for c in calls {
+                            let idx = c.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
+                            let e = openai_calls.entry(idx).or_default();
+                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
+                                if e.0.is_empty() {
+                                    e.0.push_str(name);
+                                } else if !e.0.ends_with(name) {
+                                    e.0.push_str(name);
+                                }
+                            }
+                            if let Some(args) = c.pointer("/function/arguments").and_then(|x| x.as_str()) {
+                                e.1.push_str(args);
+                            }
+                        }
+                    }
+                    if let Some(calls) = v
+                        .pointer("/choices/0/message/tool_calls")
+                        .and_then(|x| x.as_array())
+                    {
+                        for c in calls {
+                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
+                                let args = c
+                                    .pointer("/function/arguments")
+                                    .cloned()
+                                    .unwrap_or_else(|| json!({}));
+                                native_calls.push(json!({"name": name, "arguments": args}));
+                            }
+                        }
+                    }
+                } else if let Some(calls) = v
+                    .pointer("/message/tool_calls")
+                    .and_then(|x| x.as_array())
+                {
+                    for c in calls {
+                        if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
+                            let args = c
+                                .pointer("/function/arguments")
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            native_calls.push(json!({"name": name, "arguments": args}));
+                        }
+                    }
+                }
                 true
             })?;
-            io.emit(req, json!({"kind": "done", "finish_reason": "stop"}));
-            Ok(json!({"text": acc, "finish_reason": "stop"}))
+            for (_, (name, args)) in openai_calls {
+                if name.is_empty() {
+                    continue;
+                }
+                let args = if args.trim().is_empty() {
+                    json!({})
+                } else {
+                    serde_json::from_str(&args).unwrap_or_else(|_| json!({"raw": args}))
+                };
+                native_calls.push(json!({"name": name, "arguments": args}));
+            }
+            let calls = featheragent::context::parse::from_value(&Value::Array(native_calls));
+            if acc.trim().is_empty() && calls.is_empty() {
+                let msg = "Ollama 返回空响应（content 与 tool_calls 均为空）；已拒绝以 status=ok 静默通过。请检查 base_url/代理/模型是否就绪";
+                io.emit(req, json!({"kind": "error", "message": msg}));
+                return Err(msg.to_string());
+            }
+            let finish = if calls.is_empty() {
+                if upstream_finish.is_empty() { "stop".into() } else { upstream_finish }
+            } else {
+                "tool_calls".into()
+            };
+            let calls_json = Value::Array(
+                calls
+                    .iter()
+                    .map(|c| json!({"name": c.name, "arguments": c.arguments}))
+                    .collect(),
+            );
+            io.emit(
+                req,
+                json!({"kind": "done", "finish_reason": finish, "tool_calls": calls_json}),
+            );
+            Ok(json!({"text": acc, "finish_reason": finish, "tool_calls": calls_json}))
         }
         "fim" => {
             let prompt = params.get("prompt").and_then(|x| x.as_str()).unwrap_or("");
@@ -364,24 +452,26 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
         "tool.ping" => Ok(json!({"pong": true})),
         "tool.fs.read" => {
             let path = args.get("path").and_then(|x| x.as_str()).ok_or("缺少 path")?;
-            let p = safe_path(&workspace, path)?;
+            let (base, rel) = tool_base(&workspace, path);
+            let p = safe_path(&base, &rel)?;
             let meta = std::fs::metadata(&p).map_err(|e| format!("{}: {e}", p.display()))?;
             if meta.len() > 4 * 1024 * 1024 {
                 return Err("文件超过 4 MB".into());
             }
             let content = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
             Ok(json!({"content": content, "bytes": meta.len(),
-                "path": p.strip_prefix(&workspace).unwrap_or(&p).display().to_string()}))
+                "path": p.strip_prefix(&base).unwrap_or(&p).display().to_string()}))
         }
         "tool.fs.write" => {
             let path = args.get("path").and_then(|x| x.as_str()).ok_or("缺少 path")?;
             let content = args.get("content").and_then(|x| x.as_str()).ok_or("缺少 content")?;
-            let p = safe_path(&workspace, path)?;
+            let (base, rel) = tool_base(&workspace, path);
+            let p = safe_path(&base, &rel)?;
             if let Some(dir) = p.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
             std::fs::write(&p, content).map_err(|e| e.to_string())?;
-            Ok(json!({"bytes": content.len(), "path": p.strip_prefix(&workspace).unwrap_or(&p).display().to_string()}))
+            Ok(json!({"bytes": content.len(), "path": p.strip_prefix(&base).unwrap_or(&p).display().to_string()}))
         }
         "tool.shell" => {
             let cmd = args.get("cmd").and_then(|x| x.as_str()).ok_or("缺少 cmd")?;
@@ -461,6 +551,18 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
 }
 
 /// 路径守卫：只允许工作空间内的文件（越界直接拒绝）。
+/// 模型常把根工作区写成 `workspace/xxx`；此时相对安装根解析，避免落到
+/// `<root>/workspace/<session>/workspace/xxx`。普通相对路径仍相对会话工作区。
+fn tool_base(workspace: &Path, user: &str) -> (PathBuf, String) {
+    let norm = user.replace('\\', "/");
+    if let Some(rest) = norm.strip_prefix("workspace/") {
+        // <root>/workspace/<session> + workspace/xxx → <root>/workspace/xxx
+        (workspace.parent().unwrap_or(workspace).to_path_buf(), rest.to_string())
+    } else {
+        (workspace.to_path_buf(), norm)
+    }
+}
+
 fn safe_path(workspace: &Path, user: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(workspace).map_err(|e| e.to_string())?;
     let base = std::fs::canonicalize(workspace).map_err(|e| e.to_string())?;

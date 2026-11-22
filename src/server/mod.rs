@@ -83,6 +83,13 @@ impl Server {
                     if self.stop.load(Ordering::SeqCst) {
                         break;
                     }
+                    // Windows 管道收尾竞争会产生 ERROR_NO_DATA(232)/ERROR_BROKEN_PIPE(109)；
+                    // 这是正常的 stop/断连唤醒，不要作为错误刷屏。
+                    #[cfg(windows)]
+                    if matches!(e.raw_os_error(), Some(232) | Some(109)) {
+                        thread::sleep(Duration::from_millis(20));
+                        continue;
+                    }
                     eprintln!("accept error: {e}");
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -93,6 +100,41 @@ impl Server {
             let _ = std::fs::remove_file(&self.socket);
         }
         Ok(())
+    }
+}
+
+/// 客户端断开即视为取消：释放该连接持有的会话写锁，并停止仍在跑的模型请求。
+/// 否则被 kill 的客户端会留下孤儿回合继续烧算力，且 holder 会挡住后续连接。
+fn cancel_connection(kernel: &Arc<Kernel>, conn_id: u64) {
+    let owned: Vec<Arc<crate::engine::Session>> = kernel
+        .sessions
+        .read()
+        .values()
+        .filter(|s| *s.holder.read() == Some(conn_id))
+        .cloned()
+        .collect();
+    for s in owned {
+        let running = matches!(
+            *s.state.read(),
+            crate::engine::SessionState::Assembling
+                | crate::engine::SessionState::Generating
+                | crate::engine::SessionState::ToolExecuting
+        );
+        if running {
+            s.cancel.store(true, Ordering::SeqCst);
+            let active = s.active_req.lock().clone();
+            if let Some((plugin, req)) = active {
+                if let Ok(p) = kernel.plugins.get(&plugin) {
+                    p.cancel(req);
+                }
+            }
+            kernel.emit(
+                &s.id,
+                EventKind::ToolCancelled,
+                json!({"name": "client.disconnect", "reason": "client_disconnect"}),
+            );
+        }
+        *s.holder.write() = None;
     }
 }
 
@@ -186,6 +228,7 @@ fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) ->
     };
 
     let _ = reader.join();
+    cancel_connection(&kernel, conn_id);
     stop_poll.store(true, Ordering::Relaxed);
     let _ = poller.join();
     kernel.broadcasts.write().retain(|(id, _)| *id != conn_id);
@@ -317,9 +360,13 @@ fn dispatch(
                 }
                 _ => {}
             }
-            if *s.state.read() != SessionState::Idle {
+            if matches!(
+                *s.state.read(),
+                SessionState::Assembling | SessionState::Generating | SessionState::ToolExecuting
+            ) {
                 return Err((rpc::ERR_OCCUPIED, "会话正忙".into()));
             }
+            *s.state.write() = SessionState::Idle;
             let k = kernel.clone();
             let ss = s.clone();
             let t = text.to_string();

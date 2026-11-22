@@ -40,6 +40,8 @@ pub fn parse_url(s: &str) -> Result<Url, String> {
 }
 
 fn connect(u: &Url) -> Result<TcpStream, String> {
+    // 直接 TCP，不读取 HTTP_PROXY/HTTPS_PROXY；本地 Ollama 不会被系统代理截走。
+    // 需要代理的远程模型请显式使用可代理的传输层，不要依赖环境变量。
     let addr = format!("{}:{}", u.host, u.port);
     let stream = TcpStream::connect(&addr).map_err(|e| format!("连接 {addr} 失败: {e}"))?;
     stream

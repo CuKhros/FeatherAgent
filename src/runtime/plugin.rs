@@ -99,6 +99,22 @@ impl PluginProc {
         for (k, v) in env {
             cmd.env(k, v);
         }
+        // 本地 provider 不应被宿主机的 HTTP(S)_PROXY 截走；保留已有 NO_PROXY 并补齐回环地址。
+        let existing = std::env::var("NO_PROXY")
+            .or_else(|_| std::env::var("no_proxy"))
+            .unwrap_or_default();
+        let mut no_proxy = existing.clone();
+        for host in ["127.0.0.1", "localhost", "::1"] {
+            if !no_proxy.split(',').any(|x| x.trim() == host) {
+                if !no_proxy.is_empty() {
+                    no_proxy.push(',');
+                }
+                no_proxy.push_str(host);
+            }
+        }
+        if no_proxy != existing {
+            cmd.env("NO_PROXY", &no_proxy).env("no_proxy", &no_proxy);
+        }
         let mut child = cmd.spawn().map_err(|e| PluginError::Io(e.to_string()))?;
         let stdin = child.stdin.take().ok_or(PluginError::Io("no stdin".into()))?;
         let stdout = child.stdout.take().ok_or(PluginError::Io("no stdout".into()))?;

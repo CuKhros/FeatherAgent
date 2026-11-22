@@ -170,6 +170,12 @@ pub struct Kernel {
     pub warnings: RwLock<Vec<String>>,
 }
 
+struct ModelReply {
+    text: String,
+    finish: String,
+    tool_calls: Vec<crate::context::parse::ToolCall>,
+}
+
 impl Kernel {
     pub fn new(paths: Paths, cfg: Config, force: bool) -> Result<Arc<Self>, String> {
         paths.create_all().map_err(|e| format!("创建目录失败: {e}"))?;
@@ -478,15 +484,20 @@ impl Kernel {
                     model_res = self.run_model(session, &cfg, &assembled.messages);
                 }
             }
-            let (final_text, finish) = model_res?;
+            let reply = model_res?;
             if session.cancel.load(Ordering::SeqCst) {
                 last_status = "cancelled";
                 break;
             }
-            self.emit(&session.id, EventKind::ModelMessage, json!({"text": final_text, "finish": finish}));
+            self.emit(&session.id, EventKind::ModelMessage, json!({"text": reply.text, "finish": reply.finish}));
 
             // ---- 工具 ----
-            let calls = crate::context::parse::extract(&final_text);
+            // provider 结构化返回的 tool_calls 优先；文本解析只作为兼容回落。
+            let calls = if reply.tool_calls.is_empty() {
+                crate::context::parse::extract(&reply.text)
+            } else {
+                reply.tool_calls.clone()
+            };
             if calls.is_empty() {
                 break;
             }
@@ -577,7 +588,7 @@ impl Kernel {
         session: &Arc<Session>,
         cfg: &Config,
         messages: &[crate::context::Message],
-    ) -> Result<(String, String), String> {
+    ) -> Result<ModelReply, String> {
         let proc = self.plugins.get(&cfg.provider_plugin).map_err(|e| e.to_string())?;
         let params = json!({
             "model": cfg.model,
@@ -591,6 +602,7 @@ impl Kernel {
 
         let mut acc = String::new();
         let mut finish = "stop".to_string();
+        let mut tool_calls: Vec<crate::context::parse::ToolCall> = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(600);
         let mut first = true;
         loop {
@@ -626,6 +638,9 @@ impl Kernel {
                             if let Some(f) = p.get("finish_reason").and_then(|f| f.as_str()) {
                                 finish = f.to_string();
                             }
+                            if let Some(tc) = p.get("tool_calls") {
+                                tool_calls = crate::context::parse::from_value(tc);
+                            }
                             break;
                         }
                         "error" => {
@@ -651,10 +666,10 @@ impl Kernel {
         }
         proc.finish_stream(req);
         *session.active_req.lock() = None;
-        if acc.is_empty() && finish == "stop" {
+        if acc.is_empty() && tool_calls.is_empty() && finish == "stop" {
             finish = "empty".into();
         }
-        Ok((acc, finish))
+        Ok(ModelReply { text: acc, finish, tool_calls })
     }
 
     fn authorize(&self, session: &Arc<Session>, tool: &str) -> Result<bool, String> {
