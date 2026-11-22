@@ -61,9 +61,17 @@ fn golden_parse() {
     for c in &fx.parse {
         let got = parse::extract(&c.input);
         let ok = got.len() == c.expect.len()
-            && got.iter().zip(c.expect.iter()).all(|(g, e)| g.name == e.name && g.arguments == e.arguments);
+            && got
+                .iter()
+                .zip(c.expect.iter())
+                .all(|(g, e)| g.name == e.name && g.arguments == e.arguments);
         if !ok {
-            failed.push(format!("{}: 期望 {:?}，实际 {:?}", c.name, c.expect.iter().map(|e| &e.name).collect::<Vec<_>>(), got));
+            failed.push(format!(
+                "{}: 期望 {:?}，实际 {:?}",
+                c.name,
+                c.expect.iter().map(|e| &e.name).collect::<Vec<_>>(),
+                got
+            ));
         }
     }
     assert!(failed.is_empty(), "golden 解析失败:\n{}", failed.join("\n"));
@@ -93,7 +101,13 @@ fn copy_dir(src: &Path, dst: &Path) {
     }
 }
 
-fn start() -> (Arc<Kernel>, Arc<Server>, thread::JoinHandle<()>, PathBuf, client::Connect) {
+fn start() -> (
+    Arc<Kernel>,
+    Arc<Server>,
+    thread::JoinHandle<()>,
+    PathBuf,
+    client::Connect,
+) {
     let root = std::env::temp_dir().join(format!("fa-golden-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
@@ -101,9 +115,26 @@ fn start() -> (Arc<Kernel>, Arc<Server>, thread::JoinHandle<()>, PathBuf, client
     for b in ["featheragent", "feather-plugin", "feather-storage"] {
         std::fs::copy(debug.join(b), root.join(b)).unwrap();
     }
-    copy_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins"), &root.join("plugins"));
-    let paths = Paths::resolve(&root.join("featheragent"), &Overrides { install_root: Some(root.clone()), ..Default::default() });
-    let kernel = Kernel::new(paths.clone(), Config { sync: "never".into(), ..Default::default() }, true).unwrap();
+    copy_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins"),
+        &root.join("plugins"),
+    );
+    let paths = Paths::resolve(
+        &root.join("featheragent"),
+        &Overrides {
+            install_root: Some(root.clone()),
+            ..Default::default()
+        },
+    );
+    let kernel = Kernel::new(
+        paths.clone(),
+        Config {
+            sync: "never".into(),
+            ..Default::default()
+        },
+        true,
+    )
+    .unwrap();
     let srv = Server::new(kernel.clone(), paths.socket(), Codec::MsgPack);
     let h = {
         let s = srv.clone();
@@ -123,8 +154,14 @@ fn wait_finish(conn: &client::Connect, session: &str) -> Vec<Value> {
     while Instant::now() < deadline {
         match conn.events.recv_timeout(Duration::from_millis(200)) {
             Ok(v) => {
-                let kind = v.pointer("/params/kind").and_then(|x| x.as_str()).unwrap_or("");
-                let sess = v.pointer("/params/payload/session").and_then(|x| x.as_str()).unwrap_or("");
+                let kind = v
+                    .pointer("/params/kind")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                let sess = v
+                    .pointer("/params/payload/session")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
                 if sess == session {
                     seen.push(v.clone());
                     if kind == "chat.finished" {
@@ -143,39 +180,67 @@ fn wait_finish(conn: &client::Connect, session: &str) -> Vec<Value> {
 fn golden_pipeline_replay() {
     let fx = fixtures();
     let (kernel, srv, handle, root, conn) = start();
-    conn.client.call("session.create", json!({"id": "golden"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "golden"}))
+        .unwrap();
     let ws = kernel.paths.workspace.join("golden");
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("golden.txt"), "golden-content").unwrap();
 
     for c in &fx.pipeline {
-        conn.client.call("chat.send", json!({"session": "golden", "text": c.prompt})).unwrap();
+        conn.client
+            .call("chat.send", json!({"session": "golden", "text": c.prompt}))
+            .unwrap();
         let seen = wait_finish(&conn, "golden");
         let model: Vec<String> = seen
             .iter()
             .filter(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("model.message"))
-            .filter_map(|v| v.pointer("/params/payload/text").and_then(|x| x.as_str()).map(|s| s.to_string()))
+            .filter_map(|v| {
+                v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect();
         if let Some(p) = &c.expect_model_prefix {
-            assert!(model.iter().any(|m| m.starts_with(p)), "{}: model={model:?}", c.name);
+            assert!(
+                model.iter().any(|m| m.starts_with(p)),
+                "{}: model={model:?}",
+                c.name
+            );
         }
         if let Some(k) = &c.expect_model_contains {
-            assert!(model.iter().any(|m| m.contains(k)), "{}: model={model:?}", c.name);
+            assert!(
+                model.iter().any(|m| m.contains(k)),
+                "{}: model={model:?}",
+                c.name
+            );
         }
         if let Some(tool) = &c.expect_tool {
             let hit = seen.iter().any(|v| {
                 v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("tool.result")
                     && v.pointer("/params/payload/name").and_then(|x| x.as_str()) == Some(tool)
-                    && v.pointer("/params/payload/result/content").and_then(|x| x.as_str()) == c.expect_tool_content.as_deref()
+                    && v.pointer("/params/payload/result/content")
+                        .and_then(|x| x.as_str())
+                        == c.expect_tool_content.as_deref()
             });
             assert!(hit, "{}: 未找到工具结果", c.name);
         }
         if let Some(m) = &c.expect_final_model {
-            assert!(model.iter().any(|x| x == m), "{}: final model={model:?}", c.name);
+            assert!(
+                model.iter().any(|x| x == m),
+                "{}: final model={model:?}",
+                c.name
+            );
         }
     }
-    let snap = conn.client.call("ctx.inspect", json!({"session": "golden"})).unwrap();
-    let tokens = snap.pointer("/snapshot/stats/total_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+    let snap = conn
+        .client
+        .call("ctx.inspect", json!({"session": "golden"}))
+        .unwrap();
+    let tokens = snap
+        .pointer("/snapshot/stats/total_tokens")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
     assert!(tokens <= 8192 * 95 / 100, "golden 会话预算超 95%: {tokens}");
 
     drop(conn);

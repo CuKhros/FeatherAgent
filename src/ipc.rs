@@ -41,7 +41,9 @@ mod imp {
 
     impl Stream {
         pub fn try_clone(&self) -> io::Result<Stream> {
-            Ok(Stream { inner: self.inner.try_clone()? })
+            Ok(Stream {
+                inner: self.inner.try_clone()?,
+            })
         }
         pub fn shutdown(&self, how: std::net::Shutdown) -> io::Result<()> {
             self.inner.shutdown(how)
@@ -63,7 +65,9 @@ mod imp {
     }
 
     pub fn connect(path: &Path) -> io::Result<Stream> {
-        Ok(Stream { inner: UnixStream::connect(path)? })
+        Ok(Stream {
+            inner: UnixStream::connect(path)?,
+        })
     }
 }
 
@@ -74,15 +78,15 @@ mod imp {
     use std::time::{Duration, Instant};
     use windows_sys::Win32::Foundation::{
         CloseHandle, DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
-        ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
-        GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
+        ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, ReadFile, WriteFile, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW};
     use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcess};
+    use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 
     const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
     const PIPE_TYPE_BYTE: u32 = 0x0000_0000;
@@ -213,7 +217,10 @@ mod imp {
             }
             let name = wide(&pipe_name(path));
             let pending = fresh_instance(&name)?;
-            Ok(Self { name, pending: Some(pending) })
+            Ok(Self {
+                name,
+                pending: Some(pending),
+            })
         }
 
         pub fn accept(&mut self) -> io::Result<Stream> {
@@ -227,7 +234,9 @@ mod imp {
                         // 先补下一个监听实例，允许 TUI/WebUI/观察者并发连接。
                         // 补实例失败也不丢弃已建立的连接；下一次 accept 会再补。
                         self.pending = fresh_instance(&self.name).ok();
-                        return Ok(Stream { inner: Arc::new(PipeHandle { handle }) });
+                        return Ok(Stream {
+                            inner: Arc::new(PipeHandle { handle }),
+                        });
                     }
                     Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => {
                         // 客户端连上后立刻断开：复位实例并把错误交回 accept 循环。
@@ -267,7 +276,9 @@ mod imp {
             if ok == 0 {
                 return Err(io::Error::last_os_error());
             }
-            Ok(Stream { inner: Arc::new(PipeHandle { handle: dup }) })
+            Ok(Stream {
+                inner: Arc::new(PipeHandle { handle: dup }),
+            })
         }
 
         pub fn shutdown(&self, _how: std::net::Shutdown) -> io::Result<()> {
@@ -355,7 +366,9 @@ mod imp {
                 )
             };
             if h != INVALID_HANDLE_VALUE && h != 0 {
-                return Ok(Stream { inner: Arc::new(PipeHandle { handle: h }) });
+                return Ok(Stream {
+                    inner: Arc::new(PipeHandle { handle: h }),
+                });
             }
             let err = unsafe { GetLastError() };
             if err == ERROR_PIPE_BUSY {
@@ -372,9 +385,9 @@ mod imp {
     }
 }
 
-pub use imp::{connect, Listener, Stream};
 #[cfg(windows)]
 pub use imp::pipe_name;
+pub use imp::{connect, Listener, Stream};
 
 /// 前端可读的实际端点：Unix 是 socket 路径，Windows 是 `\\.\pipe\...`。
 pub fn endpoint(path: &Path) -> String {

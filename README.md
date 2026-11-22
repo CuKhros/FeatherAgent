@@ -61,7 +61,7 @@ cargo build --release --bins
 ./target/release/featheragent-webui --root . --app    # WebUI（Chromium --app 独立窗口）
 ```
 
-出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。
+出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度与上下文参数，保存后经 `config.set` 即时应用。
 
 三产物打包：`scripts/package.sh`，输出 `dist/*.tar.gz` + `sha256` + manifest；体积门禁（内核 ≤ 8 MiB）在脚本内断言。
 
@@ -69,7 +69,7 @@ cargo build --release --bins
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.1.4-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.1.5-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -81,7 +81,7 @@ cargo build --release --bins
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.md)。
 
-## 平台门禁差异（v1.1.4）
+## 平台门禁差异（v1.1.5）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -99,7 +99,8 @@ cargo build --release --bins
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
-- **[v1.1.4 Windows 修复对照](docs/v1.1.4-Windows修复说明.md)** —— v1.1.3 复测 NEW-A～NEW-D 与 WebUI 更名的根因、修法与验证状态
+- **[v1.1.5 Windows 修复对照](docs/v1.1.5-Windows修复说明.md)** —— v1.1.4 复测 NEW-E～NEW-G、工具熔断粒度与 WebUI/TUI 设置页
+- **[v1.1.4 Windows 修复对照](docs/v1.1.4-Windows修复说明.md)** —— v1.1.3 复测 NEW-A～NEW-D 与 WebUI 更名
 - **[v1.1.3 Windows 修复对照](docs/v1.1.3-Windows修复说明.md)** —— 上一轮 NEW-1～NEW-4 的修复记录
 - **[v1.1.2 Windows 修复对照](docs/v1.1.2-Windows修复说明.md)** —— 上一轮 BUG-1～BUG-9 的修复记录
 
@@ -107,11 +108,11 @@ cargo build --release --bins
 
 ## 状态
 
-`v1.1.4` 是针对 v1.1.3 Windows 复测报告的修复版：`chat` 新增 `--allow` / `--yes` / `--confirm-timeout`，dangerous 工具可在受信脚本中显式放行；权限拒绝作为结构化 tool 结果回注，模型能解释“为什么没执行”；空响应自动重试一次；当前 Web 前端正式更名 **WebUI**，二进制为 `featheragent-webui`，旧 `gui` 命令保留兼容别名。Linux 自动化测试全绿。
+`v1.1.5` 是针对 v1.1.4 Windows 复测报告的修复版：区分工具业务错误与插件崩溃（`tool.error` / `tool.degraded`），按工具熔断；归一化 `/workspace/...` 路径；WebUI 与 TUI 均新增设置页，可配置 Provider、Base URL、模型、温度、上下文窗口与回合上限，保存后经 `config.set` 即时应用到内核。Linux 自动化测试 **65/65** 通过。
 
 已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、WebUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、三产物打包与解压运行、1000 次日志随机截断恢复。
 
-Windows x64：v1.1.3 真机复测确认 NEW-1～NEW-3 已修（工具闭环首次跑通，bench 6/6 全绿）；v1.1.4 处理新暴露的权限授权/拒绝回注/空响应重试与 WebUI 更名。v1.1.4 仍需真机复测；Wine 只能做基本冒烟，不能复现真实 Windows 的管道/ConPTY/代理环境。
+Windows x64：v1.1.3 真机复测确认 NEW-1～NEW-3 已修；v1.1.4 确认 NEW-A～NEW-D 已修，并暴露 NEW-E～NEW-G；v1.1.5 修复工具失败链路与路径语义，并加入设置页。v1.1.5 仍需真机复测；Wine 只能做基本冒烟，不能复现真实 Windows 的管道/ConPTY/代理环境。
 
 未实测：真实 Ollama / 7B 模型指标（S3）、Windows 实机、macOS、四平台 × 双架构矩阵。详见验证报告。
 

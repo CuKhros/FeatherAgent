@@ -340,10 +340,11 @@ Segment 文件：data/sessions/<session_id>/<first_seq:016x>.log
 | 场景 | 事件 | 循环行为 | 用户可见 |
 |---|---|---|---|
 | 主动取消 | `tool.cancelled`（终态） | 中止本轮，下轮注入"已取消" | 中止提示 |
-| 插件崩溃 | `tool.failed(crash)` | **重试 1 次** → 仍失败则本轮标记该工具不可用，**继续推理** | 告警条 |
-| 持续崩溃 | `plugin.degraded` | 连续 3 次熔断该插件 | 插件页标红 |
+| 业务错误（路径越界/缺参数/文件不存在） | `tool.error` | **不重启、不计熔断**；结果回注，模型下一轮修正 | 工具卡片标“业务错误” |
+| 插件崩溃 / 超时 / IO 故障 | `tool.failed(crash)` | **重试 1 次** → 仍失败则按该工具记一次技术失败，**继续推理** | 告警条 |
+| 同一工具持续技术失败 | `tool.degraded` | 连续 3 次只熔断该工具，从 tools schema 移除，并注入“不要输出 tool_call 语法” | 工具页标红 |
 
-> 原则：**崩溃不中止会话**。小模型下工具失败是常态，中止的体验代价远大于降级续跑。
+> 原则：**业务失败不等于插件崩溃，崩溃不中止会话**。小模型下工具失败是常态，中止的体验代价远大于降级续跑。
 
 ---
 
@@ -444,7 +445,7 @@ chat.send / cancel
 event.subscribe(kinds)            // 服务端推送，SSE 或 WS
 tool.confirm / deny
 ctx.inspect                       // 预算占用、压缩摘要、召回条目
-config.get / set(path, value)      // 含三类路径与配额
+config.get / set(patch)           // 整体配置；provider.models 单独发现模型
 storage.stats / gc(run|dry)
 plugin.list / enable / disable / install
 ```
@@ -454,11 +455,11 @@ plugin.list / enable / disable / install
   | 段 | 实现 | 归属 |
   |---|---|---|
   | 内核 ←→ 前端 | **仅 UDS / 命名管道** | 内核 |
-  | 浏览器 ←→ GUI 桥 | HTTP + WebSocket | **GUI 包的启动器** `featheragent-gui`，不是内核 |
+  | 浏览器 ←→ WebUI 桥 | HTTP + WebSocket | **WebUI 包的启动器** `featheragent-webui`，不是内核 |
 
   > **内核不实现任何 HTTP/WebSocket 服务。** 否则要拉 `tokio` 全量 + `tungstenite`，
   > **8 MB 体积预算与 §10.1 的 `mio` 选型会同时破功**。
-  > GUI 包内的 `featheragent-gui`（独立小二进制）职责：拉起内核 → 连 UDS →
+  > WebUI 包内的 `featheragent-webui`（独立小二进制）职责：拉起内核 → 连 UDS →
   > 在 `127.0.0.1:<随机端口>` 提供静态资源 + WS → 双向桥接。
 
 - **桥接端安全（必须，非可选）**：
@@ -476,8 +477,8 @@ plugin.list / enable / disable / install
 | 前端 | 分发 | 实现 | 体积 |
 |---|---|---|---|
 | **TUI** | **随主包** | `ratatui` + `crossterm` | ~3 MB |
-| **GUI（默认形态）** | **独立包** | Web 前端（Svelte/Preact + htm）+ **`featheragent-gui` 桥接器**（静态资源 + WS，**不在内核**）+ 浏览器 `--app` 窗口 | 静态资源 ~1.5 MB（gzip） |
-| **GUI（原生壳变体）** | 独立包（可选） | `wry`（WebView2 / WKWebView / WebKitGTK）+ 同一套 Web 资源 | +3~5 MB |
+| **WebUI（默认形态）** | **独立包** | Web 前端 + **`featheragent-webui` 桥接器**（静态资源 + WS，**不在内核**）+ 浏览器 `--app` 窗口 | 静态资源 ~1.5 MB（gzip） |
+| **原生 GUI 插件（后续）** | 独立插件 | 原生壳（`wry` / WebView2 等）+ 前端契约 | +3~5 MB |
 
 **为什么 GUI 默认不捆绑 WebView 运行时：**
 
@@ -502,21 +503,21 @@ plugin.list / enable / disable / install
 > **承诺边界（与 Ollama 同理）**：浏览器是**第三方程序**，它自身的 crashpad / 更新器
 > 仍可能触及用户目录，**不在「零写入」承诺范围内**。
 > CI 审计把浏览器进程树列为**外部程序白名单**（单独统计、不判失败），
-> 但必须断言「`runtime/gui-profile` 存在且确实被该浏览器使用」。
+> 但必须断言「`runtime/webui-profile` 存在且确实被该浏览器使用」。
 
-**GUI 独立分发的好处：**
+**WebUI 独立分发的好处：**
 - 开箱包保持 ≤ 100 MiB，GUI 不背在主包里
 - GUI 迭代节奏与内核解耦（改 UI 不必发内核）
 - 第三方可基于前端契约做自己的前端（VS Code 插件、Web 面板、移动端）
 
-### 7.4 GUI 功能（首版即做）
+### 7.4 WebUI 功能（v1.1.5）
 
 三栏布局：
 - 左：会话列表 + preset 切换
 - 中：对话流（Markdown、工具卡片可展开看参数/结果、耗时与 token 角标）
 - 右：**上下文面板**（预算占用条、压缩摘要可 pin、记忆召回、**存储占用与配额**）
 
-设置页：三类路径（含工作空间迁移向导）、配额、卷类型健康检查、插件管理。
+设置页（v1.1.5）：Provider 插件、Base URL、模型（`provider.models` 发现，可手填）、温度、上下文窗口、`max_turns`、`auto_allow_safe`；保存经 `config.set` 原子写 `data/config.json` 并即时应用。TUI 同样提供 `/settings` 页面。三类路径迁移、配额、卷类型健康检查、插件管理仍待后续。
 
 ---
 

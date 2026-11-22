@@ -44,9 +44,7 @@ fn connect(u: &Url) -> Result<TcpStream, String> {
     // 需要代理的远程模型请显式使用可代理的传输层，不要依赖环境变量。
     let addr = format!("{}:{}", u.host, u.port);
     let stream = TcpStream::connect(&addr).map_err(|e| format!("连接 {addr} 失败: {e}"))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(300)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(300))).ok();
     Ok(stream)
 }
 
@@ -105,13 +103,19 @@ fn read_head<R: BufRead>(r: &mut R) -> Result<Head, String> {
     Ok(Head { status, headers })
 }
 
-fn read_exact_body<R: BufRead>(r: &mut R, headers: &HashMap<String, String>) -> Result<Vec<u8>, String> {
+fn read_exact_body<R: BufRead>(
+    r: &mut R,
+    headers: &HashMap<String, String>,
+) -> Result<Vec<u8>, String> {
     if let Some(enc) = headers.get("transfer-encoding") {
         if enc.contains("chunked") {
             return read_chunked(r);
         }
     }
-    if let Some(len) = headers.get("content-length").and_then(|s| s.parse::<usize>().ok()) {
+    if let Some(len) = headers
+        .get("content-length")
+        .and_then(|s| s.parse::<usize>().ok())
+    {
         let mut buf = vec![0u8; len];
         r.read_exact(&mut buf).map_err(|e| e.to_string())?;
         return Ok(buf);
@@ -127,7 +131,8 @@ fn read_chunked<R: BufRead>(r: &mut R) -> Result<Vec<u8>, String> {
         let mut size_line = String::new();
         r.read_line(&mut size_line).map_err(|e| e.to_string())?;
         let hex = size_line.trim().split(';').next().unwrap_or("");
-        let size = usize::from_str_radix(hex, 16).map_err(|_| format!("非法 chunk 长度 {hex:?}"))?;
+        let size =
+            usize::from_str_radix(hex, 16).map_err(|_| format!("非法 chunk 长度 {hex:?}"))?;
         if size == 0 {
             // trailers
             loop {
@@ -149,8 +154,14 @@ fn read_chunked<R: BufRead>(r: &mut R) -> Result<Vec<u8>, String> {
 }
 
 pub fn get_json(url: &str) -> Result<Response, String> {
+    get_json_timeout(url, Duration::from_secs(300))
+}
+
+/// 模型列表探测等交互式查询必须快速失败，不能占用设置页 5 分钟。
+pub fn get_json_timeout(url: &str, timeout: Duration) -> Result<Response, String> {
     let u = parse_url(url)?;
     let mut s = connect(&u)?;
+    s.set_read_timeout(Some(timeout)).ok();
     let req = format!(
         "GET {} HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
         u.path, u.host, u.port
@@ -159,15 +170,24 @@ pub fn get_json(url: &str) -> Result<Response, String> {
     let mut r = BufReader::new(s);
     let head = read_head(&mut r)?;
     let body = read_exact_body(&mut r, &head.headers)?;
-    Ok(Response { status: head.status, headers: head.headers, body })
+    Ok(Response {
+        status: head.status,
+        headers: head.headers,
+        body,
+    })
 }
 
 pub fn post_json(url: &str, body: &serde_json::Value) -> Result<Response, String> {
     let u = parse_url(url)?;
     let body = serde_json::to_vec(body).map_err(|e| e.to_string())?;
     let mut s = connect(&u)?;
-    s.write_all(&build(&format!("{}:{}", u.host, u.port), &u.path, &body, false))
-        .map_err(|e| e.to_string())?;
+    s.write_all(&build(
+        &format!("{}:{}", u.host, u.port),
+        &u.path,
+        &body,
+        false,
+    ))
+    .map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
     let head = read_head(&mut r)?;
     let body = read_exact_body(&mut r, &head.headers)?;
@@ -179,20 +199,33 @@ pub fn post_json(url: &str, body: &serde_json::Value) -> Result<Response, String
 }
 
 /// 逐行读取流式响应（NDJSON / SSE 均可），对 chunked 透明。
-pub fn stream_post_lines<F>(url: &str, body: &serde_json::Value, mut on_line: F) -> Result<(), String>
+pub fn stream_post_lines<F>(
+    url: &str,
+    body: &serde_json::Value,
+    mut on_line: F,
+) -> Result<(), String>
 where
     F: FnMut(&str) -> bool, // 返回 false 表示停止
 {
     let u = parse_url(url)?;
     let body = serde_json::to_vec(body).map_err(|e| e.to_string())?;
     let mut s = connect(&u)?;
-    s.write_all(&build(&format!("{}:{}", u.host, u.port), &u.path, &body, true))
-        .map_err(|e| e.to_string())?;
+    s.write_all(&build(
+        &format!("{}:{}", u.host, u.port),
+        &u.path,
+        &body,
+        true,
+    ))
+    .map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
     let head = read_head(&mut r)?;
     if head.status >= 400 {
         let b = read_exact_body(&mut r, &head.headers)?;
-        return Err(format!("HTTP {}: {}", head.status, String::from_utf8_lossy(&b)));
+        return Err(format!(
+            "HTTP {}: {}",
+            head.status,
+            String::from_utf8_lossy(&b)
+        ));
     }
     let chunked = head
         .headers
@@ -207,7 +240,10 @@ where
     Ok(())
 }
 
-fn read_plain_lines<R: BufRead, F: FnMut(&str) -> bool>(r: &mut R, on_line: &mut F) -> Result<(), String> {
+fn read_plain_lines<R: BufRead, F: FnMut(&str) -> bool>(
+    r: &mut R,
+    on_line: &mut F,
+) -> Result<(), String> {
     let mut buf = String::new();
     loop {
         buf.clear();
@@ -222,7 +258,10 @@ fn read_plain_lines<R: BufRead, F: FnMut(&str) -> bool>(r: &mut R, on_line: &mut
     Ok(())
 }
 
-fn read_chunked_lines<R: BufRead, F: FnMut(&str) -> bool>(r: &mut R, on_line: &mut F) -> Result<(), String> {
+fn read_chunked_lines<R: BufRead, F: FnMut(&str) -> bool>(
+    r: &mut R,
+    on_line: &mut F,
+) -> Result<(), String> {
     // 必须以**字节**累积：HTTP chunk 边界可能切断多字节 UTF-8（中文/emoji），
     // 逐 chunk 做 from_utf8_lossy 会造成乱码。
     let mut carry: Vec<u8> = Vec::new();
@@ -233,7 +272,8 @@ fn read_chunked_lines<R: BufRead, F: FnMut(&str) -> bool>(r: &mut R, on_line: &m
         if hex.is_empty() {
             break;
         }
-        let size = usize::from_str_radix(hex, 16).map_err(|_| format!("非法 chunk 长度 {hex:?}"))?;
+        let size =
+            usize::from_str_radix(hex, 16).map_err(|_| format!("非法 chunk 长度 {hex:?}"))?;
         if size == 0 {
             let mut t = String::new();
             loop {

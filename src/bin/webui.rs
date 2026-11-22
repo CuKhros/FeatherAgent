@@ -60,9 +60,10 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if let Err(e) = rpc_conn
-        .client
-        .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
+    if let Err(e) =
+        rpc_conn
+            .client
+            .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
     {
         eprintln!("内核未就绪（{socket:?}）: {e}");
         std::process::exit(2);
@@ -132,7 +133,9 @@ struct Req {
 
 impl Req {
     fn header(&self, name: &str) -> Option<&str> {
-        self.headers.get(&name.to_ascii_lowercase()).map(|s| s.as_str())
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(|s| s.as_str())
     }
 }
 
@@ -143,11 +146,17 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Req> {
     let header_end = loop {
         let n = stream.read(&mut tmp)?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "eof",
+            ));
         }
         buf.extend_from_slice(&tmp[..n]);
         if buf.len() > 64 * 1024 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "header too large"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "header too large",
+            ));
         }
         if let Some(p) = find_sub(&buf, b"\r\n\r\n") {
             break p + 4;
@@ -177,7 +186,10 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Req> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     if len > 1024 * 1024 {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "body too large"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "body too large",
+        ));
     }
     let mut body = buf[header_end..].to_vec();
     while body.len() < len {
@@ -188,7 +200,13 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Req> {
         body.extend_from_slice(&tmp[..n]);
     }
     body.truncate(len);
-    Ok(Req { method, path, query, headers, body })
+    Ok(Req {
+        method,
+        path,
+        query,
+        headers,
+        body,
+    })
 }
 
 fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -226,29 +244,53 @@ fn urldecode(s: &str) -> String {
 
 fn host_ok(req: &Req, port: u16) -> bool {
     let allowed = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
-    let host_ok = req.header("host").map(|h| allowed.iter().any(|a| a.eq_ignore_ascii_case(h))).unwrap_or(false);
+    let host_ok = req
+        .header("host")
+        .map(|h| allowed.iter().any(|a| a.eq_ignore_ascii_case(h)))
+        .unwrap_or(false);
     if !host_ok {
         return false;
     }
     match req.header("origin") {
         None => true,
-        Some(o) => [format!("http://127.0.0.1:{port}"), format!("http://localhost:{port}")]
-            .iter()
-            .any(|a| a.eq_ignore_ascii_case(o)),
+        Some(o) => [
+            format!("http://127.0.0.1:{port}"),
+            format!("http://localhost:{port}"),
+        ]
+        .iter()
+        .any(|a| a.eq_ignore_ascii_case(o)),
     }
 }
 
 fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     let req = read_request(&mut stream)?;
     if !host_ok(&req, ctx.port) {
-        return respond(&mut stream, 403, "text/plain; charset=utf-8", b"forbidden host/origin");
+        return respond(
+            &mut stream,
+            403,
+            "text/plain; charset=utf-8",
+            b"forbidden host/origin",
+        );
     }
     match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/") | ("GET", "/index.html") => {
-            respond(&mut stream, 200, "text/html; charset=utf-8", INDEX_HTML.as_bytes())
-        }
-        ("GET", "/app.js") => respond(&mut stream, 200, "application/javascript; charset=utf-8", APP_JS.as_bytes()),
-        ("GET", "/style.css") => respond(&mut stream, 200, "text/css; charset=utf-8", STYLE_CSS.as_bytes()),
+        ("GET", "/") | ("GET", "/index.html") => respond(
+            &mut stream,
+            200,
+            "text/html; charset=utf-8",
+            INDEX_HTML.as_bytes(),
+        ),
+        ("GET", "/app.js") => respond(
+            &mut stream,
+            200,
+            "application/javascript; charset=utf-8",
+            APP_JS.as_bytes(),
+        ),
+        ("GET", "/style.css") => respond(
+            &mut stream,
+            200,
+            "text/css; charset=utf-8",
+            STYLE_CSS.as_bytes(),
+        ),
         ("GET", "/events") => {
             let Some(t) = query_get(&req.query, "token") else {
                 return respond(&mut stream, 401, "text/plain", b"missing token");
@@ -296,15 +338,32 @@ fn rpc(mut stream: TcpStream, req: Req, ctx: Arc<Ctx>) -> std::io::Result<()> {
     let auth = req.header("authorization").unwrap_or("");
     let token = auth.strip_prefix("Bearer ").unwrap_or("");
     if token != ctx.token {
-        return respond(&mut stream, 401, "application/json", br#"{"error":"bad token"}"#);
+        return respond(
+            &mut stream,
+            401,
+            "application/json",
+            br#"{"error":"bad token"}"#,
+        );
     }
     let v: Value = match serde_json::from_slice(&req.body) {
         Ok(v) => v,
-        Err(_) => return respond(&mut stream, 400, "application/json", br#"{"error":"bad json"}"#),
+        Err(_) => {
+            return respond(
+                &mut stream,
+                400,
+                "application/json",
+                br#"{"error":"bad json"}"#,
+            )
+        }
     };
     let id = v.get("id").cloned().unwrap_or(Value::Null);
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
-        return respond(&mut stream, 400, "application/json", br#"{"error":"method required"}"#);
+        return respond(
+            &mut stream,
+            400,
+            "application/json",
+            br#"{"error":"method required"}"#,
+        );
     };
     let params = v.get("params").cloned().unwrap_or(json!({}));
     let reply = {
@@ -334,7 +393,10 @@ fn stream_sse(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     loop {
         match conn.events.recv_timeout(Duration::from_secs(15)) {
             Ok(v) => {
-                let line = format!("data: {}\n\n", serde_json::to_string(&v).unwrap_or_default());
+                let line = format!(
+                    "data: {}\n\n",
+                    serde_json::to_string(&v).unwrap_or_default()
+                );
                 if stream.write_all(line.as_bytes()).is_err() {
                     break;
                 }
@@ -359,10 +421,16 @@ fn ws_bridge(mut stream: TcpStream, req: Req, ctx: Arc<Ctx>) -> std::io::Result<
         Some(k) => k.to_string(),
         None => return respond(&mut stream, 400, "text/plain", b"missing sec-websocket-key"),
     };
-    if !req.header("upgrade").map(|u| u.eq_ignore_ascii_case("websocket")).unwrap_or(false) {
+    if !req
+        .header("upgrade")
+        .map(|u| u.eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false)
+    {
         return respond(&mut stream, 400, "text/plain", b"not a websocket upgrade");
     }
-    let accept = base64(&sha1(format!("{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11").as_bytes()));
+    let accept = base64(&sha1(
+        format!("{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11").as_bytes(),
+    ));
     let head = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
     );
@@ -408,7 +476,9 @@ fn ws_bridge(mut stream: TcpStream, req: Req, ctx: Arc<Ctx>) -> std::io::Result<
             Err(_) => continue,
         };
         let id = v.get("id").cloned();
-        let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+        let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+            continue;
+        };
         let params = v.get("params").cloned().unwrap_or(json!({}));
         let reply = match conn.client.call(method, params) {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
@@ -443,7 +513,10 @@ fn read_ws_text(stream: &mut TcpStream) -> std::io::Result<Option<String>> {
             len = u64::from_be_bytes(b);
         }
         if len > 1024 * 1024 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "ws frame too large"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ws frame too large",
+            ));
         }
         let mut mask = [0u8; 4];
         if masked {
@@ -476,11 +549,26 @@ fn read_ws_text(stream: &mut TcpStream) -> std::io::Result<Option<String>> {
                             l2 = u64::from_be_bytes(b);
                         }
                         if l2 > 1024 * 1024 || op2 != 0x0 {
-                            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad fragment"));
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "bad fragment",
+                            ));
                         }
-                        let mut p2 = vec![0u8; l2 as usize];
-                        stream.read_exact(&mut p2)?;
-                        all.extend_from_slice(&p2);
+                        let masked2 = h2[1] & 0x80 != 0;
+                        if masked2 {
+                            let mut m2 = [0u8; 4];
+                            stream.read_exact(&mut m2)?;
+                            let mut p2 = vec![0u8; l2 as usize];
+                            stream.read_exact(&mut p2)?;
+                            for (i, b) in p2.iter_mut().enumerate() {
+                                *b ^= m2[i % 4];
+                            }
+                            all.extend_from_slice(&p2);
+                        } else {
+                            let mut p2 = vec![0u8; l2 as usize];
+                            stream.read_exact(&mut p2)?;
+                            all.extend_from_slice(&p2);
+                        }
                         if fin2 {
                             break;
                         }
@@ -533,10 +621,22 @@ fn launch_browser(url: &str, profile: &PathBuf) {
     ];
     #[cfg(windows)]
     let candidates: Vec<(String, bool)> = vec![
-        (r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(), true),
-        (r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe".into(), true),
-        (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".into(), true),
-        (r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".into(), true),
+        (
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
+            true,
+        ),
+        (
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe".into(),
+            true,
+        ),
+        (
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".into(),
+            true,
+        ),
+        (
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".into(),
+            true,
+        ),
         ("chrome.exe".into(), true),
         ("msedge.exe".into(), true),
         ("chromium.exe".into(), true),
@@ -572,11 +672,19 @@ fn launch_browser(url: &str, profile: &PathBuf) {
                 .arg("--window-size=1280,800");
         } else {
             // Firefox 无 app 模式；独立 profile 目录同样隔离
-            cmd.arg("--new-window").arg(url).arg("--profile").arg(profile);
+            cmd.arg("--new-window")
+                .arg(url)
+                .arg("--profile")
+                .arg(profile);
         }
         match cmd.spawn() {
             Ok(child) => {
-                println!("已启动 WebUI（{}，pid {}，profile {}）", bin, child.id(), profile.display());
+                println!(
+                    "已启动 WebUI（{}，pid {}，profile {}）",
+                    bin,
+                    child.id(),
+                    profile.display()
+                );
                 return;
             }
             Err(e) => eprintln!("启动 {bin} 失败: {e}"),
@@ -589,6 +697,9 @@ fn launch_browser(url: &str, profile: &PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
 
     #[test]
     fn urldecode_basic() {
@@ -598,6 +709,40 @@ mod tests {
     #[test]
     fn static_assets_nonempty() {
         assert!(INDEX_HTML.contains("FeatherAgent"));
+        assert!(INDEX_HTML.contains("settings-page"));
+        assert!(INDEX_HTML.contains("cfg-temperature"));
         assert!(APP_JS.contains("EventSource"));
+        assert!(APP_JS.contains("provider.models"));
+        assert!(APP_JS.contains("RPC 超时"));
+        assert!(APP_JS.contains("config.set"));
+    }
+
+    fn masked_frame(opcode: u8, fin: bool, text: &str) -> Vec<u8> {
+        let payload = text.as_bytes();
+        assert!(payload.len() <= 125);
+        let mut out = Vec::new();
+        out.push(if fin { 0x80 } else { 0 } | opcode);
+        out.push(0x80 | payload.len() as u8);
+        let mask = [0x12u8, 0x34, 0x56, 0x78];
+        out.extend_from_slice(&mask);
+        for (i, b) in payload.iter().enumerate() {
+            out.push(*b ^ mask[i % 4]);
+        }
+        out
+    }
+
+    #[test]
+    fn fragmented_masked_text_is_reassembled() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.write_all(&masked_frame(0x1, false, "hello ")).unwrap();
+            s.write_all(&masked_frame(0x0, true, "world")).unwrap();
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        let got = read_ws_text(&mut client).unwrap();
+        assert_eq!(got.as_deref(), Some("hello world"));
+        server.join().unwrap();
     }
 }

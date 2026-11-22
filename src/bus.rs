@@ -189,7 +189,12 @@ mod tests {
         let bus = Bus::new(8);
         let mut s = bus.subscribe(None);
         for i in 0..20u64 {
-            bus.publish(Arc::new(Event::new(i + 1, i, EventKind::UserMessage, serde_json::json!({}))));
+            bus.publish(Arc::new(Event::new(
+                i + 1,
+                i,
+                EventKind::UserMessage,
+                serde_json::json!({}),
+            )));
         }
         let out = bus.poll(&mut s);
         assert!(out.lagged > 0, "lagged={}", out.lagged);
@@ -199,7 +204,12 @@ mod tests {
     #[test]
     fn subscriber_sees_only_events_after_subscribe() {
         let bus = Bus::new(64);
-        bus.publish(Arc::new(Event::new(1, 1, EventKind::UserMessage, serde_json::json!({}))));
+        bus.publish(Arc::new(Event::new(
+            1,
+            1,
+            EventKind::UserMessage,
+            serde_json::json!({}),
+        )));
         let mut s = bus.subscribe(None);
         let out = bus.poll(&mut s);
         assert!(out.events.is_empty());

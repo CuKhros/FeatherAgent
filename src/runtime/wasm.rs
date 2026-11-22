@@ -66,8 +66,14 @@ impl WasmRuntime {
     }
 
     /// 执行一个模块的 `run` 导出，返回它 emit 的事件与日志。
-    pub fn run(&self, wasm: &[u8], input: &Value, cfg: &WasmCfg) -> Result<(Vec<EmittedEvent>, Vec<String>), WasmError> {
-        let module = Module::new(&self.engine, wasm).map_err(|e| WasmError::Compile(e.to_string()))?;
+    pub fn run(
+        &self,
+        wasm: &[u8],
+        input: &Value,
+        cfg: &WasmCfg,
+    ) -> Result<(Vec<EmittedEvent>, Vec<String>), WasmError> {
+        let module =
+            Module::new(&self.engine, wasm).map_err(|e| WasmError::Compile(e.to_string()))?;
         let mut store = Store::new(&self.engine, HostState::default());
         // wasmi 0.31 的语义：向 store 注入燃料，执行时逐指令消耗
         store
@@ -93,7 +99,10 @@ impl WasmRuntime {
                         .or_else(|| caller.get_export("memory").and_then(|e| e.into_memory()));
                     if let Some(mem) = mem {
                         let data = read_bytes(&mut caller, mem, ptr, len);
-                        caller.data_mut().logs.push(String::from_utf8_lossy(&data).to_string());
+                        caller
+                            .data_mut()
+                            .logs
+                            .push(String::from_utf8_lossy(&data).to_string());
                     }
                 },
             )
@@ -117,9 +126,13 @@ impl WasmRuntime {
                         .or_else(|| caller.get_export("memory").and_then(|e| e.into_memory()));
                     if let Some(mem) = mem {
                         let data = read_bytes(&mut caller, mem, ptr, len);
-                        let payload: Value = serde_json::from_slice(&data)
-                            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&data).to_string()));
-                        caller.data_mut().emitted.push(EmittedEvent { kind: k, payload });
+                        let payload: Value = serde_json::from_slice(&data).unwrap_or_else(|_| {
+                            Value::String(String::from_utf8_lossy(&data).to_string())
+                        });
+                        caller
+                            .data_mut()
+                            .emitted
+                            .push(EmittedEvent { kind: k, payload });
                     }
                 },
             )

@@ -68,7 +68,11 @@ fn main() {
     loop {
         match read_frame(&mut lock, codec) {
             Ok(Some(v)) => {
-                let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                let method = v
+                    .get("method")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let id = v.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
                 let params = v.get("params").cloned().unwrap_or(Value::Null);
                 if method == "$/cancel" {
@@ -126,7 +130,13 @@ fn manifest(role: &str) -> PluginManifest {
     }
 }
 
-fn handle(role: &str, method: &str, params: &Value, id: u64, io: &Arc<Io>) -> Option<(i64, String)> {
+fn handle(
+    role: &str,
+    method: &str,
+    params: &Value,
+    id: u64,
+    io: &Arc<Io>,
+) -> Option<(i64, String)> {
     if method == "initialize" {
         io.respond(id, serde_json::to_value(manifest(role)).unwrap());
         return None;
@@ -155,6 +165,7 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             "name": "mock",
             "capabilities": ["chat", "stream", "tools", "embed"],
             "model": params.get("model").cloned().unwrap_or(json!("mock-7b")),
+            "models": [params.get("model").cloned().unwrap_or(json!("mock-7b"))],
             "context_window": 8192,
         })),
         "embed" => {
@@ -175,7 +186,13 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                 let data = std::env::var("FEATHER_DATA").unwrap_or_else(|_| "/tmp".into());
                 let marker = std::path::Path::new(&data).join(".crash_once");
                 if marker.exists() {
-                    return Ok((format!("restarted: {}", last_user.chars().take(20).collect::<String>()), 0));
+                    return Ok((
+                        format!(
+                            "restarted: {}",
+                            last_user.chars().take(20).collect::<String>()
+                        ),
+                        0,
+                    ));
                 }
                 let _ = std::fs::create_dir_all(&data);
                 let _ = std::fs::write(&marker, b"1");
@@ -207,12 +224,20 @@ fn ok_chat_stream<F>(params: &Value, io: &Arc<Io>, req: u64, f: F) -> Result<Val
 where
     F: FnOnce(&str, bool) -> Result<(String, u64), String>,
 {
-    let messages = params.get("messages").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+    let messages = params
+        .get("messages")
+        .and_then(|m| m.as_array())
+        .cloned()
+        .unwrap_or_default();
     let last_user = messages
         .iter()
         .rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        .and_then(|m| m.get("content").and_then(|c| c.as_str()).map(|s| s.to_string()))
+        .and_then(|m| {
+            m.get("content")
+                .and_then(|c| c.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_default();
     let last_is_tool = messages
         .last()
@@ -237,7 +262,11 @@ where
     if delay_ms > 0 && !text.is_empty() {
         thread::sleep(Duration::from_millis(delay_ms));
     }
-    if params.get("stream").and_then(|s| s.as_bool()).unwrap_or(true) {
+    if params
+        .get("stream")
+        .and_then(|s| s.as_bool())
+        .unwrap_or(true)
+    {
         // 按字符切块：按字节切会把中文/emoji 的多字节序列切断成乱码
         let chars: Vec<char> = text.chars().collect();
         for chunk in chars.chunks(16) {
@@ -263,17 +292,50 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
         .unwrap_or("http://127.0.0.1:11434")
         .trim_end_matches('/')
         .to_string();
-    let model = params.get("model").and_then(|m| m.as_str()).unwrap_or("qwen2.5:7b");
+    let model = params
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("qwen2.5:7b");
     let req = params.get("req").and_then(|x| x.as_u64()).unwrap_or(id);
     match method {
         "probe" => {
-            let r = net::get_json(&format!("{base}/api/tags"))?;
-            let models = r.json().ok();
+            let openai = base.contains("/v1");
+            let url = if openai {
+                format!("{base}/models")
+            } else {
+                format!("{base}/api/tags")
+            };
+            let r = net::get_json_timeout(&url, std::time::Duration::from_secs(5))?;
+            let v: Value = r.json()?;
+            let mut models = Vec::new();
+            if openai {
+                for m in v
+                    .get("data")
+                    .and_then(|x| x.as_array())
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(id) = m.get("id").and_then(|x| x.as_str()) {
+                        models.push(Value::String(id.to_string()));
+                    }
+                }
+            } else {
+                for m in v
+                    .get("models")
+                    .and_then(|x| x.as_array())
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(name) = m.get("name").and_then(|x| x.as_str()) {
+                        models.push(Value::String(name.to_string()));
+                    }
+                }
+            }
             Ok(json!({
                 "name": "ollama",
                 "capabilities": ["chat", "stream", "tools", "embed", "fim"],
                 "base_url": base,
-                "models": models.and_then(|v| v.get("models").cloned()).unwrap_or(Value::Null),
+                "models": models,
             }))
         }
         "embed" => {
@@ -283,7 +345,11 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                 &json!({"model": model, "input": text}),
             )?;
             let v = r.json()?;
-            let arr = v.get("embeddings").and_then(|e| e.get(0)).cloned().unwrap_or(Value::Null);
+            let arr = v
+                .get("embeddings")
+                .and_then(|e| e.get(0))
+                .cloned()
+                .unwrap_or(Value::Null);
             Ok(json!({"vector": arr, "model": model}))
         }
         "chat" => {
@@ -328,11 +394,16 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                 if payload == "[DONE]" {
                     return false;
                 }
-                let Ok(v) = serde_json::from_str::<Value>(payload) else { return true };
+                let Ok(v) = serde_json::from_str::<Value>(payload) else {
+                    return true;
+                };
                 if let Some(r) = v.get("done_reason").and_then(|x| x.as_str()) {
                     upstream_finish = r.to_string();
                 }
-                if let Some(r) = v.pointer("/choices/0/finish_reason").and_then(|x| x.as_str()) {
+                if let Some(r) = v
+                    .pointer("/choices/0/finish_reason")
+                    .and_then(|x| x.as_str())
+                {
                     upstream_finish = r.to_string();
                 }
                 let delta = if openai {
@@ -358,14 +429,17 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                         for c in calls {
                             let idx = c.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
                             let e = openai_calls.entry(idx).or_default();
-                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
+                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str())
+                            {
                                 if e.0.is_empty() {
                                     e.0.push_str(name);
                                 } else if !e.0.ends_with(name) {
                                     e.0.push_str(name);
                                 }
                             }
-                            if let Some(args) = c.pointer("/function/arguments").and_then(|x| x.as_str()) {
+                            if let Some(args) =
+                                c.pointer("/function/arguments").and_then(|x| x.as_str())
+                            {
                                 e.1.push_str(args);
                             }
                         }
@@ -375,7 +449,8 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                         .and_then(|x| x.as_array())
                     {
                         for c in calls {
-                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
+                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str())
+                            {
                                 let args = c
                                     .pointer("/function/arguments")
                                     .cloned()
@@ -384,9 +459,8 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                             }
                         }
                     }
-                } else if let Some(calls) = v
-                    .pointer("/message/tool_calls")
-                    .and_then(|x| x.as_array())
+                } else if let Some(calls) =
+                    v.pointer("/message/tool_calls").and_then(|x| x.as_array())
                 {
                     for c in calls {
                         if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str()) {
@@ -418,7 +492,11 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                 return Err(msg.to_string());
             }
             let finish = if calls.is_empty() {
-                if upstream_finish.is_empty() { "stop".into() } else { upstream_finish }
+                if upstream_finish.is_empty() {
+                    "stop".into()
+                } else {
+                    upstream_finish
+                }
             } else {
                 "tool_calls".into()
             };
@@ -449,7 +527,10 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
 // ---------------- tools ----------------
 
 fn tools(method: &str, params: &Value) -> Result<Value, String> {
-    let args = params.get("arguments").cloned().unwrap_or_else(|| params.clone());
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| params.clone());
     let workspace = params
         .get("workspace")
         .and_then(|x| x.as_str())
@@ -459,7 +540,10 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
     match method {
         "tool.ping" => Ok(json!({"pong": true})),
         "tool.fs.read" => {
-            let path = args.get("path").and_then(|x| x.as_str()).ok_or("缺少 path")?;
+            let path = args
+                .get("path")
+                .and_then(|x| x.as_str())
+                .ok_or("缺少 path")?;
             let (base, rel) = tool_base(&workspace, path);
             let p = safe_path(&base, &rel)?;
             let meta = std::fs::metadata(&p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -471,15 +555,23 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
                 "path": p.strip_prefix(&base).unwrap_or(&p).display().to_string()}))
         }
         "tool.fs.write" => {
-            let path = args.get("path").and_then(|x| x.as_str()).ok_or("缺少 path")?;
-            let content = args.get("content").and_then(|x| x.as_str()).ok_or("缺少 content")?;
+            let path = args
+                .get("path")
+                .and_then(|x| x.as_str())
+                .ok_or("缺少 path")?;
+            let content = args
+                .get("content")
+                .and_then(|x| x.as_str())
+                .ok_or("缺少 content")?;
             let (base, rel) = tool_base(&workspace, path);
             let p = safe_path(&base, &rel)?;
             if let Some(dir) = p.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
             std::fs::write(&p, content).map_err(|e| e.to_string())?;
-            Ok(json!({"bytes": content.len(), "path": p.strip_prefix(&base).unwrap_or(&p).display().to_string()}))
+            Ok(
+                json!({"bytes": content.len(), "path": p.strip_prefix(&base).unwrap_or(&p).display().to_string()}),
+            )
         }
         "tool.shell" => {
             let cmd = args.get("cmd").and_then(|x| x.as_str()).ok_or("缺少 cmd")?;
@@ -500,7 +592,13 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            for v in ["RIPGREP_CONFIG_PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME", "TMPDIR"] {
+            for v in [
+                "RIPGREP_CONFIG_PATH",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "HOME",
+                "TMPDIR",
+            ] {
                 c.env_remove(v);
             }
             c.env("HOME", workspace.join(".home"));
@@ -562,10 +660,28 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
 /// 模型常把根工作区写成 `workspace/xxx`；此时相对安装根解析，避免落到
 /// `<root>/workspace/<session>/workspace/xxx`。普通相对路径仍相对会话工作区。
 fn tool_base(workspace: &Path, user: &str) -> (PathBuf, String) {
-    let norm = user.replace('\\', "/");
-    if let Some(rest) = norm.strip_prefix("workspace/") {
+    let mut norm = user.replace('\\', "/");
+    while let Some(rest) = norm.strip_prefix("./") {
+        norm = rest.to_string();
+    }
+    // 模型常把安装根工作区写成 `/workspace/x`。Windows 上这是当前盘符根，
+    // 不能直接当绝对路径；先归一化成安装根相对路径，再做越界检查。
+    if let Some(rest) = norm.strip_prefix('/') {
+        if rest == "workspace" || rest.starts_with("workspace/") {
+            norm = rest.to_string();
+        }
+    }
+    if norm == "workspace" {
+        (
+            workspace.parent().unwrap_or(workspace).to_path_buf(),
+            ".".to_string(),
+        )
+    } else if let Some(rest) = norm.strip_prefix("workspace/") {
         // <root>/workspace/<session> + workspace/xxx → <root>/workspace/xxx
-        (workspace.parent().unwrap_or(workspace).to_path_buf(), rest.to_string())
+        (
+            workspace.parent().unwrap_or(workspace).to_path_buf(),
+            rest.to_string(),
+        )
     } else {
         (workspace.to_path_buf(), norm)
     }
@@ -597,4 +713,45 @@ fn safe_path(workspace: &Path, user: &str) -> Result<PathBuf, String> {
 fn drain<R: BufRead>(r: &mut R) {
     let mut s = String::new();
     let _ = std::io::Read::read_to_string(r, &mut s);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leading_slash_workspace_is_install_relative() {
+        let root = Path::new("/tmp/fa-root");
+        let session = root.join("workspace").join("s1");
+        for p in [
+            "workspace/a.txt",
+            "/workspace/a.txt",
+            "\\workspace\\a.txt",
+            "./workspace/a.txt",
+        ] {
+            let (base, rel) = tool_base(&session, p);
+            assert_eq!(base, root.join("workspace"), "base for {p}");
+            assert_eq!(rel, "a.txt", "rel for {p}");
+        }
+        let (base, rel) = tool_base(&session, "/etc/passwd");
+        assert_eq!(base, root.join("workspace").join("s1"));
+        assert_eq!(rel, "/etc/passwd");
+    }
+
+    #[test]
+    fn safe_path_rejects_parent_escape() {
+        let root = temp_root("escape");
+        let ws = root.join("workspace").join("s1");
+        std::fs::create_dir_all(&ws).unwrap();
+        assert!(safe_path(&ws, "ok.txt").is_ok());
+        assert!(safe_path(&ws, "../outside.txt").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("fa-plugin-{}-{}", std::process::id(), tag));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
 }

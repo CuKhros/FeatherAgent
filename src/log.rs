@@ -148,8 +148,7 @@ pub fn decode_record(buf: &[u8]) -> Result<(RecordHeader, Value, usize), RecordE
     }
     // 事件类型必须已知；未知类型视为记录损坏（前向兼容通过新增码值解决）
     EventKind::from_code(kind).ok_or(RecordError::UnknownKind(kind))?;
-    let payload: Value = rmp_serde::from_slice(payload_bytes)
-        .map_err(|_| RecordError::BadMagic)?;
+    let payload: Value = rmp_serde::from_slice(payload_bytes).map_err(|_| RecordError::BadMagic)?;
     Ok((
         RecordHeader {
             kind,
@@ -298,7 +297,11 @@ fn scan_session(dir: &Path) -> io::Result<Scan> {
 }
 
 fn scan_records(dir: &Path) -> io::Result<Vec<Event>> {
-    Ok(scan_session(dir)?.records.into_iter().map(|(_, _, e)| e).collect())
+    Ok(scan_session(dir)?
+        .records
+        .into_iter()
+        .map(|(_, _, e)| e)
+        .collect())
 }
 
 impl LogStore {
@@ -335,12 +338,14 @@ impl LogStore {
         let dir = self.session_dir(session);
         fs::create_dir_all(&dir)?;
         let mut inner = self.inner.lock().unwrap();
-        let st = inner.entry(session.to_string()).or_insert_with(|| SessionState {
-            seg: None,
-            next_seq: 1,
-            pending_bytes: 0,
-            last_sync: Instant::now(),
-        });
+        let st = inner
+            .entry(session.to_string())
+            .or_insert_with(|| SessionState {
+                seg: None,
+                next_seq: 1,
+                pending_bytes: 0,
+                last_sync: Instant::now(),
+            });
 
         // 首次使用时，从已有段恢复 next_seq
         if st.seg.is_none() && st.next_seq == 1 {
@@ -373,7 +378,9 @@ impl LogStore {
         st.pending_bytes += rec_len;
 
         if self.cfg.sync == SyncMode::Always || st.pending_bytes >= self.cfg.group_commit_bytes {
-            let Some(seg) = st.seg.as_mut() else { unreachable!() };
+            let Some(seg) = st.seg.as_mut() else {
+                unreachable!()
+            };
             seg.idx_file.flush()?;
             seg.file.sync_data()?;
             st.pending_bytes = 0;
@@ -418,7 +425,8 @@ impl LogStore {
             if self.cfg.sync == SyncMode::Never {
                 continue;
             }
-            let due = now.duration_since(st.last_sync) >= Duration::from_millis(self.cfg.group_commit_ms);
+            let due =
+                now.duration_since(st.last_sync) >= Duration::from_millis(self.cfg.group_commit_ms);
             if st.pending_bytes > 0 && due {
                 seg.idx_file.flush()?;
                 seg.file.sync_data()?;
@@ -452,7 +460,11 @@ impl LogStore {
             if !p.is_dir() {
                 continue;
             }
-            let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let name = p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             let evs = scan_records(&p).unwrap_or_default();
             let last_ts = evs.last().map(|e| e.ts_wall_ns).unwrap_or(0);
             out.push((name, evs.len() as u64, last_ts));
@@ -636,9 +648,7 @@ impl LogStore {
         let dir = self.session_dir(session);
         fs::create_dir_all(&dir)?;
         // 直接按原字节复制进一个段文件，保留 seq/ts
-        let first_seq = decode_record(&raw)
-            .map(|(h, _, _)| h.seq)
-            .unwrap_or(1);
+        let first_seq = decode_record(&raw).map(|(h, _, _)| h.seq).unwrap_or(1);
         let path = dir.join(format!("{first_seq:016x}.log"));
         let mut f = File::create(&path)?;
         while off < raw.len() {
@@ -799,7 +809,10 @@ impl SegmentReader {
                 Err(e) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("{e:?} at segment {:?}", self.files[self.idx.saturating_sub(1)]),
+                        format!(
+                            "{e:?} at segment {:?}",
+                            self.files[self.idx.saturating_sub(1)]
+                        ),
                     ))
                 }
             }
@@ -814,8 +827,18 @@ mod tests {
 
     #[test]
     fn record_roundtrip_and_crc() {
-        let rec = encode_record(EventKind::UserMessage, 7, 123456789, &json!({"t":"hi"}), false).unwrap();
-        assert_eq!(rec.len(), HEADER_LEN + rmp_serde::to_vec_named(&json!({"t":"hi"})).unwrap().len());
+        let rec = encode_record(
+            EventKind::UserMessage,
+            7,
+            123456789,
+            &json!({"t":"hi"}),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            rec.len(),
+            HEADER_LEN + rmp_serde::to_vec_named(&json!({"t":"hi"})).unwrap().len()
+        );
         let (h, p, total) = decode_record(&rec).unwrap();
         assert_eq!(h.seq, 7);
         assert_eq!(h.kind, EventKind::UserMessage.code());
@@ -825,16 +848,28 @@ mod tests {
         let mut bad = rec.clone();
         let last = bad.len() - 1;
         bad[last] ^= 0xFF;
-        assert!(matches!(decode_record(&bad), Err(RecordError::BadCrc { .. })));
+        assert!(matches!(
+            decode_record(&bad),
+            Err(RecordError::BadCrc { .. })
+        ));
     }
 
     #[test]
     fn append_read_and_rotation() {
         let dir = tempfile::tempdir().unwrap();
-        let cfg = LogConfig { segment_size: 120, ..Default::default() };
+        let cfg = LogConfig {
+            segment_size: 120,
+            ..Default::default()
+        };
         let store = LogStore::open(dir.path(), cfg).unwrap();
         for i in 0..20 {
-            store.append("s1", EventKind::UserMessage, json!({"i": i, "pad": "0123456789"})).unwrap();
+            store
+                .append(
+                    "s1",
+                    EventKind::UserMessage,
+                    json!({"i": i, "pad": "0123456789"}),
+                )
+                .unwrap();
         }
         store.flush().unwrap();
         let evs = store.read_session("s1").unwrap();
@@ -850,11 +885,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = LogStore::open(dir.path(), LogConfig::default()).unwrap();
         for i in 0..10 {
-            store.append("s", EventKind::ModelDelta, json!({"i": i})).unwrap();
+            store
+                .append("s", EventKind::ModelDelta, json!({"i": i}))
+                .unwrap();
         }
         store.flush().unwrap();
         drop(store);
-        let seg = segments_in(&dir.path().join("sessions/s")).unwrap().pop().unwrap();
+        let seg = segments_in(&dir.path().join("sessions/s"))
+            .unwrap()
+            .pop()
+            .unwrap();
         // 模拟断电：尾部写入半条记录
         let mut data = fs::read(&seg).unwrap();
         let cut = data.len() - 5;
@@ -872,7 +912,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = LogStore::open(dir.path(), LogConfig::default()).unwrap();
         for i in 0..30 {
-            store.append("s", EventKind::UserMessage, json!({"i": i})).unwrap();
+            store
+                .append("s", EventKind::UserMessage, json!({"i": i}))
+                .unwrap();
         }
         store.flush().unwrap();
         let before = store.read_session("s").unwrap().len();
@@ -882,7 +924,9 @@ mod tests {
         let evs = store.read_session("s").unwrap(); // 只剩 session.archived
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].kind, EventKind::SessionArchived);
-        let n = store.import_archive("s2", Path::new(&rep.archive_path)).unwrap();
+        let n = store
+            .import_archive("s2", Path::new(&rep.archive_path))
+            .unwrap();
         assert_eq!(n as usize, before);
         assert_eq!(store.read_session("s2").unwrap().len(), before);
     }
@@ -892,14 +936,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = LogStore::open(dir.path(), LogConfig::default()).unwrap();
         for i in 0..5 {
-            store.append("p", EventKind::UserMessage, json!({"i": i})).unwrap();
+            store
+                .append("p", EventKind::UserMessage, json!({"i": i}))
+                .unwrap();
         }
         let n = store.fork("p", "c").unwrap();
         assert_eq!(n, 5);
         let evs = store.read_session("c").unwrap();
         assert_eq!(evs.len(), 6);
         assert_eq!(evs[5].kind, EventKind::SessionForked);
-        store.append("c", EventKind::UserMessage, json!({"i": 99})).unwrap();
+        store
+            .append("c", EventKind::UserMessage, json!({"i": 99}))
+            .unwrap();
         assert_eq!(store.read_session("c").unwrap().len(), 7);
     }
 }

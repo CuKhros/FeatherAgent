@@ -69,7 +69,10 @@ pub mod paths {
 
         #[test]
         fn rooted_at_exe_not_cwd() {
-            let p = Paths::resolve(Path::new("/opt/feather/bin/featheragent"), &Overrides::default());
+            let p = Paths::resolve(
+                Path::new("/opt/feather/bin/featheragent"),
+                &Overrides::default(),
+            );
             assert_eq!(p.install_root, PathBuf::from("/opt/feather/bin"));
             assert_eq!(p.data, PathBuf::from("/opt/feather/bin/data"));
             assert_eq!(p.workspace, PathBuf::from("/opt/feather/bin/workspace"));
@@ -130,7 +133,10 @@ pub mod volume {
     ];
 
     pub fn is_sync_path(path: &Path, extra: &[String]) -> bool {
-        let mut names: Vec<String> = DEFAULT_SYNC_NAMES.iter().map(|s| s.to_lowercase()).collect();
+        let mut names: Vec<String> = DEFAULT_SYNC_NAMES
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect();
         names.extend(extra.iter().map(|s| s.to_lowercase()));
         for comp in path.components() {
             let c = comp.as_os_str().to_string_lossy().to_lowercase();
@@ -282,10 +288,16 @@ pub mod volume {
         #[test]
         fn matrix_matches_doc() {
             assert_eq!(judge(VolumeKind::Network, Purpose::Data), Verdict::Reject);
-            assert_eq!(judge(VolumeKind::Network, Purpose::Workspace), Verdict::Warn);
+            assert_eq!(
+                judge(VolumeKind::Network, Purpose::Workspace),
+                Verdict::Warn
+            );
             assert_eq!(judge(VolumeKind::Sync, Purpose::Data), Verdict::Reject);
             assert_eq!(judge(VolumeKind::Fixed, Purpose::Data), Verdict::Ok);
-            assert_eq!(judge(VolumeKind::Removable, Purpose::Workspace), Verdict::Ok);
+            assert_eq!(
+                judge(VolumeKind::Removable, Purpose::Workspace),
+                Verdict::Ok
+            );
         }
 
         #[test]
@@ -388,7 +400,7 @@ pub mod permission {
     pub struct Gate {
         default_risk: HashMap<String, Risk>,
         pending: Mutex<HashMap<String, Pending>>,
-        pub auto_allow_safe: bool,
+        pub auto_allow_safe: std::sync::atomic::AtomicBool,
     }
 
     impl Default for Gate {
@@ -402,7 +414,7 @@ pub mod permission {
             Self {
                 default_risk: HashMap::new(),
                 pending: Mutex::new(HashMap::new()),
-                auto_allow_safe,
+                auto_allow_safe: std::sync::atomic::AtomicBool::new(auto_allow_safe),
             }
         }
 
@@ -416,15 +428,23 @@ pub mod permission {
 
         pub fn check(&self, tool: &str, _session: &str) -> Decision {
             let risk = self.risk_of(tool);
-            if risk == Risk::Safe && self.auto_allow_safe {
+            if risk == Risk::Safe
+                && self
+                    .auto_allow_safe
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 return Decision::Allowed;
             }
             let token = random_token(8);
-            self.pending.lock().insert(
-                token.clone(),
-                Pending { allowed: None },
-            );
+            self.pending
+                .lock()
+                .insert(token.clone(), Pending { allowed: None });
             Decision::ConfirmNeeded { token }
+        }
+
+        pub fn set_auto_allow_safe(&self, on: bool) {
+            self.auto_allow_safe
+                .store(on, std::sync::atomic::Ordering::Relaxed);
         }
 
         /// 前端 `tool.confirm / deny` 调到这里；返回是否被授权。

@@ -116,9 +116,18 @@ impl PluginProc {
             cmd.env("NO_PROXY", &no_proxy).env("no_proxy", &no_proxy);
         }
         let mut child = cmd.spawn().map_err(|e| PluginError::Io(e.to_string()))?;
-        let stdin = child.stdin.take().ok_or(PluginError::Io("no stdin".into()))?;
-        let stdout = child.stdout.take().ok_or(PluginError::Io("no stdout".into()))?;
-        let stderr = child.stderr.take().ok_or(PluginError::Io("no stderr".into()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or(PluginError::Io("no stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or(PluginError::Io("no stdout".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or(PluginError::Io("no stderr".into()))?;
 
         let proc = Arc::new(Self {
             name: spec.name.clone(),
@@ -292,7 +301,11 @@ impl PluginProc {
 
     /// 发起流式请求：返回 `(req_id, 事件接收器)`。
     /// 插件以 `plugin.event` 通知回传 `{req, kind: delta|done|error, data}`。
-    pub fn start_stream(&self, method: &str, mut params: Value) -> Result<(u64, Receiver<Value>), PluginError> {
+    pub fn start_stream(
+        &self,
+        method: &str,
+        mut params: Value,
+    ) -> Result<(u64, Receiver<Value>), PluginError> {
         if matches!(self.state(), PluginState::Crashed | PluginState::Stopped) {
             return Err(PluginError::Crashed);
         }

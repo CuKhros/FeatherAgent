@@ -36,17 +36,21 @@ def run(session, text, timeout=180, allow=ALLOW):
 
 
 def summarize(evs):
-    tools, calls, results = [], [], []
+    tools, calls, results, errors = [], [], [], []
     final, finish = "", None
     for k, pl in evs:
         if k == "tool.call":
             calls.append(pl)
         elif k == "tool.result":
             results.append(pl)
+        elif k == "tool.error":
+            errors.append(pl)
+        elif k == "tool.failed":
+            errors.append(pl)
         elif k == "model.message":
             final = pl.get("text", "") if pl.get("text") else final
             finish = pl.get("finish")
-    return calls, results, final, finish
+    return calls, results, errors, final, finish
 
 
 TASKS = [
@@ -71,7 +75,7 @@ for tid, prompt, exp_tool, exp_text in TASKS:
     except subprocess.TimeoutExpired:
         print(f"{tid:12s} TIMEOUT")
         continue
-    calls, results, final, finish = summarize(evs)
+    calls, results, errors, final, finish = summarize(evs)
     names = [str(c.get("name") or c.get("tool") or "?") for c in calls]
     args = [c.get("arguments") or c.get("args") for c in calls]
     args_s = json.dumps(args[0], ensure_ascii=False) if args else "-"
@@ -79,7 +83,19 @@ for tid, prompt, exp_tool, exp_text in TASKS:
         args_s = args_s[:26] + "…"
 
     fired = len(calls) > 0
-    res_ok = all(isinstance(r, dict) and not r.get("error") for r in results) if results else None
+    # 严格口径：有 tool.result、未被拒绝、result 内无 error，且没有 tool.error/tool.failed。
+    if errors:
+        res_ok = False
+    elif results:
+        res_ok = all(
+            isinstance(r, dict)
+            and not r.get("denied")
+            and not r.get("error")
+            and not (isinstance(r.get("result"), dict) and r["result"].get("error"))
+            for r in results
+        )
+    else:
+        res_ok = None
     final_ok = (exp_text in (final or "")) if exp_text else None
 
     if exp_tool is None:
@@ -104,8 +120,8 @@ for tid, prompt, exp_tool, exp_text in TASKS:
 print("-" * 95)
 print(f"应触发工具的任务数      : {stat['tool_expected']}")
 print(f"  实际触发              : {stat['tool_fired']}  ({stat['tool_fired']}/{stat['tool_expected']})")
-print(f"  工具名/参数正确        : {stat['args_ok']}  ({stat['args_ok']}/{stat['tool_expected']})")
-print(f"  工具执行无错          : {stat['result_ok']}  ({stat['result_ok']}/{stat['tool_expected']})")
+print(f"  工具名命中（未校验参数值）: {stat['args_ok']}  ({stat['args_ok']}/{stat['tool_expected']})")
+print(f"  工具执行成功（严格口径）  : {stat['result_ok']}  ({stat['result_ok']}/{stat['tool_expected']})")
 print(f"  最终答复正确          : {stat['final_ok']}  ({stat['final_ok']}/{stat['tool_expected']})")
 print(f"不应调用工具的任务     : {stat['no_tool_cases']}，正确未调用 {stat['no_tool_ok']}")
 

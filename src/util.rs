@@ -65,9 +65,10 @@ fn fill_random(buf: &mut [u8]) {
     }
     #[cfg(unix)]
     {
-        let mut f = std::fs::File::open("/dev/urandom")
-            .expect("打开 /dev/urandom 失败：随机源不可用");
-        f.read_exact(buf).expect("读取 /dev/urandom 失败：随机源不可用");
+        let mut f =
+            std::fs::File::open("/dev/urandom").expect("打开 /dev/urandom 失败：随机源不可用");
+        f.read_exact(buf)
+            .expect("读取 /dev/urandom 失败：随机源不可用");
     }
     #[cfg(not(any(windows, unix)))]
     {
@@ -164,8 +165,16 @@ pub fn base64(data: &[u8]) -> String {
         let v = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(T[(v >> 18) as usize & 63] as char);
         out.push(T[(v >> 12) as usize & 63] as char);
-        out.push(if c.len() > 1 { T[(v >> 6) as usize & 63] as char } else { '=' });
-        out.push(if c.len() > 2 { T[v as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 1 {
+            T[(v >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            T[v as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -187,8 +196,16 @@ pub fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING};
-        let f: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let t: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let f: Vec<u16> = from
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let t: Vec<u16> = to
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let ok = unsafe { MoveFileExW(f.as_ptr(), t.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
         if ok != 0 {
             return Ok(());
@@ -214,7 +231,13 @@ mod tests {
 
     #[test]
     fn args_parse() {
-        let a = Args::parse(vec!["serve".into(), "--sync".into(), "never".into(), "--port=1".into(), "-h".into()]);
+        let a = Args::parse(vec![
+            "serve".into(),
+            "--sync".into(),
+            "never".into(),
+            "--port=1".into(),
+            "-h".into(),
+        ]);
         assert_eq!(a.positional, vec!["serve".to_string(), "-h".to_string()]);
         assert_eq!(a.flag("sync"), Some("never"));
         assert_eq!(a.flag("port"), Some("1"));

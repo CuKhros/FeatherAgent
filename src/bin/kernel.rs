@@ -37,7 +37,11 @@ fn main() {
             Ok(())
         }
         "version" | "-v" | "--version" => {
-            println!("featheragent {} (contract {})", featheragent::VERSION, featheragent::proto::CONTRACT_API);
+            println!(
+                "featheragent {} (contract {})",
+                featheragent::VERSION,
+                featheragent::proto::CONTRACT_API
+            );
             Ok(())
         }
         "serve" => serve(&args),
@@ -46,7 +50,9 @@ fn main() {
         "webui" | "gui" => launch_webui(&args),
         "chat" => chat(&args),
         other => {
-            eprintln!("未知子命令 {other}；可用: serve | doctor | bench | webui | chat | version | help");
+            eprintln!(
+                "未知子命令 {other}；可用: serve | doctor | bench | webui | chat | version | help"
+            );
             std::process::exit(2);
         }
     };
@@ -58,7 +64,11 @@ fn main() {
 
 fn print_help(topic: Option<&str>) {
     let topic = topic.unwrap_or("");
-    println!("FeatherAgent {} (contract {})", featheragent::VERSION, featheragent::proto::CONTRACT_API);
+    println!(
+        "FeatherAgent {} (contract {})",
+        featheragent::VERSION,
+        featheragent::proto::CONTRACT_API
+    );
     println!("用法: featheragent <serve|doctor|bench|webui|chat|version|help> [选项]");
     println!();
     if topic.is_empty() || topic == "help" {
@@ -92,7 +102,9 @@ fn print_help(topic: Option<&str>) {
     }
     if topic.is_empty() || topic == "chat" {
         println!("chat 选项: --root <dir> / --session <id> / --text <文本> / --timeout <秒>");
-        println!("  --allow <tool,...>  自动确认指定 dangerous 工具（如 tool.fs.write,tool.shell）");
+        println!(
+            "  --allow <tool,...>  自动确认指定 dangerous 工具（如 tool.fs.write,tool.shell）"
+        );
         println!("  --yes               自动确认所有 dangerous 工具（仅限受信脚本）");
         println!("  --confirm-timeout <秒> 未放行时等待多久再拒绝（默认 0，立即拒绝）");
     }
@@ -101,12 +113,24 @@ fn print_help(topic: Option<&str>) {
 /// `featheragent webui`：找到同目录或 plugins/ 下的 WebUI 桥并拉起（§8 安装建议）。
 fn launch_webui(args: &featheragent::util::Args) -> Result<(), String> {
     let paths = paths_from(args)?;
-    let exe = if cfg!(windows) { "featheragent-webui.exe" } else { "featheragent-webui" };
-    let legacy = if cfg!(windows) { "featheragent-gui.exe" } else { "featheragent-gui" };
+    let exe = if cfg!(windows) {
+        "featheragent-webui.exe"
+    } else {
+        "featheragent-webui"
+    };
+    let legacy = if cfg!(windows) {
+        "featheragent-gui.exe"
+    } else {
+        "featheragent-gui"
+    };
     let candidates = [
         paths.install_root.join(exe),
         paths.install_root.join("featheragent-webui").join(exe),
-        paths.install_root.join("plugins").join("featheragent-webui").join(exe),
+        paths
+            .install_root
+            .join("plugins")
+            .join("featheragent-webui")
+            .join(exe),
         paths.install_root.join(legacy),
     ];
     let Some(bin) = candidates.iter().find(|p| p.is_file()) else {
@@ -168,14 +192,20 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
         .map_err(|e| format!("session.create 失败: {e}"))?;
     eprintln!(
         "session {} state={}",
-        created.get("id").and_then(|x| x.as_str()).unwrap_or(session),
+        created
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or(session),
         created.get("state").and_then(|x| x.as_str()).unwrap_or("?")
     );
     conn.client
         .call("event.subscribe", serde_json::json!({"kinds": []}))
         .map_err(|e| format!("event.subscribe 失败: {e}"))?;
     conn.client
-        .call("chat.send", serde_json::json!({"session": session, "text": text}))
+        .call(
+            "chat.send",
+            serde_json::json!({"session": session, "text": text}),
+        )
         .map_err(|e| format!("chat.send 失败: {e}"))?;
 
     let deadline = Instant::now() + Duration::from_secs(timeout);
@@ -190,10 +220,16 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
                 if v.get("method").and_then(|m| m.as_str()) == Some("tool.confirm_request") {
                     let params = v.get("params").cloned().unwrap_or(serde_json::json!({}));
                     let token = params.get("token").and_then(|x| x.as_str()).unwrap_or("");
-                    let tool = params.get("tool").and_then(|x| x.as_str()).unwrap_or("tool");
+                    let tool = params
+                        .get("tool")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("tool");
                     if allow_all || allow.split(',').any(|a| tool_matches(a.trim(), tool)) {
                         conn.client
-                            .call("tool.confirm", serde_json::json!({"token": token, "allow": true}))
+                            .call(
+                                "tool.confirm",
+                                serde_json::json!({"token": token, "allow": true}),
+                            )
                             .map_err(|e| format!("自动授权失败: {e}"))?;
                         eprintln!("chat: 已授权 {tool}（--allow/--yes）");
                     } else {
@@ -273,9 +309,7 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         cfg.strict_temp = true;
     }
     let force = args.has("--force");
-    let socket = args
-        .path("socket")
-        .unwrap_or_else(|| paths.socket());
+    let socket = args.path("socket").unwrap_or_else(|| paths.socket());
 
     let kernel = Kernel::new(paths.clone(), cfg.clone(), force)?;
     // 组提交 flusher（§3.1：默认 5 ms 触发 fdatasync）
@@ -302,7 +336,10 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         socket.display(),
         paths.data.display(),
         cfg.provider_plugin,
-        match codec { Codec::Json => "json", Codec::MsgPack => "msgpack" }
+        match codec {
+            Codec::Json => "json",
+            Codec::MsgPack => "msgpack",
+        }
     );
     for w in kernel.warnings.read().iter() {
         let _ = writeln!(err, "warn: {w}");
@@ -336,12 +373,18 @@ fn doctor(args: &featheragent::util::Args) -> Result<(), String> {
                 }),
             );
         }
-        println!("{}", serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap()
+        );
         return Ok(());
     }
 
     if args.has("--stress-log") {
-        let n: usize = args.flag("stress-log").and_then(|s| s.parse().ok()).unwrap_or(1000);
+        let n: usize = args
+            .flag("stress-log")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1000);
         return stress_log(n);
     }
 
@@ -394,7 +437,11 @@ fn stress_log(n: usize) -> Result<(), String> {
         let m = 1 + (rng.next() % 40) as usize;
         for j in 0..m {
             store
-                .append("s", EventKind::UserMessage, serde_json::json!({"i": j, "pad": "x".repeat(20)}))
+                .append(
+                    "s",
+                    EventKind::UserMessage,
+                    serde_json::json!({"i": j, "pad": "x".repeat(20)}),
+                )
                 .map_err(|e| e.to_string())?;
         }
         store.flush().ok();
@@ -410,8 +457,15 @@ fn stress_log(n: usize) -> Result<(), String> {
         segs.sort();
         if let Some(last) = segs.last() {
             let len = std::fs::metadata(last).map(|m| m.len()).unwrap_or(0) as usize;
-            let cut = if len == 0 { 0 } else { (rng.next() as usize) % len };
-            let f = std::fs::OpenOptions::new().write(true).open(last).map_err(|e| e.to_string())?;
+            let cut = if len == 0 {
+                0
+            } else {
+                (rng.next() as usize) % len
+            };
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(last)
+                .map_err(|e| e.to_string())?;
             f.set_len(cut as u64).map_err(|e| e.to_string())?;
         }
         let store = LogStore::open(&dir, LogConfig::default()).map_err(|e| e.to_string())?;
@@ -472,15 +526,22 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let mut rss_kb = 0u64;
     for i in 0..3 {
         let bdir = dir.join(format!("boot{i}"));
-        let paths = Paths::resolve(&exe, &Overrides {
-            install_root: Some(bdir.clone()),
-            ..Default::default()
-        });
+        let paths = Paths::resolve(
+            &exe,
+            &Overrides {
+                install_root: Some(bdir.clone()),
+                ..Default::default()
+            },
+        );
         let cfg = Config::default();
         let t0 = Instant::now();
         let k = Kernel::new(paths.clone(), cfg, true)?;
         let socket = paths.socket();
-        let srv = Server::new(k.clone(), socket.clone(), featheragent::proto::Codec::MsgPack);
+        let srv = Server::new(
+            k.clone(),
+            socket.clone(),
+            featheragent::proto::Codec::MsgPack,
+        );
         let handle = {
             let s = srv.clone();
             thread::spawn(move || {
@@ -534,15 +595,20 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         eprintln!("bench[4/6] 事件写入");
     }
     // 4) 事件写入 P95（不含 fsync）
-    let store = LogStore::open(&dir.join("log"), LogConfig {
-        sync: SyncMode::Never,
-        ..Default::default()
-    })
+    let store = LogStore::open(
+        &dir.join("log"),
+        LogConfig {
+            sync: SyncMode::Never,
+            ..Default::default()
+        },
+    )
     .map_err(|e| e.to_string())?;
     let mut lat = Vec::new();
     for i in 0..2000 {
         let t = Instant::now();
-        store.append("bench", EventKind::UserMessage, serde_json::json!({"i": i})).map_err(|e| e.to_string())?;
+        store
+            .append("bench", EventKind::UserMessage, serde_json::json!({"i": i}))
+            .map_err(|e| e.to_string())?;
         lat.push(t.elapsed().as_secs_f64() * 1_000_000.0);
     }
     lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -554,10 +620,25 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let eng = ContextEngine::new(CtxConfig::default());
     let mut events = Vec::new();
     for i in 0..100u64 {
-        events.push(Event::new(i * 2 + 1, i, EventKind::UserMessage, serde_json::json!({"text": format!("问题 {i} {}", "x".repeat(60))})));
-        events.push(Event::new(i * 2 + 2, i, EventKind::ModelMessage, serde_json::json!({"text": format!("回答 {i} {}", "y".repeat(60))})));
+        events.push(Event::new(
+            i * 2 + 1,
+            i,
+            EventKind::UserMessage,
+            serde_json::json!({"text": format!("问题 {i} {}", "x".repeat(60))}),
+        ));
+        events.push(Event::new(
+            i * 2 + 2,
+            i,
+            EventKind::ModelMessage,
+            serde_json::json!({"text": format!("回答 {i} {}", "y".repeat(60))}),
+        ));
     }
-    let profile = ModelProfile { name: "bench".into(), context_window: 8192, max_output: 512, ..Default::default() };
+    let profile = ModelProfile {
+        name: "bench".into(),
+        context_window: 8192,
+        max_output: 512,
+        ..Default::default()
+    };
     let mut asm_lat = Vec::new();
     for _ in 0..100 {
         let t = Instant::now();
@@ -571,10 +652,20 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     }
     // 6) RPC 往返 P95
     let rdir = dir.join("rpc");
-    let paths = Paths::resolve(&exe, &Overrides { install_root: Some(rdir.clone()), ..Default::default() });
+    let paths = Paths::resolve(
+        &exe,
+        &Overrides {
+            install_root: Some(rdir.clone()),
+            ..Default::default()
+        },
+    );
     let k = Kernel::new(paths.clone(), Config::default(), true)?;
     let socket = paths.socket();
-    let srv = Server::new(k.clone(), socket.clone(), featheragent::proto::Codec::MsgPack);
+    let srv = Server::new(
+        k.clone(),
+        socket.clone(),
+        featheragent::proto::Codec::MsgPack,
+    );
     let handle = {
         let s = srv.clone();
         thread::spawn(move || {
@@ -586,7 +677,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let mut rpc = Vec::new();
     for _ in 0..200 {
         let t = Instant::now();
-        conn.client.call("system.info", serde_json::json!({})).map_err(|e| e)?;
+        conn.client
+            .call("system.info", serde_json::json!({}))
+            .map_err(|e| e)?;
         rpc.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     rpc.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -613,8 +706,16 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let platform = if windows { "windows" } else { "linux" };
     let boot_limit = if windows { 100.0 } else { 20.0 };
     let write_limit = if windows { 10_000.0 } else { 100.0 };
-    let boot_key = if windows { "boot_lt_100ms" } else { "boot_lt_20ms" };
-    let write_key = if windows { "write_p95_lt_10ms" } else { "write_p95_lt_100us" };
+    let boot_key = if windows {
+        "boot_lt_100ms"
+    } else {
+        "boot_lt_20ms"
+    };
+    let write_key = if windows {
+        "write_p95_lt_10ms"
+    } else {
+        "write_p95_lt_100us"
+    };
     let mut gates = serde_json::json!({
         "platform": platform,
         "binary_le_8mb": size_bytes <= 8 * 1024 * 1024,
@@ -625,20 +726,54 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "write_limit_us": write_limit,
     });
     if let Some(o) = gates.as_object_mut() {
-        o.insert(boot_key.into(), serde_json::json!(percentile(&boot_ms, 0.5) < boot_limit));
-        o.insert(write_key.into(), serde_json::json!(percentile(&lat, 0.95) < write_limit));
+        o.insert(
+            boot_key.into(),
+            serde_json::json!(percentile(&boot_ms, 0.5) < boot_limit),
+        );
+        o.insert(
+            write_key.into(),
+            serde_json::json!(percentile(&lat, 0.95) < write_limit),
+        );
     }
     if json_only {
-        println!("{}", serde_json::to_string(&serde_json::json!({"metrics": m, "gates": gates})).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({"metrics": m, "gates": gates})).unwrap()
+        );
     } else {
         println!("FeatherAgent 内核实测（{}）", featheragent::VERSION);
-        println!("  二进制体积      {:.2} MiB   (≤ 8 MiB)", size_bytes as f64 / 1_048_576.0);
-        println!("  进程内启动 P50   {:.2} ms   (< {:.0} ms)", percentile(&boot_ms, 0.5), boot_limit);
-        println!("  spawn→socket    {:.2} ms", if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) });
+        println!(
+            "  二进制体积      {:.2} MiB   (≤ 8 MiB)",
+            size_bytes as f64 / 1_048_576.0
+        );
+        println!(
+            "  进程内启动 P50   {:.2} ms   (< {:.0} ms)",
+            percentile(&boot_ms, 0.5),
+            boot_limit
+        );
+        println!(
+            "  spawn→socket    {:.2} ms",
+            if spawn_ms.is_empty() {
+                0.0
+            } else {
+                spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min)
+            }
+        );
         println!("  空闲 RSS        {} KiB   (≤ 15 MiB)", rss_kb);
-        println!("  事件写入 P50/P95 {:.1} / {:.1} µs (P95 < {:.0} µs)", percentile(&lat, 0.5), percentile(&lat, 0.95), write_limit);
-        println!("  上下文组装 P95  {:.2} ms   (< 30 ms)", percentile(&asm_lat, 0.95));
-        println!("  RPC 往返 P95    {:.3} ms   (< 1 ms)", percentile(&rpc, 0.95));
+        println!(
+            "  事件写入 P50/P95 {:.1} / {:.1} µs (P95 < {:.0} µs)",
+            percentile(&lat, 0.5),
+            percentile(&lat, 0.95),
+            write_limit
+        );
+        println!(
+            "  上下文组装 P95  {:.2} ms   (< 30 ms)",
+            percentile(&asm_lat, 0.95)
+        );
+        println!(
+            "  RPC 往返 P95    {:.3} ms   (< 1 ms)",
+            percentile(&rpc, 0.95)
+        );
         println!("门禁: {}", serde_json::to_string_pretty(&gates).unwrap());
         let _ = human_bytes(size_bytes);
         let _ = std::io::stdout().flush();
@@ -649,8 +784,12 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
 #[cfg(windows)]
 fn read_rss_kb(pid: u32) -> u64 {
     use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
+    use windows_sys::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
         if h == 0 {

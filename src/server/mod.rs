@@ -138,7 +138,11 @@ fn cancel_connection(kernel: &Arc<Kernel>, conn_id: u64) {
     }
 }
 
-fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) -> std::io::Result<()> {
+fn handle_conn(
+    kernel: Arc<Kernel>,
+    stream: crate::ipc::Stream,
+    codec: Codec,
+) -> std::io::Result<()> {
     let conn_id = kernel.next_conn_id();
     let (tx, rx): (Sender<Value>, Receiver<Value>) = mpsc::channel();
     kernel.broadcasts.write().push((conn_id, tx.clone()));
@@ -206,12 +210,21 @@ fn handle_conn(kernel: Arc<Kernel>, stream: crate::ipc::Stream, codec: Codec) ->
             loop {
                 match read_frame(&mut r, codec) {
                     Ok(Some(v)) => {
-                        let Some(req) = Request::parse(&v) else { continue };
+                        let Some(req) = Request::parse(&v) else {
+                            continue;
+                        };
                         if req.is_notification() {
                             continue;
                         }
                         let id = req.id.unwrap();
-                        let resp = match dispatch(&kernel, conn_id, &kinds, codec, &req.method, &req.params) {
+                        let resp = match dispatch(
+                            &kernel,
+                            conn_id,
+                            &kinds,
+                            codec,
+                            &req.method,
+                            &req.params,
+                        ) {
                             Ok(result) => rpc::success(id, result),
                             Err((code, msg)) => rpc::error(Some(id), code, msg),
                         };
@@ -305,7 +318,10 @@ fn dispatch(
             Ok(json!({"sessions": list}))
         }
         "session.resume" => {
-            let id = params.get("session").and_then(|x| x.as_str()).ok_or_else(|| invalid("session required"))?;
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
             let s = kernel.session(id);
             let role = {
                 let mut h = s.holder.write();
@@ -318,7 +334,11 @@ fn dispatch(
                     Some(_) => Role::Observer,
                 }
             };
-            kernel.emit(id, EventKind::SessionResumed, json!({"conn": conn_id, "role": role}));
+            kernel.emit(
+                id,
+                EventKind::SessionResumed,
+                json!({"conn": conn_id, "role": role}),
+            );
             let events = kernel.store.read_session(id).unwrap_or_default();
             let tail: Vec<Value> = events
                 .iter()
@@ -337,7 +357,10 @@ fn dispatch(
             }))
         }
         "session.fork" => {
-            let id = params.get("session").and_then(|x| x.as_str()).ok_or_else(|| invalid("session required"))?;
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
             let as_id = params.get("as").and_then(|x| x.as_str()).unwrap_or("fork");
             let n = kernel
                 .store
@@ -347,13 +370,22 @@ fn dispatch(
             Ok(json!({"session": as_id, "copied": n}))
         }
         "chat.send" => {
-            let id = params.get("session").and_then(|x| x.as_str()).ok_or_else(|| invalid("session required"))?;
-            let text = params.get("text").and_then(|x| x.as_str()).ok_or_else(|| invalid("text required"))?;
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
+            let text = params
+                .get("text")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("text required"))?;
             let s = kernel.session(id);
             let holder = *s.holder.read();
             match holder {
                 Some(h) if h != conn_id => {
-                    return Err((rpc::ERR_OBSERVER_READONLY, "当前连接是观察视图（单写者模型）".into()))
+                    return Err((
+                        rpc::ERR_OBSERVER_READONLY,
+                        "当前连接是观察视图（单写者模型）".into(),
+                    ))
                 }
                 None => {
                     *s.holder.write() = Some(conn_id);
@@ -374,13 +406,20 @@ fn dispatch(
                 if let Err(e) = k.run_turn(&ss, t) {
                     *ss.state.write() = SessionState::Failed;
                     *ss.error.write() = Some(e.clone());
-                    k.emit(&ss.id, EventKind::ChatFinished, json!({"status": "failed", "error": e}));
+                    k.emit(
+                        &ss.id,
+                        EventKind::ChatFinished,
+                        json!({"status": "failed", "error": e}),
+                    );
                 }
             });
             Ok(json!({"session": id, "accepted": true, "turn": s.turn.load(Ordering::Relaxed)}))
         }
         "chat.cancel" => {
-            let id = params.get("session").and_then(|x| x.as_str()).ok_or_else(|| invalid("session required"))?;
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
             let s = kernel.session(id);
             s.cancel.store(true, Ordering::SeqCst);
             let active = s.active_req.lock().clone();
@@ -389,11 +428,19 @@ fn dispatch(
                     p.cancel(req);
                 }
             }
-            kernel.emit(id, EventKind::ToolCancelled, json!({"reason": "chat.cancel"}));
+            kernel.emit(
+                id,
+                EventKind::ToolCancelled,
+                json!({"reason": "chat.cancel"}),
+            );
             Ok(json!({"ok": true}))
         }
         "event.subscribe" => {
-            let ks = params.get("kinds").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            let ks = params
+                .get("kinds")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
             let mut out = Vec::new();
             for k in ks {
                 if let Some(s) = k.as_str() {
@@ -406,29 +453,56 @@ fn dispatch(
             Ok(json!({"ok": true}))
         }
         "tool.confirm" | "tool.deny" => {
-            let token = params.get("token").and_then(|x| x.as_str()).ok_or_else(|| invalid("token required"))?;
-            let allow = method == "tool.confirm" && params.get("allow").and_then(|x| x.as_bool()).unwrap_or(true);
+            let token = params
+                .get("token")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("token required"))?;
+            let allow = method == "tool.confirm"
+                && params
+                    .get("allow")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(true);
             Ok(json!({"ok": kernel.resolve_confirm(token, allow)}))
         }
         "ctx.inspect" => {
-            let id = params.get("session").and_then(|x| x.as_str()).ok_or_else(|| invalid("session required"))?;
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
             let s = kernel.session(id);
+            // 诊断接口绝不阻塞：若会话锁被长回合短暂占用，返回 busy 而不是挂住前端。
+            let state = s
+                .state
+                .try_read()
+                .map(|g| g.as_str().to_string())
+                .unwrap_or_else(|| "busy".into());
+            let snapshot = s
+                .snapshot
+                .try_read()
+                .map(|g| g.clone())
+                .unwrap_or(Value::Null);
             Ok(json!({
                 "session": id,
-                "state": s.state.read().as_str(),
-                "snapshot": s.snapshot.read().clone(),
+                "state": state,
+                "snapshot": snapshot,
                 "turn": s.turn.load(Ordering::Relaxed),
             }))
         }
         "config.get" => {
             let cfg = kernel.config_json();
             match params.get("path").and_then(|x| x.as_str()) {
-                Some(p) => Ok(json!({"value": cfg.pointer(p).cloned().unwrap_or(Value::Null), "config": cfg})),
+                Some(p) => Ok(
+                    json!({"value": cfg.pointer(p).cloned().unwrap_or(Value::Null), "config": cfg}),
+                ),
                 None => Ok(cfg),
             }
         }
         "config.set" => {
-            let patch = params.get("patch").cloned().or_else(|| params.get("value").cloned()).unwrap_or(Value::Null);
+            let patch = params
+                .get("patch")
+                .cloned()
+                .or_else(|| params.get("value").cloned())
+                .unwrap_or(Value::Null);
             let cfg = kernel
                 .set_config(&patch)
                 .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
@@ -436,8 +510,50 @@ fn dispatch(
         }
         "storage.stats" => Ok(kernel.storage_stats()),
         "storage.gc" => {
-            let dry = params.get("dry_run").and_then(|x| x.as_bool()).unwrap_or(true);
+            let dry = params
+                .get("dry_run")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(true);
             Ok(kernel.storage_gc(dry))
+        }
+        "provider.models" => {
+            let cfg = kernel.config_json();
+            let provider = params
+                .get("provider")
+                .and_then(|x| x.as_str())
+                .or_else(|| cfg.get("provider_plugin").and_then(|x| x.as_str()))
+                .unwrap_or("provider-mock")
+                .to_string();
+            let base_url = params
+                .get("base_url")
+                .and_then(|x| x.as_str())
+                .or_else(|| cfg.get("base_url").and_then(|x| x.as_str()))
+                .unwrap_or("http://127.0.0.1:11434")
+                .to_string();
+            let model = params
+                .get("model")
+                .and_then(|x| x.as_str())
+                .or_else(|| cfg.get("model").and_then(|x| x.as_str()))
+                .unwrap_or("qwen2.5:7b")
+                .to_string();
+            let Ok(p) = kernel.plugins.get(&provider) else {
+                return Ok(
+                    json!({"provider": provider, "models": [], "error": "provider 插件未安装"}),
+                );
+            };
+            match p.call("probe", json!({"base_url": base_url, "model": model})) {
+                Ok(v) => {
+                    let models: Vec<String> = v
+                        .get("models")
+                        .and_then(|x| x.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect();
+                    Ok(json!({"provider": provider, "models": models, "probe": v}))
+                }
+                Err(e) => Ok(json!({"provider": provider, "models": [], "error": e.to_string()})),
+            }
         }
         "plugin.list" => {
             let reg = kernel.registry.list();
@@ -448,7 +564,10 @@ fn dispatch(
             }))
         }
         "plugin.enable" | "plugin.disable" => {
-            let name = params.get("name").and_then(|x| x.as_str()).ok_or_else(|| invalid("name required"))?;
+            let name = params
+                .get("name")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("name required"))?;
             let on = method == "plugin.enable";
             kernel
                 .registry
@@ -457,7 +576,10 @@ fn dispatch(
             Ok(json!({"ok": true, "enabled": on}))
         }
         "plugin.install" => {
-            let path = params.get("path").and_then(|x| x.as_str()).ok_or_else(|| invalid("path required"))?;
+            let path = params
+                .get("path")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("path required"))?;
             let e = kernel
                 .registry
                 .install(Path::new(path))
@@ -469,7 +591,11 @@ fn dispatch(
 }
 
 /// 供 bench / doctor 直接嵌入使用时构造一条内存内 UDS 服务器。
-pub fn spawn_server(kernel: Arc<Kernel>, socket: PathBuf, codec: Codec) -> std::io::Result<(Arc<Server>, thread::JoinHandle<()>)> {
+pub fn spawn_server(
+    kernel: Arc<Kernel>,
+    socket: PathBuf,
+    codec: Codec,
+) -> std::io::Result<(Arc<Server>, thread::JoinHandle<()>)> {
     let srv = Server::new(kernel, socket, codec);
     let s2 = srv.clone();
     let h = thread::spawn(move || {
@@ -487,5 +613,8 @@ pub fn wait_ready(socket: &Path, timeout: Duration) -> std::io::Result<()> {
         }
         thread::sleep(Duration::from_millis(1));
     }
-    Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "socket not ready"))
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "socket not ready",
+    ))
 }

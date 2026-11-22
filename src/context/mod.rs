@@ -228,7 +228,7 @@ impl ContextEngine {
 
         // ---- 稳定前缀 ----
         let system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。",
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。文件工具参数必须使用相对安装根的路径（如 workspace/foo.txt），不要用前导斜杠。",
             profile.name
         );
         let system_tokens = estimate_tokens(&system);
@@ -244,7 +244,8 @@ impl ContextEngine {
         };
         let tools_tokens = estimate_tokens(&tools_json);
 
-        let (skill_text, skill_tokens, skill_refs) = inject_skills(skills, &latest_user_text(events));
+        let (skill_text, skill_tokens, skill_refs) =
+            inject_skills(skills, &latest_user_text(events));
         let _ = skill_refs;
 
         // ---- 历史（L1） ----
@@ -289,7 +290,9 @@ impl ContextEngine {
         for r in recalls.iter().take(self.cfg.recall_items) {
             let line = format!("- [{}] {}", r.id, r.text);
             let t = estimate_tokens(&line);
-            if recall_tokens + t > IMAGE_TOKENS_PER_ROUND || base + history_tokens + summary_tokens + recall_tokens + t > limit {
+            if recall_tokens + t > IMAGE_TOKENS_PER_ROUND
+                || base + history_tokens + summary_tokens + recall_tokens + t > limit
+            {
                 break;
             }
             recall_tokens += t;
@@ -301,17 +304,17 @@ impl ContextEngine {
         // ---- 多模态预算 ----
         let media_count = events
             .iter()
-            .filter(|e| {
-                e.kind == EventKind::UserMessage
-                    && e.payload.get("media").is_some()
-            })
+            .filter(|e| e.kind == EventKind::UserMessage && e.payload.get("media").is_some())
             .count();
         let media_tokens = media_count.min(4) * (IMAGE_TOKENS_PER_ROUND / 4);
 
         let mut messages = Vec::new();
         messages.push(Message::new("system", &system));
         if !task_state.is_empty() {
-            messages.push(Message::new("system", format!("[task_state]\n{task_state}")));
+            messages.push(Message::new(
+                "system",
+                format!("[task_state]\n{task_state}"),
+            ));
         }
         if !tools_json.is_empty() {
             messages.push(Message::new("system", format!("[tools]\n{tools_json}")));
@@ -325,8 +328,14 @@ impl ContextEngine {
             messages.push(Message::new("system", format!("[memory]\n{recall_text}")));
         }
         for c in &cards {
-            let mut m = Message::new("system", format!("[summary] {}", c["text"].as_str().unwrap_or("")));
-            m.refs = c["refs"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default();
+            let mut m = Message::new(
+                "system",
+                format!("[summary] {}", c["text"].as_str().unwrap_or("")),
+            );
+            m.refs = c["refs"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_u64()).collect())
+                .unwrap_or_default();
             messages.push(m);
         }
         let kept_count = kept.len();
@@ -379,7 +388,12 @@ fn latest_user_text(events: &[Event]) -> String {
         .iter()
         .rev()
         .find(|e| e.kind == EventKind::UserMessage)
-        .and_then(|e| e.payload.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .and_then(|e| {
+            e.payload
+                .get("text")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_default()
 }
 
@@ -398,14 +412,21 @@ fn events_to_messages(events: &[Event]) -> Vec<Message> {
                 }
             }
             EventKind::ToolCall => {
-                let name = e.payload.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
+                let name = e
+                    .payload
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("tool");
                 let args = e.payload.get("arguments").cloned().unwrap_or(Value::Null);
                 out.push(Message::new(
                     "assistant",
-                    format!("tool_call {name} {}", serde_json::to_string(&args).unwrap_or_default()),
+                    format!(
+                        "tool_call {name} {}",
+                        serde_json::to_string(&args).unwrap_or_default()
+                    ),
                 ));
             }
-            EventKind::ToolResult | EventKind::ToolFailed => {
+            EventKind::ToolResult | EventKind::ToolFailed | EventKind::ToolError => {
                 let text = e
                     .payload
                     .get("result")
@@ -416,7 +437,11 @@ fn events_to_messages(events: &[Event]) -> Vec<Message> {
                     "tool",
                     format!(
                         "{}: {text}",
-                        if e.kind == EventKind::ToolFailed { "failed" } else { "result" }
+                        match e.kind {
+                            EventKind::ToolFailed => "failed",
+                            EventKind::ToolError => "error",
+                            _ => "result",
+                        }
                     ),
                 ));
             }
@@ -457,7 +482,7 @@ fn build_task_state(events: &[Event]) -> String {
             EventKind::ToolResult => {
                 open_calls.pop();
             }
-            EventKind::ToolFailed => {
+            EventKind::ToolFailed | EventKind::ToolError => {
                 open_calls.pop();
                 last_failure = e
                     .payload
@@ -563,11 +588,22 @@ impl Skill {
     }
 
     pub fn compact(&self) -> String {
-        let budget = if self.budget == 0 { SKILL_TOKENS_EACH } else { self.budget.min(SKILL_TOKENS_EACH) };
+        let budget = if self.budget == 0 {
+            SKILL_TOKENS_EACH
+        } else {
+            self.budget.min(SKILL_TOKENS_EACH)
+        };
         let mut s = format!("· {}：{}", self.name, self.instructions);
         if estimate_tokens(&s) > budget {
             let max_chars = budget.saturating_mul(2);
-            s = format!("· {}：{}", self.name, self.instructions.chars().take(max_chars).collect::<String>());
+            s = format!(
+                "· {}：{}",
+                self.name,
+                self.instructions
+                    .chars()
+                    .take(max_chars)
+                    .collect::<String>()
+            );
         }
         s
     }
@@ -656,8 +692,16 @@ mod tests {
         let engine = ContextEngine::default();
         let mut events = Vec::new();
         for i in 0..20u64 {
-            events.push(ev(i * 2 + 1, EventKind::UserMessage, json!({"text": format!("用户问题 {i} {}", "x".repeat(40))})));
-            events.push(ev(i * 2 + 2, EventKind::ModelMessage, json!({"text": format!("回答 {i} {}", "y".repeat(40))})));
+            events.push(ev(
+                i * 2 + 1,
+                EventKind::UserMessage,
+                json!({"text": format!("用户问题 {i} {}", "x".repeat(40))}),
+            ));
+            events.push(ev(
+                i * 2 + 2,
+                EventKind::ModelMessage,
+                json!({"text": format!("回答 {i} {}", "y".repeat(40))}),
+            ));
         }
         let profile = ModelProfile {
             context_window: 900,
@@ -665,12 +709,21 @@ mod tests {
             ..Default::default()
         };
         let a = engine
-            .assemble(&events, &profile, &[json!({"name":"tool.fs.read"})], &[], &[])
+            .assemble(
+                &events,
+                &profile,
+                &[json!({"name":"tool.fs.read"})],
+                &[],
+                &[],
+            )
             .unwrap();
         assert_eq!(a.messages[0].role, "system");
         assert!(a.messages[1].content.starts_with("[task_state]"));
         assert!(a.stats.total_tokens <= profile.context_window);
-        assert!(a.stats.layers.l2_summary_cards >= 1, "older turns should be carded");
+        assert!(
+            a.stats.layers.l2_summary_cards >= 1,
+            "older turns should be carded"
+        );
         assert!(a.stats.history_tokens > 0);
         assert!(a.stats.layers.l1_window_messages > 0);
     }
@@ -695,7 +748,12 @@ mod tests {
         };
         assert!(s.matches("帮我处理这个 PDF"));
         assert!(s.compact().chars().count() <= SKILL_TOKENS_EACH * 2 + 8);
-        assert!(!Skill::from_yaml("name: x\nkeywords: [a, b]\ninstructions: |\n  做某事\nbudget: 20").unwrap().instructions.is_empty());
+        assert!(!Skill::from_yaml(
+            "name: x\nkeywords: [a, b]\ninstructions: |\n  做某事\nbudget: 20"
+        )
+        .unwrap()
+        .instructions
+        .is_empty());
     }
 
     #[test]
@@ -703,7 +761,7 @@ mod tests {
         let events = vec![
             ev(1, EventKind::UserMessage, json!({"text":"跑一下测试"})),
             ev(2, EventKind::ToolCall, json!({"name":"tool.shell"})),
-            ev(3, EventKind::ToolFailed, json!({"error":"exit 1"})),
+            ev(3, EventKind::ToolError, json!({"error":"exit 1"})),
             ev(4, EventKind::ToolCancelled, json!({})),
         ];
         let s = build_task_state(&events);

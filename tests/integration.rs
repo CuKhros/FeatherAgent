@@ -68,10 +68,13 @@ fn prepare_root(name: &str) -> PathBuf {
 
 fn start(name: &str, cfg_patch: impl FnOnce(&mut Config)) -> (Harness, client::Connect) {
     let root = prepare_root(name);
-    let paths = Paths::resolve(&root.join("featheragent"), &Overrides {
-        install_root: Some(root.clone()),
-        ..Default::default()
-    });
+    let paths = Paths::resolve(
+        &root.join("featheragent"),
+        &Overrides {
+            install_root: Some(root.clone()),
+            ..Default::default()
+        },
+    );
     let mut cfg = Config {
         sync: "never".into(),
         ..Default::default()
@@ -113,10 +116,17 @@ impl Drop for Harness {
 fn is_kind(v: &Value, kind: &str, session: &str) -> bool {
     v.get("method").and_then(|m| m.as_str()) == Some("event")
         && v.pointer("/params/kind").and_then(|k| k.as_str()) == Some(kind)
-        && v.pointer("/params/payload/session").and_then(|s| s.as_str()) == Some(session)
+        && v.pointer("/params/payload/session")
+            .and_then(|s| s.as_str())
+            == Some(session)
 }
 
-fn send_and_wait(conn: &client::Connect, session: &str, text: &str, timeout: Duration) -> Vec<Value> {
+fn send_and_wait(
+    conn: &client::Connect,
+    session: &str,
+    text: &str,
+    timeout: Duration,
+) -> Vec<Value> {
     conn.client
         .call("chat.send", json!({"session": session, "text": text}))
         .unwrap();
@@ -137,13 +147,20 @@ fn send_and_wait(conn: &client::Connect, session: &str, text: &str, timeout: Dur
             Err(_) => break,
         }
     }
-    panic!("等待 chat.finished 超时（{session} / {text}）；看到 {} 条事件", seen.len());
+    panic!(
+        "等待 chat.finished 超时（{session} / {text}）；看到 {} 条事件",
+        seen.len()
+    );
 }
 
 fn last_model_text(seen: &[Value]) -> String {
     seen.iter()
         .filter(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("model.message"))
-        .filter_map(|v| v.pointer("/params/payload/text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .filter_map(|v| {
+            v.pointer("/params/payload/text")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        })
         .last()
         .unwrap_or_default()
 }
@@ -151,14 +168,25 @@ fn last_model_text(seen: &[Value]) -> String {
 #[test]
 fn thirty_rounds_stable() {
     let (_h, conn) = start("30r", |_| {});
-    conn.client.call("session.create", json!({"id": "s30"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "s30"}))
+        .unwrap();
     for i in 0..30 {
         let seen = send_and_wait(&conn, "s30", &format!("round {i}"), Duration::from_secs(10));
-        assert!(last_model_text(&seen).starts_with(&format!("echo: round {i}")), "第 {i} 轮回复异常");
+        assert!(
+            last_model_text(&seen).starts_with(&format!("echo: round {i}")),
+            "第 {i} 轮回复异常"
+        );
     }
-    let info = conn.client.call("ctx.inspect", json!({"session": "s30"})).unwrap();
+    let info = conn
+        .client
+        .call("ctx.inspect", json!({"session": "s30"}))
+        .unwrap();
     assert_eq!(info["state"], "idle");
-    let events = conn.client.call("session.resume", json!({"session": "s30"})).unwrap();
+    let events = conn
+        .client
+        .call("session.resume", json!({"session": "s30"}))
+        .unwrap();
     assert_eq!(events["role"], "holder");
     assert!(events["total"].as_u64().unwrap() >= 30);
 }
@@ -166,14 +194,28 @@ fn thirty_rounds_stable() {
 #[test]
 fn hundred_rounds_budget_stable() {
     let (_h, conn) = start("100r", |_| {});
-    conn.client.call("session.create", json!({"id": "s100"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "s100"}))
+        .unwrap();
     let mut max_tokens = 0u64;
     for i in 0..100 {
-        let seen = send_and_wait(&conn, "s100", &format!("长会话第 {i} 轮：{}", "内容".repeat(8)), Duration::from_secs(10));
+        let seen = send_and_wait(
+            &conn,
+            "s100",
+            &format!("长会话第 {i} 轮：{}", "内容".repeat(8)),
+            Duration::from_secs(10),
+        );
         assert!(!last_model_text(&seen).is_empty());
         if i % 5 == 0 {
-            let snap = conn.client.call("ctx.inspect", json!({"session": "s100"})).unwrap();
-            max_tokens = max_tokens.max(snap.pointer("/snapshot/stats/total_tokens").and_then(|x| x.as_u64()).unwrap_or(0));
+            let snap = conn
+                .client
+                .call("ctx.inspect", json!({"session": "s100"}))
+                .unwrap();
+            max_tokens = max_tokens.max(
+                snap.pointer("/snapshot/stats/total_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0),
+            );
         }
     }
     assert!(max_tokens <= 8192 * 95 / 100, "预算超 95%: {max_tokens}");
@@ -182,7 +224,9 @@ fn hundred_rounds_budget_stable() {
 #[test]
 fn tool_execution_and_permission_gate() {
     let (h, conn) = start("tools", |_| {});
-    conn.client.call("session.create", json!({"id": "stool"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "stool"}))
+        .unwrap();
     // 预置工作空间文件
     let ws = h.kernel.paths.workspace.join("stool");
     std::fs::create_dir_all(&ws).unwrap();
@@ -194,7 +238,12 @@ fn tool_execution_and_permission_gate() {
         .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("tool.result"))
         .cloned()
         .expect("应有 tool.result");
-    assert_eq!(result.pointer("/params/payload/result/content").and_then(|x| x.as_str()), Some("feather-note"));
+    assert_eq!(
+        result
+            .pointer("/params/payload/result/content")
+            .and_then(|x| x.as_str()),
+        Some("feather-note")
+    );
 
     // 危险工具：必须收到确认请求，允许后才执行
     let seen = {
@@ -219,8 +268,14 @@ fn tool_execution_and_permission_gate() {
             }
         }
         let c = confirm.expect("未收到 tool.confirm_request");
-        let token = c.pointer("/params/token").and_then(|t| t.as_str()).unwrap().to_string();
-        conn.client.call("tool.confirm", json!({"token": token, "allow": true})).unwrap();
+        let token = c
+            .pointer("/params/token")
+            .and_then(|t| t.as_str())
+            .unwrap()
+            .to_string();
+        conn.client
+            .call("tool.confirm", json!({"token": token, "allow": true}))
+            .unwrap();
         let mut rest = send_and_wait_after(&conn, "stool", collected);
         rest.append(&mut Vec::new());
         rest
@@ -230,7 +285,11 @@ fn tool_execution_and_permission_gate() {
         .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("tool.result"))
         .cloned()
         .expect("应有 shell 结果");
-    assert!(shell.pointer("/params/payload/result/stdout").and_then(|x| x.as_str()).unwrap_or("").contains("hi"));
+    assert!(shell
+        .pointer("/params/payload/result/stdout")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .contains("hi"));
 }
 
 fn send_and_wait_after(conn: &client::Connect, session: &str, already: Vec<Value>) -> Vec<Value> {
@@ -255,22 +314,32 @@ fn send_and_wait_after(conn: &client::Connect, session: &str, already: Vec<Value
 #[test]
 fn shell_timeout_marks_timed_out() {
     let (_h, conn) = start("timeout", |_| {});
-    conn.client.call("session.create", json!({"id": "stimeout"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "stimeout"}))
+        .unwrap();
     let payload = r#"TOOL:{"name":"tool.shell","arguments":{"cmd":"sleep 30"}}"#;
-    conn.client.call("chat.send", json!({"session": "stimeout", "text": payload})).unwrap();
+    conn.client
+        .call("chat.send", json!({"session": "stimeout", "text": payload}))
+        .unwrap();
     // 等危险工具确认请求
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut token = None;
     while Instant::now() < deadline {
         if let Ok(v) = conn.events.recv_timeout(Duration::from_millis(200)) {
             if v.get("method").and_then(|m| m.as_str()) == Some("tool.confirm_request") {
-                token = v.pointer("/params/token").and_then(|x| x.as_str()).map(|x| x.to_string());
+                token = v
+                    .pointer("/params/token")
+                    .and_then(|x| x.as_str())
+                    .map(|x| x.to_string());
                 break;
             }
         }
     }
     let tok = token.expect("confirm token");
-    let r = conn.client.call("tool.confirm", json!({"token": tok, "allow": true})).unwrap();
+    let r = conn
+        .client
+        .call("tool.confirm", json!({"token": tok, "allow": true}))
+        .unwrap();
     assert_eq!(r["ok"], true, "确认未被接受: {r}");
     // 15s 超时 + 一轮收尾：给足 30s
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -298,21 +367,35 @@ fn shell_timeout_marks_timed_out() {
                 .collect();
             panic!("应有 tool.result；实际事件: {kinds:?}");
         });
-    assert_eq!(tool.pointer("/params/payload/result/timed_out").and_then(|x| x.as_bool()), Some(true), "工具应超时: {tool}");
+    assert_eq!(
+        tool.pointer("/params/payload/result/timed_out")
+            .and_then(|x| x.as_bool()),
+        Some(true),
+        "工具应超时: {tool}"
+    );
 }
 
 #[test]
 fn cancel_propagation() {
     let (_h, conn) = start("cancel", |_| {});
-    conn.client.call("session.create", json!({"id": "sc"})).unwrap();
-    conn.client.call("chat.send", json!({"session": "sc", "text": "SPIN"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "sc"}))
+        .unwrap();
+    conn.client
+        .call("chat.send", json!({"session": "sc", "text": "SPIN"}))
+        .unwrap();
     thread::sleep(Duration::from_millis(400));
-    conn.client.call("chat.cancel", json!({"session": "sc"})).unwrap();
+    conn.client
+        .call("chat.cancel", json!({"session": "sc"}))
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline {
         if let Ok(v) = conn.events.recv_timeout(Duration::from_millis(200)) {
             if is_kind(&v, "chat.finished", "sc") {
-                assert_eq!(v.pointer("/params/payload/status").and_then(|s| s.as_str()), Some("cancelled"));
+                assert_eq!(
+                    v.pointer("/params/payload/status").and_then(|s| s.as_str()),
+                    Some("cancelled")
+                );
                 return;
             }
         }
@@ -323,19 +406,29 @@ fn cancel_propagation() {
 #[test]
 fn crash_restart_retries_once() {
     let (_h, conn) = start("crash", |_| {});
-    conn.client.call("session.create", json!({"id": "scrash"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "scrash"}))
+        .unwrap();
     let seen = send_and_wait(&conn, "scrash", "CRASH_ONCE", Duration::from_secs(20));
-    assert!(last_model_text(&seen).contains("restarted"), "崩溃重启后应重试成功: {seen:?}");
+    assert!(
+        last_model_text(&seen).contains("restarted"),
+        "崩溃重启后应重试成功: {seen:?}"
+    );
 }
 
 #[test]
 fn observer_is_readonly_and_fork_copies() {
     let (_h, conn) = start("obs", |_| {});
-    conn.client.call("session.create", json!({"id": "so"})).unwrap();
+    conn.client
+        .call("session.create", json!({"id": "so"}))
+        .unwrap();
     send_and_wait(&conn, "so", "hello", Duration::from_secs(10));
 
     let conn2 = Client::connect(&_h.kernel.paths.socket()).unwrap();
-    let resume = conn2.client.call("session.resume", json!({"session": "so"})).unwrap();
+    let resume = conn2
+        .client
+        .call("session.resume", json!({"session": "so"}))
+        .unwrap();
     assert_eq!(resume["role"], "observer");
     let err = conn2
         .client
@@ -343,24 +436,42 @@ fn observer_is_readonly_and_fork_copies() {
         .unwrap_err();
     assert!(err.contains("40301"), "观察者写入应被拒: {err}");
 
-    let fork = conn.client.call("session.fork", json!({"session": "so", "as": "so-fork"})).unwrap();
+    let fork = conn
+        .client
+        .call("session.fork", json!({"session": "so", "as": "so-fork"}))
+        .unwrap();
     assert!(fork["copied"].as_u64().unwrap() >= 2);
-    let child_events = conn.client.call("session.resume", json!({"session": "so-fork"})).unwrap();
+    let child_events = conn
+        .client
+        .call("session.resume", json!({"session": "so-fork"}))
+        .unwrap();
     assert!(child_events["total"].as_u64().unwrap() >= 3); // 复制 + session.forked
 }
 
 #[test]
 fn storage_index_and_vector_recall() {
     let (_h, conn) = start("storage", |_| {});
-    conn.client.call("session.create", json!({"id": "sst"})).unwrap();
-    send_and_wait(&conn, "sst", "苹果 香蕉 上下文测试", Duration::from_secs(15));
+    conn.client
+        .call("session.create", json!({"id": "sst"}))
+        .unwrap();
+    send_and_wait(
+        &conn,
+        "sst",
+        "苹果 香蕉 上下文测试",
+        Duration::from_secs(15),
+    );
     // 索引器是异步的，给一点时间
     thread::sleep(Duration::from_millis(600));
     let stats = conn.client.call("storage.stats", json!({})).unwrap();
     assert_eq!(stats["available"], true, "storage 应可用: {stats}");
-    assert!(stats["events"].as_u64().unwrap() >= 2, "索引事件数: {stats}");
-    assert!(stats["embeddings"].as_u64().unwrap() >= 1, "向量应已写入: {stats}");
-
+    assert!(
+        stats["events"].as_u64().unwrap() >= 2,
+        "索引事件数: {stats}"
+    );
+    assert!(
+        stats["embeddings"].as_u64().unwrap() >= 1,
+        "向量应已写入: {stats}"
+    );
 }
 
 #[test]
@@ -371,7 +482,11 @@ fn s2_thousand_truncations() {
         .args(["doctor", "--stress-log", "1000"])
         .output()
         .expect("spawn doctor");
-    assert!(out.status.success(), "stress-log 失败: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stress-log 失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["failed"], 0);
     assert_eq!(v["iterations"], 1000);
@@ -387,7 +502,10 @@ fn plugin_contract_list() {
         .iter()
         .filter_map(|x| x["name"].as_str().map(|s| s.to_string()))
         .collect();
-    assert!(names.contains(&"provider-mock".to_string()), "registry={names:?}");
+    assert!(
+        names.contains(&"provider-mock".to_string()),
+        "registry={names:?}"
+    );
 }
 
 #[test]
@@ -397,4 +515,93 @@ fn wasm_and_log_unit_paths_smoke() {
     let info = conn.client.call("system.info", json!({})).unwrap();
     assert!(info["version"].as_str().unwrap().starts_with("1.1"));
     assert_eq!(info["gate"], "collaborative");
+}
+
+#[test]
+fn leading_slash_workspace_and_business_error_are_not_fatal() {
+    let (h, conn) = start("paths", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "spath"}))
+        .unwrap();
+    std::fs::create_dir_all(h.kernel.paths.workspace.join("spath")).unwrap();
+    std::fs::write(h.kernel.paths.workspace.join("lead.txt"), "LEAD_CONTENT").unwrap();
+
+    let seen = send_and_wait(
+        &conn,
+        "spath",
+        r#"TOOL:{"name":"tool.fs.read","arguments":{"path":"/workspace/lead.txt"}}"#,
+        Duration::from_secs(15),
+    );
+    let result = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("tool.result"))
+        .expect("leading slash should be normalized to install root");
+    assert_eq!(
+        result
+            .pointer("/params/payload/result/content")
+            .and_then(|x| x.as_str()),
+        Some("LEAD_CONTENT")
+    );
+
+    let seen = send_and_wait(
+        &conn,
+        "spath",
+        r#"TOOL:{"name":"tool.fs.read","arguments":{"path":"/workspace/missing-xyz.txt"}}"#,
+        Duration::from_secs(15),
+    );
+    assert!(
+        seen.iter()
+            .any(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("tool.error")),
+        "业务错误应发 tool.error: {seen:?}"
+    );
+    assert!(
+        !seen
+            .iter()
+            .any(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("plugin.degraded")),
+        "业务错误不应熔断插件: {seen:?}"
+    );
+}
+
+#[test]
+fn config_api_applies_and_lists_models() {
+    let (h, conn) = start("config", |_| {});
+    let cfg = conn.client.call("config.get", json!({})).unwrap();
+    assert_eq!(cfg["temperature"].as_f64(), Some(0.7));
+
+    let saved = conn
+        .client
+        .call(
+            "config.set",
+            json!({"patch": {
+                "model": "mock-config",
+                "temperature": 0.2,
+                "context_window": 4096,
+                "max_turns": 3
+            }}),
+        )
+        .unwrap();
+    assert_eq!(saved["config"]["temperature"].as_f64(), Some(0.2));
+    assert_eq!(saved["config"]["model"], "mock-config");
+    let on_disk: Value =
+        serde_json::from_slice(&std::fs::read(&h.kernel.cfg_path).unwrap()).unwrap();
+    assert_eq!(on_disk["temperature"].as_f64(), Some(0.2));
+
+    let models = conn
+        .client
+        .call(
+            "provider.models",
+            json!({"provider": "provider-mock", "model": "mock-config"}),
+        )
+        .unwrap();
+    assert!(models["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m == "mock-config"));
+
+    let bad = conn
+        .client
+        .call("config.set", json!({"patch": {"temperature": 3.0}}))
+        .unwrap_err();
+    assert!(bad.contains("temperature"), "非法配置应被拒绝: {bad}");
 }

@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::proto::types::PluginManifest;
-use crate::runtime::plugin::PluginSpec;
 use crate::proto::Codec;
+use crate::runtime::plugin::PluginSpec;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
@@ -94,7 +94,10 @@ impl Registry {
         };
         if manifest_path.exists() {
             let v: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
-            if let Some(m) = v.get("manifest").and_then(|m| serde_json::from_value::<PluginManifest>(m.clone()).ok()) {
+            if let Some(m) = v
+                .get("manifest")
+                .and_then(|m| serde_json::from_value::<PluginManifest>(m.clone()).ok())
+            {
                 entry.name = m.name;
                 entry.category = m.category;
             }
@@ -114,9 +117,15 @@ impl Registry {
                 entry.program = prog.to_string_lossy().into_owned();
             }
             if let Some(a) = v.get("args").and_then(|a| a.as_array()) {
-                entry.args = a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+                entry.args = a
+                    .iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect();
             }
-            entry.signature = v.get("signature").and_then(|s| s.as_str()).map(|s| s.to_string());
+            entry.signature = v
+                .get("signature")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
         }
         // 内容哈希：对可执行文件
         if let Ok(bytes) = std::fs::read(&entry.program) {
@@ -183,7 +192,12 @@ impl Registry {
     }
 
     pub fn find(&self, name: &str) -> Option<Entry> {
-        self.inner.lock().plugins.iter().find(|p| p.name == name).cloned()
+        self.inner
+            .lock()
+            .plugins
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
     }
 }
 

@@ -88,7 +88,8 @@ fn collect_from_value(v: &Value, out: &mut Vec<ToolCall>) {
                     .unwrap_or_else(|| json!({}));
                 match args {
                     Value::String(s) => {
-                        let parsed = serde_json::from_str(&s).unwrap_or_else(|_| json!({ "raw": s }));
+                        let parsed =
+                            serde_json::from_str(&s).unwrap_or_else(|_| json!({ "raw": s }));
                         out.push(ToolCall {
                             name: name.to_string(),
                             arguments: parsed,
@@ -126,7 +127,10 @@ fn fenced_blocks(text: &str) -> Vec<String> {
             // 去掉语言标记行
             if let Some(first_nl) = s.find('\n') {
                 let first = &s[..first_nl];
-                if first.starts_with("json") || first.starts_with("JSON") || first.starts_with("tool") {
+                if first.starts_with("json")
+                    || first.starts_with("JSON")
+                    || first.starts_with("tool")
+                {
                     s = s[first_nl + 1..].trim();
                 }
             }
@@ -348,7 +352,10 @@ fn find_string_after(text: &str, key: &str) -> Option<String> {
 fn dedup(calls: Vec<ToolCall>) -> Vec<ToolCall> {
     let mut out: Vec<ToolCall> = Vec::new();
     for c in calls {
-        if !out.iter().any(|x| x.name == c.name && x.arguments == c.arguments) {
+        if !out
+            .iter()
+            .any(|x| x.name == c.name && x.arguments == c.arguments)
+        {
             out.push(c);
         }
     }
@@ -361,7 +368,8 @@ mod tests {
 
     #[test]
     fn structured_ollama_tool_calls() {
-        let v = json!([{"function":{"name":"tool.fs.read","arguments":{"path":"workspace/a.txt"}}}]);
+        let v =
+            json!([{"function":{"name":"tool.fs.read","arguments":{"path":"workspace/a.txt"}}}]);
         let c = from_value(&v);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].name, "tool.fs.read");
@@ -410,7 +418,8 @@ mod tests {
 
     #[test]
     fn xml_tag_fallback() {
-        let text = "<tool_call>{\"name\": \"tool.fs.read\", \"arguments\": {\"path\": \"x\"}}</tool_call>";
+        let text =
+            "<tool_call>{\"name\": \"tool.fs.read\", \"arguments\": {\"path\": \"x\"}}</tool_call>";
         let c = extract(text);
         assert_eq!(c.len(), 1);
     }
@@ -423,7 +432,8 @@ mod tests {
 
     #[test]
     fn nested_objects_balance() {
-        let text = r#"{"name":"tool.shell","arguments":{"cmd":"echo {a:1}","env":{"A":"b"},"n":3}}"#;
+        let text =
+            r#"{"name":"tool.shell","arguments":{"cmd":"echo {a:1}","env":{"A":"b"},"n":3}}"#;
         let c = extract(text);
         assert_eq!(c[0].arguments["env"]["A"], "b");
         assert_eq!(c[0].arguments["n"], 3);

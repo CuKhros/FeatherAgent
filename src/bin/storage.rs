@@ -105,7 +105,14 @@ impl Storage {
         let mut l0 = self.l0.lock();
         for (id, session, model, _dim, blob, text, ts) in rows {
             let vector = decode_f32(&blob);
-            let item = VecItem { id, session, model, vector, text, ts };
+            let item = VecItem {
+                id,
+                session,
+                model,
+                vector,
+                text,
+                ts,
+            };
             self.l0_bytes.fetch_add(item.bytes(), Ordering::Relaxed);
             l0.push(item);
         }
@@ -213,7 +220,11 @@ impl Storage {
         let vector: Vec<f32> = p
             .get("vector")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_f64().map(|f| f as f32))
+                    .collect()
+            })
             .unwrap_or_default();
         if vector.is_empty() {
             return Err("向量为空".into());
@@ -235,7 +246,15 @@ impl Storage {
             conn.execute(
                 "INSERT OR REPLACE INTO embeddings(id, session, model, dim, vector, text, ts)
                  VALUES(?1,?2,?3,?4,?5,?6,?7)",
-                params![item.id, item.session, item.model, item.vector.len() as i64, encode_f32(&item.vector), item.text, item.ts],
+                params![
+                    item.id,
+                    item.session,
+                    item.model,
+                    item.vector.len() as i64,
+                    encode_f32(&item.vector),
+                    item.text,
+                    item.ts
+                ],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -254,13 +273,20 @@ impl Storage {
         let q: Vec<f32> = p
             .get("vector")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_f64().map(|f| f as f32))
+                    .collect()
+            })
             .unwrap_or_default();
         if q.is_empty() {
             return Ok(json!({"items": []}));
         }
         let k = p.get("k").and_then(|x| x.as_u64()).unwrap_or(5) as usize;
-        let model = p.get("model").and_then(|x| x.as_str()).map(|s| s.trim_matches('"').to_string());
+        let model = p
+            .get("model")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim_matches('"').to_string());
         let mut scored: Vec<(f32, String, String, String, i64)> = Vec::new();
 
         // L0 热层
@@ -275,20 +301,34 @@ impl Storage {
                         continue;
                     }
                 }
-                scored.push((cosine(&q, &it.vector), it.id.clone(), it.session.clone(), it.text.clone(), it.ts));
+                scored.push((
+                    cosine(&q, &it.vector),
+                    it.id.clone(),
+                    it.session.clone(),
+                    it.text.clone(),
+                    it.ts,
+                ));
             }
         }
 
         // L2 冷层（显式全库扫描；受内存预算约束，不常驻）
         if cold && scored.len() < k {
             let conn = self.conn.lock();
-            let rows: Vec<(String, String, Vec<u8>, String, i64, String)> = if let Some(m) = &model {
+            let rows: Vec<(String, String, Vec<u8>, String, i64, String)> = if let Some(m) = &model
+            {
                 let mut stmt = conn
                     .prepare("SELECT id, session, vector, text, ts, model FROM embeddings WHERE model=?1 AND dim=?2 LIMIT 20000")
                     .map_err(|e| e.to_string())?;
                 let it = stmt
                     .query_map(params![m, q.len() as i64], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
                     })
                     .map_err(|e| e.to_string())?
                     .filter_map(|x| x.ok())
@@ -300,7 +340,14 @@ impl Storage {
                     .map_err(|e| e.to_string())?;
                 let it = stmt
                     .query_map(params![q.len() as i64], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
                     })
                     .map_err(|e| e.to_string())?
                     .filter_map(|x| x.ok())
@@ -330,13 +377,21 @@ impl Storage {
 
     fn stats(&self) -> Result<Value, String> {
         let conn = self.conn.lock();
-        let events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0)).unwrap_or(0);
-        let embeds: i64 = conn.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0)).unwrap_or(0);
+        let events: i64 = conn
+            .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
+            .unwrap_or(0);
+        let embeds: i64 = conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+            .unwrap_or(0);
         let sessions: i64 = conn
-            .query_row("SELECT COUNT(DISTINCT session) FROM events", [], |r| r.get(0))
+            .query_row("SELECT COUNT(DISTINCT session) FROM events", [], |r| {
+                r.get(0)
+            })
             .unwrap_or(0);
         drop(conn);
-        let db_bytes = std::fs::metadata(&self.db_path).map(|m| m.len()).unwrap_or(0);
+        let db_bytes = std::fs::metadata(&self.db_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
         Ok(json!({
             "available": true,
             "events": events,
@@ -352,19 +407,30 @@ impl Storage {
     }
 
     fn gc(&self, dry: bool) -> Result<Value, String> {
-        let cutoff = (featheragent::proto::types::now_wall_ns() as i64) - 90 * 24 * 3600 * 1_000_000_000i64;
+        let cutoff =
+            (featheragent::proto::types::now_wall_ns() as i64) - 90 * 24 * 3600 * 1_000_000_000i64;
         let conn = self.conn.lock();
         let old_events: i64 = conn
-            .query_row("SELECT COUNT(*) FROM events WHERE ts < ?1", params![cutoff], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE ts < ?1",
+                params![cutoff],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
         let old_embeds: i64 = conn
-            .query_row("SELECT COUNT(*) FROM embeddings WHERE ts < ?1", params![cutoff], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE ts < ?1",
+                params![cutoff],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
         let mut deleted = 0i64;
         if !dry {
             let keep_sessions: i64 = 200;
             let n_sessions: i64 = conn
-                .query_row("SELECT COUNT(DISTINCT session) FROM events", [], |r| r.get(0))
+                .query_row("SELECT COUNT(DISTINCT session) FROM events", [], |r| {
+                    r.get(0)
+                })
                 .unwrap_or(0);
             if n_sessions > keep_sessions {
                 let excess = n_sessions - keep_sessions;
@@ -477,7 +543,11 @@ fn main() {
             }
         };
         let id = req.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
-        let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
+        let method = req
+            .get("method")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
         let params = req.get("params").cloned().unwrap_or(Value::Null);
 
         if method == "$/cancel" {
@@ -490,12 +560,17 @@ fn main() {
                 Err(e) => Err(e.clone()),
                 Ok(st) => match method.as_str() {
                     "index.append" => {
-                        let events = params.get("events").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+                        let events = params
+                            .get("events")
+                            .and_then(|x| x.as_array())
+                            .cloned()
+                            .unwrap_or_default();
                         st.index_append(&events)
                     }
                     "search.fts" => {
                         let q = params.get("q").and_then(|x| x.as_str()).unwrap_or("");
-                        let limit = params.get("limit").and_then(|x| x.as_u64()).unwrap_or(5) as usize;
+                        let limit =
+                            params.get("limit").and_then(|x| x.as_u64()).unwrap_or(5) as usize;
                         st.search_fts(q, limit)
                     }
                     "vec.upsert" => st.vec_upsert(&params),
@@ -505,7 +580,10 @@ fn main() {
                     }
                     "stats" => st.stats(),
                     "gc" => {
-                        let dry = params.get("dry_run").and_then(|x| x.as_bool()).unwrap_or(true);
+                        let dry = params
+                            .get("dry_run")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(true);
                         st.gc(dry)
                     }
                     other => Err(format!("未知方法 {other}")),

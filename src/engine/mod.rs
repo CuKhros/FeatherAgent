@@ -16,9 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::bus::Bus;
-use crate::context::{
-    ContextEngine, CtxConfig, ModelProfile, RecallItem, Skill,
-};
+use crate::context::{ContextEngine, CtxConfig, ModelProfile, RecallItem, Skill};
 use crate::governance::paths::Paths;
 use crate::governance::permission::{Decision, Gate};
 use crate::governance::sandbox::SandboxCfg;
@@ -35,6 +33,9 @@ pub struct Config {
     pub tool_plugin: String,
     pub storage_plugin: String,
     pub model: String,
+    /// 普通推理温度（0.0–2.0）；空响应重试固定用 0.7。
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
     pub base_url: String,
     pub max_turns: u32,
     /// `always | interval | never`
@@ -54,6 +55,7 @@ impl Default for Config {
             tool_plugin: "tool".into(),
             storage_plugin: "storage".into(),
             model: "qwen2.5:7b".into(),
+            temperature: 0.7,
             base_url: "http://127.0.0.1:11434".into(),
             max_turns: 6,
             sync: "interval".into(),
@@ -65,6 +67,10 @@ impl Default for Config {
             allowed_sync_names: Vec::new(),
         }
     }
+}
+
+fn default_temperature() -> f64 {
+    0.7
 }
 
 impl Config {
@@ -164,6 +170,8 @@ pub struct Kernel {
     pub sessions: RwLock<HashMap<String, Arc<Session>>>,
     pub broadcasts: RwLock<Vec<(u64, Sender<Value>)>>,
     pub confirms: Mutex<HashMap<String, Sender<bool>>>,
+    /// 技术性工具失败计数（业务错误不计数），连续 3 次只熔断该工具。
+    tool_failures: Mutex<HashMap<String, u32>>,
     next_conn: AtomicU64,
     pub started: Instant,
     index_tx: Mutex<Option<Sender<(String, Arc<Event>)>>>,
@@ -176,9 +184,20 @@ struct ModelReply {
     tool_calls: Vec<crate::context::parse::ToolCall>,
 }
 
+const MAX_TOOL_FAILURES: u32 = 3;
+
+enum ToolExecError {
+    /// 工具正常返回的业务错误（路径越界、缺参数等），不进入熔断计数。
+    Business(String),
+    /// 进程崩溃 / 超时 / IO 故障，按工具计数，连续 3 次熔断该工具。
+    Technical(String),
+}
+
 impl Kernel {
     pub fn new(paths: Paths, cfg: Config, force: bool) -> Result<Arc<Self>, String> {
-        paths.create_all().map_err(|e| format!("创建目录失败: {e}"))?;
+        paths
+            .create_all()
+            .map_err(|e| format!("创建目录失败: {e}"))?;
 
         // 卷类型守卫（§3.5）：数据目录在网络盘/同步盘拒绝启动
         let mut warnings = Vec::new();
@@ -200,8 +219,13 @@ impl Kernel {
                         p.display()
                     ));
                 }
-                Verdict::Reject => warnings.push(format!("{} 位于 {label} 卷（已 --force 覆盖）", p.display())),
-                Verdict::Warn => warnings.push(format!("{} 位于 {label} 卷（仅告警）", p.display())),
+                Verdict::Reject => warnings.push(format!(
+                    "{} 位于 {label} 卷（已 --force 覆盖）",
+                    p.display()
+                )),
+                Verdict::Warn => {
+                    warnings.push(format!("{} 位于 {label} 卷（仅告警）", p.display()))
+                }
                 Verdict::Ok => {}
             }
         }
@@ -232,9 +256,18 @@ impl Kernel {
             sandbox,
             Duration::from_millis(30_000),
             vec![
-                ("FEATHER_DATA".into(), paths.data.to_string_lossy().into_owned()),
-                ("FEATHER_WORKSPACE".into(), paths.workspace.to_string_lossy().into_owned()),
-                ("FEATHER_RUNTIME".into(), paths.runtime.to_string_lossy().into_owned()),
+                (
+                    "FEATHER_DATA".into(),
+                    paths.data.to_string_lossy().into_owned(),
+                ),
+                (
+                    "FEATHER_WORKSPACE".into(),
+                    paths.workspace.to_string_lossy().into_owned(),
+                ),
+                (
+                    "FEATHER_RUNTIME".into(),
+                    paths.runtime.to_string_lossy().into_owned(),
+                ),
             ],
         ));
         for spec in registry.specs() {
@@ -260,6 +293,7 @@ impl Kernel {
             sessions: RwLock::new(HashMap::new()),
             broadcasts: RwLock::new(Vec::new()),
             confirms: Mutex::new(HashMap::new()),
+            tool_failures: Mutex::new(HashMap::new()),
             next_conn: AtomicU64::new(1),
             started: Instant::now(),
             index_tx: Mutex::new(None),
@@ -293,7 +327,12 @@ impl Kernel {
                 ev
             }
             Err(e) => {
-                let ev = Event::new(0, crate::proto::types::now_wall_ns(), kind, json!({"error": e.to_string()}));
+                let ev = Event::new(
+                    0,
+                    crate::proto::types::now_wall_ns(),
+                    kind,
+                    json!({"error": e.to_string()}),
+                );
                 Arc::new(ev)
             }
         }
@@ -339,7 +378,9 @@ impl Kernel {
         let cur = serde_json::to_value(&cfg).map_err(|e| e.to_string())?;
         let merged = merge_json(cur, patch.clone());
         cfg = serde_json::from_value(merged).map_err(|e| format!("配置非法: {e}"))?;
+        validate_config(&cfg, &self.plugins)?;
         cfg.save(&self.cfg_path).map_err(|e| e.to_string())?;
+        self.gate.set_auto_allow_safe(cfg.auto_allow_safe);
         *self.cfg.write() = cfg.clone();
         self.emit("_system", EventKind::ConfigChanged, json!({"patch": patch}));
         Ok(serde_json::to_value(cfg).unwrap_or(Value::Null))
@@ -352,7 +393,10 @@ impl Kernel {
         if let Ok(p) = self.plugins.get(provider) {
             if let Ok(res) = p.call("embed", json!({"text": text})) {
                 if let Some(v) = res.get("vector").and_then(|v| v.as_array()) {
-                    let vector: Vec<f32> = v.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+                    let vector: Vec<f32> = v
+                        .iter()
+                        .filter_map(|x| x.as_f64().map(|f| f as f32))
+                        .collect();
                     if !vector.is_empty() {
                         if let Ok(s) = self.plugins.get(&cfg.storage_plugin) {
                             if let Ok(r) = s.call(
@@ -362,9 +406,21 @@ impl Kernel {
                                 if let Some(arr) = r.get("items").and_then(|x| x.as_array()) {
                                     for it in arr {
                                         items.push(RecallItem {
-                                            id: it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                                            text: it.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                                            score: it.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32,
+                                            id: it
+                                                .get("id")
+                                                .and_then(|x| x.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            text: it
+                                                .get("text")
+                                                .and_then(|x| x.as_str())
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            score: it
+                                                .get("score")
+                                                .and_then(|x| x.as_f64())
+                                                .unwrap_or(0.0)
+                                                as f32,
                                             source: "vector".into(),
                                         });
                                     }
@@ -381,9 +437,18 @@ impl Kernel {
                     if let Some(arr) = r.get("items").and_then(|x| x.as_array()) {
                         for it in arr {
                             items.push(RecallItem {
-                                id: it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                                text: it.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                                score: it.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32,
+                                id: it
+                                    .get("id")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                text: it
+                                    .get("text")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                score: it.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0)
+                                    as f32,
                                 source: "fts".into(),
                             });
                         }
@@ -415,7 +480,9 @@ impl Kernel {
     pub fn storage_gc(&self, dry_run: bool) -> Value {
         let cfg = self.cfg.read().clone();
         match self.plugins.get(&cfg.storage_plugin) {
-            Ok(s) => s.call("gc", json!({"dry_run": dry_run})).unwrap_or_else(|e| json!({"error": e.to_string()})),
+            Ok(s) => s
+                .call("gc", json!({"dry_run": dry_run}))
+                .unwrap_or_else(|e| json!({"error": e.to_string()})),
             Err(e) => json!({"error": e.to_string()}),
         }
     }
@@ -457,10 +524,21 @@ impl Kernel {
                 capabilities: vec!["chat".into(), "stream".into(), "tools".into()],
             };
             let recalls = self.recall(&text, &cfg.provider_plugin);
-            let assembled = self
+            let tools = self.available_tools(&session.locked_tools);
+            let mut assembled = self
                 .ctx
-                .assemble(&events, &profile, &session.locked_tools, &session.locked_skills, &recalls)
+                .assemble(&events, &profile, &tools, &session.locked_skills, &recalls)
                 .map_err(|e| e.to_string())?;
+            let degraded = self.degraded_tools();
+            if !degraded.is_empty() {
+                assembled.messages.push(crate::context::Message::new(
+                    "system",
+                    format!(
+                        "[tool_health] 以下工具已熔断：{}。不要输出 tool_call 语法，直接用文字回答；需要用户手动处理时说明原因。",
+                        degraded.join(", ")
+                    ),
+                ));
+            }
             *session.snapshot.write() = json!({
                 "stats": assembled.stats,
                 "cards": assembled.summary_cards,
@@ -480,7 +558,11 @@ impl Kernel {
             if let Err(e) = &model_res {
                 // 空响应通常是采样抖动：换一点温度重试一次，仍空则硬失败。
                 if e.contains("空响应") && !session.cancel.load(Ordering::SeqCst) {
-                    self.emit(&session.id, EventKind::ModelRetry, json!({"attempt": 1, "reason": "empty", "temperature": 0.7}));
+                    self.emit(
+                        &session.id,
+                        EventKind::ModelRetry,
+                        json!({"attempt": 1, "reason": "empty", "temperature": 0.7}),
+                    );
                     model_res = self.run_model(session, &cfg, &assembled.messages, Some(0.7));
                 }
             }
@@ -496,7 +578,11 @@ impl Kernel {
                 last_status = "cancelled";
                 break;
             }
-            self.emit(&session.id, EventKind::ModelMessage, json!({"text": reply.text, "finish": reply.finish}));
+            self.emit(
+                &session.id,
+                EventKind::ModelMessage,
+                json!({"text": reply.text, "finish": reply.finish}),
+            );
 
             // ---- 工具 ----
             // provider 结构化返回的 tool_calls 优先；文本解析只作为兼容回落。
@@ -550,7 +636,11 @@ impl Kernel {
                         continue;
                     }
                     Err(e) => {
-                        self.emit(&session.id, EventKind::PermissionDenied, json!({"tool": call.name, "reason": e}));
+                        self.emit(
+                            &session.id,
+                            EventKind::PermissionDenied,
+                            json!({"tool": call.name, "reason": e}),
+                        );
                         self.emit(
                             &session.id,
                             EventKind::ToolResult,
@@ -570,11 +660,27 @@ impl Kernel {
                 }
                 match self.execute_tool(session, &cfg, &call.name, &call.arguments) {
                     Ok(v) => {
-                        self.emit(&session.id, EventKind::ToolResult, json!({"name": call.name, "result": v}));
+                        self.emit(
+                            &session.id,
+                            EventKind::ToolResult,
+                            json!({"name": call.name, "result": v}),
+                        );
                         executed += 1;
                     }
-                    Err(e) => {
-                        self.emit(&session.id, EventKind::ToolFailed, json!({"name": call.name, "error": e}));
+                    Err(ToolExecError::Business(e)) => {
+                        self.emit(
+                            &session.id,
+                            EventKind::ToolError,
+                            json!({"name": call.name, "error": e}),
+                        );
+                        executed += 1;
+                    }
+                    Err(ToolExecError::Technical(e)) => {
+                        self.emit(
+                            &session.id,
+                            EventKind::ToolFailed,
+                            json!({"name": call.name, "error": e}),
+                        );
                         // 崩溃不中止会话：标记后继续推理（§4.5）
                         executed += 1;
                     }
@@ -592,15 +698,28 @@ impl Kernel {
             "cancelled" => SessionState::Cancelled,
             _ => SessionState::Idle,
         };
-        self.emit(&session.id, EventKind::ChatFinished, json!({"status": last_status}));
+        self.emit(
+            &session.id,
+            EventKind::ChatFinished,
+            json!({"status": last_status}),
+        );
         Ok(())
     }
 
     fn index_user_text(&self, session: &Arc<Session>, text: &str, cfg: &Config) {
-        let Ok(p) = self.plugins.get(&cfg.provider_plugin) else { return };
-        let Ok(res) = p.call("embed", json!({"text": text})) else { return };
-        let Some(v) = res.get("vector").and_then(|x| x.as_array()) else { return };
-        let vector: Vec<f32> = v.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+        let Ok(p) = self.plugins.get(&cfg.provider_plugin) else {
+            return;
+        };
+        let Ok(res) = p.call("embed", json!({"text": text})) else {
+            return;
+        };
+        let Some(v) = res.get("vector").and_then(|x| x.as_array()) else {
+            return;
+        };
+        let vector: Vec<f32> = v
+            .iter()
+            .filter_map(|x| x.as_f64().map(|f| f as f32))
+            .collect();
         if vector.is_empty() {
             return;
         }
@@ -625,18 +744,25 @@ impl Kernel {
         messages: &[crate::context::Message],
         temperature: Option<f64>,
     ) -> Result<ModelReply, String> {
-        let proc = self.plugins.get(&cfg.provider_plugin).map_err(|e| e.to_string())?;
+        let proc = self
+            .plugins
+            .get(&cfg.provider_plugin)
+            .map_err(|e| e.to_string())?;
+        let tools = self.available_tools(&session.locked_tools);
         let mut params = json!({
             "model": cfg.model,
             "messages": messages,
-            "tools": session.locked_tools,
+            "tools": tools,
             "stream": true,
             "base_url": cfg.base_url,
+            "temperature": cfg.temperature,
         });
         if let Some(t) = temperature {
             params["temperature"] = json!(t);
         }
-        let (req, rx) = proc.start_stream("chat", params).map_err(|e| e.to_string())?;
+        let (req, rx) = proc
+            .start_stream("chat", params)
+            .map_err(|e| e.to_string())?;
         *session.active_req.lock() = Some((cfg.provider_plugin.clone(), req));
 
         let mut acc = String::new();
@@ -647,7 +773,11 @@ impl Kernel {
         loop {
             if session.cancel.load(Ordering::SeqCst) {
                 proc.cancel(req);
-                self.emit(&session.id, EventKind::ToolCancelled, json!({"name": "model.chat", "reason": "user_cancel"}));
+                self.emit(
+                    &session.id,
+                    EventKind::ToolCancelled,
+                    json!({"name": "model.chat", "reason": "user_cancel"}),
+                );
                 // 取消传播：SIGTERM 3s → SIGKILL 由 hard_kill 兜底
                 break;
             }
@@ -666,10 +796,18 @@ impl Kernel {
                             if !t.is_empty() {
                                 acc.push_str(t);
                                 if first {
-                                    self.emit(&session.id, EventKind::ModelDelta, json!({"text": t, "first": true}));
+                                    self.emit(
+                                        &session.id,
+                                        EventKind::ModelDelta,
+                                        json!({"text": t, "first": true}),
+                                    );
                                     first = false;
                                 } else {
-                                    self.emit(&session.id, EventKind::ModelDelta, json!({"text": t}));
+                                    self.emit(
+                                        &session.id,
+                                        EventKind::ModelDelta,
+                                        json!({"text": t}),
+                                    );
                                 }
                             }
                         }
@@ -683,7 +821,10 @@ impl Kernel {
                             break;
                         }
                         "error" => {
-                            let e = p.get("message").and_then(|m| m.as_str()).unwrap_or("provider error");
+                            let e = p
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("provider error");
                             proc.finish_stream(req);
                             *session.active_req.lock() = None;
                             let _ = proc.record_failure();
@@ -697,7 +838,11 @@ impl Kernel {
                     *session.active_req.lock() = None;
                     let degrade = proc.record_failure();
                     if degrade {
-                        self.emit(&session.id, EventKind::PluginDegraded, json!({"plugin": cfg.provider_plugin}));
+                        self.emit(
+                            &session.id,
+                            EventKind::PluginDegraded,
+                            json!({"plugin": cfg.provider_plugin}),
+                        );
                     }
                     return Err("provider 崩溃".into());
                 }
@@ -708,7 +853,11 @@ impl Kernel {
         if acc.is_empty() && tool_calls.is_empty() && finish == "stop" {
             finish = "empty".into();
         }
-        Ok(ModelReply { text: acc, finish, tool_calls })
+        Ok(ModelReply {
+            text: acc,
+            finish,
+            tool_calls,
+        })
     }
 
     fn authorize(&self, session: &Arc<Session>, tool: &str) -> Result<bool, String> {
@@ -746,13 +895,66 @@ impl Kernel {
         }
     }
 
+    fn tool_failure_count(&self, name: &str) -> u32 {
+        self.tool_failures.lock().get(name).copied().unwrap_or(0)
+    }
+
+    fn tool_degraded(&self, name: &str) -> bool {
+        self.tool_failure_count(name) >= MAX_TOOL_FAILURES
+    }
+
+    fn available_tools(&self, tools: &[Value]) -> Vec<Value> {
+        let failures = self.tool_failures.lock();
+        tools
+            .iter()
+            .filter(|t| {
+                let name = t.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                failures.get(name).copied().unwrap_or(0) < MAX_TOOL_FAILURES
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn degraded_tools(&self) -> Vec<String> {
+        self.tool_failures
+            .lock()
+            .iter()
+            .filter(|(_, n)| **n >= MAX_TOOL_FAILURES)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    fn reset_tool_failure(&self, name: &str) {
+        self.tool_failures.lock().remove(name);
+    }
+
+    fn record_tool_failure(&self, session: &Arc<Session>, name: &str) -> bool {
+        let (n, degrade) = {
+            let mut m = self.tool_failures.lock();
+            let n = m.entry(name.to_string()).or_insert(0);
+            *n += 1;
+            (*n, *n >= MAX_TOOL_FAILURES)
+        };
+        if degrade {
+            self.emit(
+                &session.id,
+                EventKind::ToolDegraded,
+                json!({"name": name, "failures": n}),
+            );
+        }
+        degrade
+    }
+
     fn execute_tool(
         &self,
         session: &Arc<Session>,
         cfg: &Config,
         name: &str,
         args: &Value,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, ToolExecError> {
+        if self.tool_degraded(name) {
+            return Err(ToolExecError::Technical(format!("工具已熔断: {name}")));
+        }
         let plugin_name = if name.starts_with("tool.") {
             cfg.tool_plugin.clone()
         } else if name.starts_with("storage.") {
@@ -765,20 +967,21 @@ impl Kernel {
             match self.plugins.get(&plugin_name) {
                 Ok(proc) => match proc.call(name, json!({"arguments": args, "session": session.id, "workspace": session_workspace(self, &session.id) })) {
                     Ok(v) => {
-                        proc.reset_failures();
+                        self.reset_tool_failure(name);
                         return Ok(v);
                     }
-                    Err(PluginError::Crashed) | Err(PluginError::Io(_)) if attempt == 0 => {
+                    Err(PluginError::Rpc { code, message }) => {
+                        // 业务错误（路径越界/缺参数/文件不存在）是正常工具结果，
+                        // 不重启插件、不计入熔断，回注给模型继续推理。
+                        return Err(ToolExecError::Business(format!("rpc {code}: {message}")));
+                    }
+                    Err(PluginError::Crashed) | Err(PluginError::Io(_)) | Err(PluginError::Timeout) if attempt == 0 => {
                         last_err = "插件崩溃，重启后重试一次".into();
                         let _ = self.plugins.restart(&plugin_name);
                         continue;
                     }
                     Err(e) => {
                         last_err = e.to_string();
-                        let degrade = self.plugins.get(&plugin_name).map(|p| p.record_failure()).unwrap_or(false);
-                        if degrade {
-                            self.emit(&session.id, EventKind::PluginDegraded, json!({"plugin": plugin_name}));
-                        }
                         break;
                     }
                 },
@@ -788,7 +991,8 @@ impl Kernel {
                 }
             }
         }
-        Err(last_err)
+        self.record_tool_failure(session, name);
+        Err(ToolExecError::Technical(last_err))
     }
 
     pub fn stop(&self) {
@@ -797,7 +1001,12 @@ impl Kernel {
 }
 
 fn session_workspace(kernel: &Kernel, session: &str) -> String {
-    kernel.paths.workspace.join(crate::log::safe_session_id(session)).to_string_lossy().into_owned()
+    kernel
+        .paths
+        .workspace
+        .join(crate::log::safe_session_id(session))
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn indexer_loop(kernel: Weak<Kernel>, rx: Receiver<(String, Arc<Event>)>) {
@@ -843,6 +1052,29 @@ fn indexer_loop(kernel: Weak<Kernel>, rx: Receiver<(String, Arc<Event>)>) {
     }
 }
 
+fn validate_config(cfg: &Config, plugins: &PluginHost) -> Result<(), String> {
+    if cfg.provider_plugin.trim().is_empty() || cfg.model.trim().is_empty() {
+        return Err("provider_plugin 与 model 不能为空".into());
+    }
+    if !cfg.temperature.is_finite() || !(0.0..=2.0).contains(&cfg.temperature) {
+        return Err("temperature 必须在 0.0–2.0 之间".into());
+    }
+    if !(1..=32).contains(&cfg.max_turns) {
+        return Err("max_turns 必须在 1–32 之间".into());
+    }
+    if !(512..=131_072).contains(&cfg.context_window) {
+        return Err("context_window 必须在 512–131072 之间".into());
+    }
+    if !plugins
+        .specs()
+        .iter()
+        .any(|s| s.name == cfg.provider_plugin)
+    {
+        return Err(format!("provider 插件未安装: {}", cfg.provider_plugin));
+    }
+    Ok(())
+}
+
 fn merge_json(base: Value, patch: Value) -> Value {
     match (base, patch) {
         (Value::Object(mut a), Value::Object(b)) => {
@@ -858,9 +1090,9 @@ fn merge_json(base: Value, patch: Value) -> Value {
 
 fn default_tools() -> Vec<Value> {
     vec![
-        json!({"name": "tool.fs.read", "description": "读文件", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}),
-        json!({"name": "tool.fs.write", "description": "写文件", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}}),
-        json!({"name": "tool.shell", "description": "执行 shell 命令", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}),
+        json!({"name": "tool.fs.read", "description": "读文件；path 必须是相对安装根的路径（如 workspace/foo.txt），不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}),
+        json!({"name": "tool.fs.write", "description": "写文件；path 必须是相对安装根的路径（如 workspace/foo.txt），不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}}),
+        json!({"name": "tool.shell", "description": "在工作空间执行 shell 命令", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}),
     ]
 }
 

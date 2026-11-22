@@ -18,6 +18,8 @@ pub enum EventKind {
     ToolCall,
     ToolResult,
     ToolFailed,
+    ToolError,
+    ToolDegraded,
     ToolCancelled,
     SessionCreated,
     SessionForked,
@@ -45,6 +47,8 @@ impl EventKind {
             ToolCall => 4,
             ToolResult => 5,
             ToolFailed => 6,
+            ToolError => 22,
+            ToolDegraded => 23,
             ToolCancelled => 7,
             SessionCreated => 8,
             SessionForked => 9,
@@ -73,6 +77,8 @@ impl EventKind {
             5 => ToolResult,
             6 => ToolFailed,
             7 => ToolCancelled,
+            22 => ToolError,
+            23 => ToolDegraded,
             8 => SessionCreated,
             9 => SessionForked,
             10 => SessionArchived,
@@ -100,6 +106,8 @@ impl EventKind {
             ToolCall => "tool.call",
             ToolResult => "tool.result",
             ToolFailed => "tool.failed",
+            ToolError => "tool.error",
+            ToolDegraded => "tool.degraded",
             ToolCancelled => "tool.cancelled",
             SessionCreated => "session.created",
             SessionForked => "session.forked",
@@ -128,6 +136,8 @@ impl EventKind {
             "tool.call" => ToolCall,
             "tool.result" => ToolResult,
             "tool.failed" => ToolFailed,
+            "tool.error" => ToolError,
+            "tool.degraded" => ToolDegraded,
             "tool.cancelled" => ToolCancelled,
             "session.created" => SessionCreated,
             "session.forked" => SessionForked,
@@ -154,6 +164,8 @@ impl EventKind {
         Self::ToolCall,
         Self::ToolResult,
         Self::ToolFailed,
+        Self::ToolError,
+        Self::ToolDegraded,
         Self::ToolCancelled,
         Self::SessionCreated,
         Self::SessionForked,
@@ -242,4 +254,23 @@ pub fn now_wall_ns() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_error_and_degraded_codes_round_trip() {
+        for kind in [
+            EventKind::ToolError,
+            EventKind::ToolDegraded,
+            EventKind::ModelRetry,
+        ] {
+            assert_eq!(EventKind::from_code(kind.code()), Some(kind));
+            assert_eq!(EventKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(EventKind::ToolError.code(), 22);
+        assert_eq!(EventKind::ToolDegraded.code(), 23);
+    }
 }

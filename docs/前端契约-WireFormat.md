@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.4**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.1.5**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -59,7 +59,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.4","contract":"1.0","transport":"pipe",
+  "version":"1.1.5","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -152,13 +152,14 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `chat.cancel` | 取消当前生成 | `session` |
 | `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `token`（来自 `tool.confirm_request`）、`allow` |
 | `ctx.inspect` | 查看上下文组装细节 | 见实现 |
-| `config.get` / `config.set` | 读取/修改运行配置 | 见实现 |
+| `config.get` / `config.set` | 读取/修改运行配置 | `config.get`：无参数返回完整配置；`path` 返回 `{value, config}`。`config.set`：`{patch}`，返回 `{config}` |
+| `provider.models` | 读取 provider 的模型列表 | `provider`、`base_url`、`model`（均可选） |
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
 | `plugin.list` | 插件清单 | 无 |
 | `plugin.enable` / `plugin.disable` | 启停插件 | `name` |
 | `plugin.install` | 安装插件 | 见实现 |
 
-完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`（失败为 `tool.failed`）；provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
+完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`。业务错误（路径越界/缺参数/文件不存在）为 `tool.error`；只有插件崩溃/超时/IO 故障才为 `tool.failed`；连续 3 次技术失败会为该工具发 `tool.degraded`。provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
 
 ### 5.1 工具确认与拒绝（v1.1.4）
 
@@ -167,6 +168,43 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - 拒绝时除 `permission.denied` 外，还会写入一条结构化 `tool.result`：`{"denied":true,"result":{"error":"permission_denied","reason":"user_denied|确认超时","tool":"..."}}`，模型下一轮可据此解释。
 - `chat` 命令支持 `--allow <tool,...>` / `--yes` 自动确认；未放行时默认立即 deny（`--confirm-timeout` 可保留人工窗口）。
 - 空响应自动重试一次时写入 `model.retry` 事件（`attempt` / `reason` / `temperature`）；仍失败则 `chat.finished status=failed`。
+
+### 5.2 设置与模型发现（v1.1.5）
+
+前端设置页统一走以下链路，不要直接改 `config.json`：
+
+```json
+// 1) 读取
+{"method":"config.get","params":{}}
+// → {"provider_plugin":"provider-ollama","base_url":"...","model":"qwen3.5:4b",
+//    "temperature":0.7,"context_window":8192,"max_turns":6,"auto_allow_safe":true,...}
+
+// 2) 发现模型（Ollama 读 /api/tags；OpenAI 兼容读 /v1/models）
+{"method":"provider.models","params":{"provider":"provider-ollama","base_url":"http://127.0.0.1:11434","model":"qwen3.5:4b"}}
+// → {"provider":"provider-ollama","models":["qwen3.5:4b","..."],"probe":{...}}
+// 失败时仍返回 200：{"provider":"...","models":[],"error":"..."}，前端应允许手填模型
+
+// 3) 保存（只提交需要改的字段）
+{"method":"config.set","params":{"patch":{
+  "provider_plugin":"provider-ollama","model":"qwen3.5:4b","temperature":0.6,
+  "context_window":8192,"max_turns":6,"auto_allow_safe":true
+}}}
+// → {"config":{...完整新配置...}}
+```
+
+- `config.set` 会原子写 `data/config.json`，更新内存配置与权限门的 `auto_allow_safe`，并写 `config.changed` 事件；下一轮 `chat.send` 立即使用新 provider/model/temperature/context_window/max_turns，无需重启内核。
+- 温度范围 0.0–2.0；`context_window` 512–131072；`max_turns` 1–32；`provider_plugin` 必须是已登记插件，否则服务端返回 `-32602`。
+- 空响应重试仍固定 `temperature=0.7`，与用户设置无关。
+- `ctx.inspect` 是诊断接口，不保证拿到会话锁：锁繁忙时返回 `state:"busy"`、`snapshot:null`，前端不要据此判定回合失败。
+
+### 5.3 工具错误事件
+
+| kind | 语义 | 是否计入熔断 | 前端建议 |
+|---|---|---|---|
+| `tool.result` | 工具成功返回，或权限拒绝的结构化结果（`denied=true`） | 否 | 展示结果；拒绝标红 |
+| `tool.error` | 工具业务错误（路径越界/缺参数/文件不存在） | **否** | 展示“业务错误”，模型会收到 tool 消息 |
+| `tool.failed` | 插件崩溃/超时/IO 故障 | 是（按工具名） | 展示“插件失败”；连续 3 次后显示熔断 |
+| `tool.degraded` | 某个工具连续 3 次技术失败被熔断 | — | 该工具从后续 tools schema 移除，system 注入“不要输出 tool_call 语法” |
 
 ## 6. 错误码
 
@@ -181,7 +219,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `50201` | 插件调用失败 |
 | `40901` | 资源被占用（如单客户端能力被占） |
 
-## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认语义）
+## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认，1.1.5 补设置）
 
 - Windows 命名管道使用 **overlapped I/O + 每连接独立句柄**，读写互不阻塞。
 - `accept` 遇到客户端连上后立即断开（`ERROR_NO_DATA`）会复位实例并返回错误，由 `Server::run` 继续 `accept`；不会永久占死实例。

@@ -71,7 +71,12 @@ impl Client {
         self.call_with_timeout(method, params, Duration::from_secs(30))
     }
 
-    pub fn call_with_timeout(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    pub fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
         self.inner.pending.lock().insert(id, tx);
@@ -86,7 +91,9 @@ impl Client {
                     Err(format!(
                         "rpc {}: {}",
                         err.get("code").and_then(|c| c.as_i64()).unwrap_or(0),
-                        err.get("message").and_then(|m| m.as_str()).unwrap_or("unknown")
+                        err.get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("unknown")
                     ))
                 } else {
                     Ok(v.get("result").cloned().unwrap_or(Value::Null))
@@ -113,7 +120,11 @@ impl Client {
 }
 
 /// 简单等待：测试里轮询事件直到谓词满足。
-pub fn wait_event(rx: &Receiver<Value>, pred: impl Fn(&Value) -> bool, timeout: Duration) -> Option<Value> {
+pub fn wait_event(
+    rx: &Receiver<Value>,
+    pred: impl Fn(&Value) -> bool,
+    timeout: Duration,
+) -> Option<Value> {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
         match rx.recv_timeout(Duration::from_millis(100)) {
