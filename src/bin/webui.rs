@@ -713,12 +713,19 @@ mod tests {
         assert!(INDEX_HTML.contains("cfg-temperature"));
         assert!(INDEX_HTML.contains("cfg-model-select"));
         assert!(!INDEX_HTML.contains("cfg-model-list"));
+        assert!(INDEX_HTML.contains("settings-nav"));
+        assert!(INDEX_HTML.contains("cfg-workspace-root"));
+        assert!(INDEX_HTML.contains("plugin-list"));
+        assert!(INDEX_HTML.contains("plugin-install-path"));
         assert!(APP_JS.contains("EventSource"));
         assert!(APP_JS.contains("provider.models"));
         assert!(APP_JS.contains("RPC 超时"));
         assert!(APP_JS.contains("config.set"));
         assert!(APP_JS.contains("renderModelList"));
         assert!(APP_JS.contains("cfg-model-select"));
+        assert!(APP_JS.contains("renderPluginNav"));
+        assert!(APP_JS.contains("installPlugin"));
+        assert!(APP_JS.contains("showSettingsView"));
     }
 
     fn masked_frame(opcode: u8, fin: bool, text: &str) -> Vec<u8> {

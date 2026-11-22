@@ -510,14 +510,16 @@ plugin.list / enable / disable / install
 - GUI 迭代节奏与内核解耦（改 UI 不必发内核）
 - 第三方可基于前端契约做自己的前端（VS Code 插件、Web 面板、移动端）
 
-### 7.4 WebUI 功能（v1.1.6）
+### 7.4 WebUI 功能（v1.1.7）
 
 三栏布局：
 - 左：会话列表 + preset 切换
 - 中：对话流（Markdown、工具卡片可展开看参数/结果、耗时与 token 角标）
 - 右：**上下文面板**（预算占用条、压缩摘要可 pin、记忆召回、**存储占用与配额**）
 
-设置页（v1.1.6）：Provider 插件、Base URL、模型（`provider.models` 发现，下拉列出全部模型，可手填）、温度、上下文窗口、`max_turns`、`auto_allow_safe`；保存经 `config.set` 原子写 `data/config.json` 并即时应用。TUI 同样提供 `/settings` 页面。三类路径迁移、配额、卷类型健康检查、插件管理仍待后续。
+设置页（v1.1.7）：左侧栏 + 右侧内容。固定项为“常规 / 插件管理”，其下按 `plugin.list` 的登记表自动生成每个已安装插件的侧栏条目与详情页（capabilities、permissions、program、blake3、启停）。常规页包括 Provider 插件、Base URL、模型（`provider.models` 发现，下拉列出全部模型，可手填）、温度、上下文窗口、`max_turns`、`workspace_root`、`auto_allow_safe`；保存经 `config.set` 原子写 `data/config.json`，除 `workspace_root` 需重启 `serve` 外即时应用。顶栏“插件”与“设置”并列。TUI 同样提供 `/settings` 与 `/plugins` 页面，并在进入会话后把 ↑↓ 改为翻阅上下文、Esc 返回会话列表。
+
+工作区（v1.1.7）：`workspace_root` 可指向安装目录外；内核首次启动创建 `<workspace>/.featheagent/{worklog.md,memory.md,README.md}`，system prompt 注入“任务结束写工作日志、更新项目记忆”的习惯。`plugin.enable/disable` 同步运行进程；`plugin.install` 成功后即时登记 spec。三类路径迁移、配额、卷类型健康检查仍待后续。
 
 ---
 

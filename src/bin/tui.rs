@@ -17,6 +17,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 use serde_json::{json, Value};
+use unicode_width::UnicodeWidthChar;
 
 use featheragent::governance::paths::{Overrides, Paths};
 use featheragent::server::client::{Client, Connect};
@@ -33,13 +34,26 @@ struct SettingsState {
     temperature: String,
     context_window: String,
     max_turns: String,
+    workspace_root: String,
     auto_allow_safe: bool,
     field: usize,
     status: String,
     models_hint: String,
 }
 
-const SETTINGS_FIELDS: usize = 9;
+const SETTINGS_FIELDS: usize = 10;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Focus {
+    Sessions,
+    Chat,
+}
+
+struct PluginsState {
+    items: Vec<Value>,
+    selected: usize,
+    status: String,
+}
 
 struct App {
     conn: Connect,
@@ -50,9 +64,13 @@ struct App {
     state: String,
     ctx: Value,
     input: String,
+    input_cursor: usize,
+    focus: Focus,
+    chat_scroll: usize,
     status: String,
     confirm: Option<(String, String, String)>, // token, tool, risk
     settings: Option<SettingsState>,
+    plugins: Option<PluginsState>,
     quit: bool,
 }
 
@@ -93,9 +111,13 @@ fn main() {
         state: "idle".into(),
         ctx: Value::Null,
         input: String::new(),
-        status: format!("已连接 {}", socket.display()),
+        input_cursor: 0,
+        focus: Focus::Sessions,
+        chat_scroll: 0,
+        status: format!("已连接 {}；↑↓ 选会话，Enter 进入", socket.display()),
         confirm: None,
         settings: None,
+        plugins: None,
         quit: false,
     };
     app.refresh_sessions();
@@ -178,7 +200,20 @@ impl App {
                     "系统".into(),
                     format!("已恢复会话 {id}（{} 条事件）", v["total"]),
                 ));
-                self.status = format!("会话 {id}");
+                if let Some(events) = v.get("events").and_then(|x| x.as_array()) {
+                    for e in events {
+                        let kind = e.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                        let payload = e.get("payload").cloned().unwrap_or(Value::Null);
+                        if let Some(m) = event_message(kind, &payload) {
+                            self.messages.push(m);
+                        }
+                    }
+                }
+                self.focus = Focus::Chat;
+                self.chat_scroll = 0;
+                self.input.clear();
+                self.input_cursor = 0;
+                self.status = format!("会话 {id}：↑↓ 翻阅对话，Esc 返回列表，/help 查看命令");
                 self.refresh_ctx();
             }
             Err(e) => self.status = format!("恢复失败: {e}"),
@@ -191,10 +226,128 @@ impl App {
                 self.session = Some(id.to_string());
                 self.messages.clear();
                 self.messages.push(("系统".into(), format!("新会话 {id}")));
+                self.focus = Focus::Chat;
+                self.chat_scroll = 0;
+                self.input.clear();
+                self.input_cursor = 0;
+                self.status = format!("会话 {id}：↑↓ 翻阅对话，Esc 返回列表");
                 self.refresh_sessions();
                 self.refresh_ctx();
             }
             Err(e) => self.status = format!("创建失败: {e}"),
+        }
+    }
+
+    fn refresh_plugins(&mut self) {
+        let v = match self.conn.client.call("plugin.list", json!({})) {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(p) = &mut self.plugins {
+                    p.status = format!("读取插件失败: {e}");
+                } else {
+                    self.status = format!("读取插件失败: {e}");
+                }
+                return;
+            }
+        };
+        let live: Vec<Value> = v
+            .get("live")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut items = Vec::new();
+        for e in v
+            .get("registry")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let name = e.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let state = live
+                .iter()
+                .find(|x| x.get("name").and_then(|y| y.as_str()) == Some(name))
+                .and_then(|x| x.get("state"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("stopped");
+            let mut item = e.clone();
+            item["live_state"] = json!(state);
+            items.push(item);
+        }
+        let status = format!("{} 个插件；Space 启停，r 刷新，Esc 返回", items.len());
+        if let Some(p) = &mut self.plugins {
+            let old = p.selected.min(items.len().saturating_sub(1));
+            p.items = items;
+            p.selected = old;
+            p.status = status;
+        } else {
+            let selected = 0;
+            self.plugins = Some(PluginsState {
+                items,
+                selected,
+                status,
+            });
+        }
+    }
+
+    fn toggle_plugin(&mut self) {
+        let Some(p) = &self.plugins else { return };
+        let Some(item) = p.items.get(p.selected) else {
+            return;
+        };
+        let name = item
+            .get("name")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let enabled = item
+            .get("enabled")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let method = if enabled {
+            "plugin.disable"
+        } else {
+            "plugin.enable"
+        };
+        match self.conn.client.call(method, json!({"name": name})) {
+            Ok(_) => {
+                self.refresh_plugins();
+                if let Some(p) = &mut self.plugins {
+                    p.status = format!(
+                        "{} → {}（已同步运行进程）",
+                        name,
+                        if enabled { "停用" } else { "启用" }
+                    );
+                }
+            }
+            Err(e) => {
+                if let Some(p) = &mut self.plugins {
+                    p.status = format!("启停失败: {e}");
+                }
+            }
+        }
+    }
+
+    fn on_plugins_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc => {
+                self.plugins = None;
+                self.status = "已关闭插件管理".into();
+            }
+            KeyCode::Up => {
+                if let Some(p) = &mut self.plugins {
+                    p.selected = p.selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(p) = &mut self.plugins {
+                    if p.selected + 1 < p.items.len() {
+                        p.selected += 1;
+                    }
+                }
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => self.toggle_plugin(),
+            KeyCode::Char('r') => self.refresh_plugins(),
+            _ => {}
         }
     }
 
@@ -272,6 +425,11 @@ impl App {
                 .and_then(|x| x.as_u64())
                 .unwrap_or(6)
                 .to_string(),
+            workspace_root: cfg
+                .get("workspace_root")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             auto_allow_safe: cfg
                 .get("auto_allow_safe")
                 .and_then(|x| x.as_bool())
@@ -320,19 +478,28 @@ impl App {
     }
 
     fn save_settings(&mut self) {
-        let (provider, base_url, model, temperature, context_window, max_turns, auto_allow_safe) =
-            match &self.settings {
-                Some(s) => (
-                    s.provider.clone(),
-                    s.base_url.trim().to_string(),
-                    s.model.trim().to_string(),
-                    s.temperature.trim().parse::<f64>(),
-                    s.context_window.trim().parse::<u64>(),
-                    s.max_turns.trim().parse::<u64>(),
-                    s.auto_allow_safe,
-                ),
-                None => return,
-            };
+        let (
+            provider,
+            base_url,
+            model,
+            temperature,
+            context_window,
+            max_turns,
+            workspace_root,
+            auto_allow_safe,
+        ) = match &self.settings {
+            Some(s) => (
+                s.provider.clone(),
+                s.base_url.trim().to_string(),
+                s.model.trim().to_string(),
+                s.temperature.trim().parse::<f64>(),
+                s.context_window.trim().parse::<u64>(),
+                s.max_turns.trim().parse::<u64>(),
+                s.workspace_root.trim().to_string(),
+                s.auto_allow_safe,
+            ),
+            None => return,
+        };
         let (Ok(temperature), Ok(context_window), Ok(max_turns)) =
             (temperature, context_window, max_turns)
         else {
@@ -360,6 +527,7 @@ impl App {
             "temperature": temperature,
             "context_window": context_window,
             "max_turns": max_turns,
+            "workspace_root": workspace_root,
             "auto_allow_safe": auto_allow_safe,
         });
         match self.conn.client.call("config.set", json!({"patch": patch})) {
@@ -367,7 +535,7 @@ impl App {
                 let cfg = v.get("config").cloned().unwrap_or(Value::Null);
                 if let Some(s) = &mut self.settings {
                     s.status = format!(
-                        "已保存并应用：{} / {} / T={:.2}",
+                        "已保存并应用：{} / {} / T={:.2}；工作区改动需重启 serve 生效",
                         provider, model, temperature
                     );
                     if let Some(t) = cfg.get("temperature").and_then(|x| x.as_f64()) {
@@ -401,7 +569,7 @@ impl App {
                 self.status = "已关闭设置页（未保存的修改已丢弃）".into();
             }
             KeyCode::Enter => {
-                if field == 8 {
+                if field == 9 {
                     self.settings = None;
                 } else {
                     self.save_settings();
@@ -472,6 +640,7 @@ impl App {
                         3 => Some(&mut s.temperature),
                         4 => Some(&mut s.context_window),
                         5 => Some(&mut s.max_turns),
+                        6 => Some(&mut s.workspace_root),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -479,7 +648,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(' ') if field == 6 => {
+            KeyCode::Char(' ') if field == 7 => {
                 if let Some(s) = &mut self.settings {
                     s.auto_allow_safe = !s.auto_allow_safe;
                 }
@@ -492,6 +661,7 @@ impl App {
                         3 => Some(&mut s.temperature),
                         4 => Some(&mut s.context_window),
                         5 => Some(&mut s.max_turns),
+                        6 => Some(&mut s.workspace_root),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -501,6 +671,53 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn input_len(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn input_byte_at_cursor(&self) -> usize {
+        self.input
+            .char_indices()
+            .nth(self.input_cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input.len())
+    }
+
+    fn insert_input(&mut self, c: char) {
+        let at = self.input_byte_at_cursor();
+        self.input.insert(at, c);
+        self.input_cursor += 1;
+    }
+
+    fn backspace_input(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let prev = self.input_cursor - 1;
+        if let Some((at, _)) = self.input.char_indices().nth(prev) {
+            self.input.remove(at);
+            self.input_cursor = prev;
+        }
+    }
+
+    fn delete_input(&mut self) {
+        if self.input_cursor >= self.input_len() {
+            return;
+        }
+        if let Some((at, _)) = self.input.char_indices().nth(self.input_cursor) {
+            self.input.remove(at);
+        }
+    }
+
+    fn move_input_cursor(&mut self, delta: isize) {
+        let max = self.input_len();
+        self.input_cursor = if delta < 0 {
+            self.input_cursor.saturating_sub((-delta) as usize)
+        } else {
+            (self.input_cursor + delta as usize).min(max)
+        };
     }
 
     fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
@@ -531,41 +748,76 @@ impl App {
             self.on_settings_key(code, mods);
             return;
         }
+        if self.plugins.is_some() {
+            self.on_plugins_key(code);
+            return;
+        }
         match code {
             KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => self.quit = true,
-            KeyCode::Esc => self.quit = true,
+            KeyCode::Esc => {
+                if self.focus == Focus::Chat {
+                    // 对话内 Esc 只退回会话列表，不退出 TUI；再次 Esc 才退出。
+                    self.focus = Focus::Sessions;
+                    self.chat_scroll = 0;
+                    self.input.clear();
+                    self.input_cursor = 0;
+                    self.status = "会话列表：↑↓ 选择，Enter 进入，Esc 退出".into();
+                } else {
+                    self.quit = true;
+                }
+            }
             KeyCode::Up => {
-                self.selected = self.selected.saturating_sub(1);
+                if self.focus == Focus::Chat {
+                    self.chat_scroll = self.chat_scroll.saturating_add(1);
+                } else {
+                    self.selected = self.selected.saturating_sub(1);
+                }
             }
             KeyCode::Down => {
-                if self.selected + 1 < self.sessions.len() {
+                if self.focus == Focus::Chat {
+                    self.chat_scroll = self.chat_scroll.saturating_sub(1);
+                } else if self.selected + 1 < self.sessions.len() {
                     self.selected += 1;
                 }
             }
-            KeyCode::Backspace => {
-                self.input.pop();
+            KeyCode::PageUp if self.focus == Focus::Chat => {
+                self.chat_scroll = self.chat_scroll.saturating_add(10);
             }
+            KeyCode::PageDown if self.focus == Focus::Chat => {
+                self.chat_scroll = self.chat_scroll.saturating_sub(10);
+            }
+            KeyCode::Left => self.move_input_cursor(-1),
+            KeyCode::Right => self.move_input_cursor(1),
+            KeyCode::Home => self.input_cursor = 0,
+            KeyCode::End => self.input_cursor = self.input_len(),
+            KeyCode::Backspace => self.backspace_input(),
+            KeyCode::Delete => self.delete_input(),
             KeyCode::Enter => {
                 let text = self.input.trim().to_string();
-                self.input.clear();
                 if text.is_empty() {
-                    if let Some(s) = self
-                        .sessions
-                        .get(self.selected)
-                        .and_then(|x| x["id"].as_str())
-                        .map(|x| x.to_string())
-                    {
-                        self.resume(&s);
+                    if self.focus == Focus::Sessions {
+                        if let Some(s) = self
+                            .sessions
+                            .get(self.selected)
+                            .and_then(|x| x["id"].as_str())
+                            .map(|x| x.to_string())
+                        {
+                            self.resume(&s);
+                        }
                     }
                     return;
                 }
+                self.input.clear();
+                self.input_cursor = 0;
                 if let Some(cmd) = text.strip_prefix('/') {
                     self.command(cmd);
-                } else {
+                } else if self.focus == Focus::Chat {
                     self.send(&text);
+                } else {
+                    self.status = "先按 Enter 进入会话，再输入消息".into();
                 }
             }
-            KeyCode::Char(c) => self.input.push(c),
+            KeyCode::Char(c) => self.insert_input(c),
             _ => {}
         }
     }
@@ -615,10 +867,14 @@ impl App {
                 }
             }
             "settings" | "config" => self.open_settings(),
+            "plugins" => {
+                self.refresh_plugins();
+                self.status = "插件管理：Space 启停，r 刷新，Esc 返回".into();
+            }
             "clear" => self.messages.clear(),
             "help" => self.messages.push((
                 "系统".into(),
-                "/new [id] /use <id> /fork [id] /cancel /settings /clear /quit".into(),
+                "/new [id] /use <id> /fork [id] /cancel /settings /plugins /clear /quit".into(),
             )),
             _ => self.status = format!("未知命令 /{name}"),
         }
@@ -629,6 +885,8 @@ impl App {
             self.status = "先 /new 或 /use 选择会话".into();
             return;
         };
+        self.focus = Focus::Chat;
+        self.chat_scroll = 0;
         self.messages.push(("你".into(), text.to_string()));
         match self
             .conn
@@ -686,7 +944,7 @@ impl App {
                     let t = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
                     self.messages.push(("助手".into(), t.to_string()));
                 }
-                "tool.requested" => {
+                "tool.call" => {
                     let t = p.get("tool").and_then(|x| x.as_str()).unwrap_or("?");
                     self.messages.push(("工具".into(), format!("请求 {t}")));
                 }
@@ -775,7 +1033,103 @@ impl App {
     }
 }
 
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum()
+}
+
+fn event_message(kind: &str, p: &Value) -> Option<(String, String)> {
+    let text = match kind {
+        "user.message" => ("你".to_string(), p.get("text")?.as_str()?.to_string()),
+        "model.message" => {
+            let t = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
+            if t.is_empty() {
+                return None;
+            }
+            ("助手".to_string(), t.to_string())
+        }
+        "tool.requested" => (
+            "工具".to_string(),
+            format!(
+                "请求 {}",
+                p.get("tool").and_then(|x| x.as_str()).unwrap_or("?")
+            ),
+        ),
+        "tool.result" => {
+            let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let brief: String = p
+                .get("result")
+                .cloned()
+                .unwrap_or(Value::Null)
+                .to_string()
+                .chars()
+                .take(200)
+                .collect();
+            ("工具".to_string(), format!("{name} → {brief}"))
+        }
+        "tool.error" => (
+            "工具".to_string(),
+            format!(
+                "{} 业务错误: {}",
+                p.get("name").and_then(|x| x.as_str()).unwrap_or("?"),
+                p.get("error").and_then(|x| x.as_str()).unwrap_or("")
+            ),
+        ),
+        "tool.failed" => (
+            "工具".to_string(),
+            format!(
+                "{} 插件失败: {}",
+                p.get("name").and_then(|x| x.as_str()).unwrap_or("?"),
+                p.get("error").and_then(|x| x.as_str()).unwrap_or("")
+            ),
+        ),
+        "permission.denied" => (
+            "系统".to_string(),
+            format!(
+                "拒绝: {}",
+                p.get("reason").and_then(|x| x.as_str()).unwrap_or("")
+            ),
+        ),
+        "chat.finished" => (
+            "系统".to_string(),
+            format!(
+                "— 本轮结束（{}）",
+                p.get("status").and_then(|x| x.as_str()).unwrap_or("done")
+            ),
+        ),
+        _ => return None,
+    };
+    Some(text)
+}
+
+fn wrap_display(prefix: &str, text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut out = Vec::new();
+    for (i, para) in text.split('\n').enumerate() {
+        let pfx = if i == 0 { prefix } else { "   " };
+        let mut cur = String::new();
+        let mut w = 0usize;
+        for ch in pfx.chars().chain(para.chars()) {
+            let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if w + cw > width && !cur.is_empty() {
+                out.push(cur);
+                cur = String::new();
+                w = 0;
+            }
+            cur.push(ch);
+            w += cw;
+        }
+        out.push(cur);
+    }
+    out
+}
+
 fn draw(f: &mut Frame, app: &App) {
+    if app.plugins.is_some() {
+        draw_plugins(f, app);
+        return;
+    }
     if app.settings.is_some() {
         draw_settings(f, app);
         return;
@@ -789,8 +1143,13 @@ fn draw(f: &mut Frame, app: &App) {
         ])
         .split(f.size());
 
+    let mode = match app.focus {
+        Focus::Sessions => "会话列表",
+        Focus::Chat => "对话",
+    };
     let head = format!(
-        " FeatherAgent v1.1.6  会话: {}  状态: {}  |  {}",
+        " FeatherAgent v1.1.7  {}  会话: {}  状态: {}  |  {}",
+        mode,
         app.session.as_deref().unwrap_or("-"),
         app.state,
         app.status
@@ -819,8 +1178,10 @@ fn draw(f: &mut Frame, app: &App) {
             let n = s["records"].as_u64().unwrap_or(0);
             let live = s["live"]["state"].as_str().unwrap_or("");
             let text = format!("{id}\n{n} 条 {live}");
-            let style = if i == app.selected {
+            let style = if i == app.selected && app.focus == Focus::Sessions {
                 Style::default().bg(Color::DarkGray)
+            } else if i == app.selected {
+                Style::default().fg(Color::DarkGray)
             } else {
                 Style::default()
             };
@@ -829,19 +1190,21 @@ fn draw(f: &mut Frame, app: &App) {
         .collect();
     let mut list_state = ListState::default().with_selected(Some(app.selected));
     f.render_stateful_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("会话 ↑↓ / Enter"),
-        ),
+        List::new(items).block(Block::default().borders(Borders::ALL).title(
+            if app.focus == Focus::Sessions {
+                "会话 ↑↓ / Enter"
+            } else {
+                "会话（Esc 返回）"
+            },
+        )),
         cols[0],
         &mut list_state,
     );
 
-    // 中：对话流
-    let width = cols[1].width.saturating_sub(2) as usize;
+    // 中：对话流。先按显示宽度手工折行，滚动量就是可视行数，底部不会因
+    // Paragraph 的软换行估算偏差而滚成空白。
+    let width = cols[1].width.saturating_sub(2).max(1) as usize;
     let mut lines: Vec<Line> = Vec::new();
-    let mut total = 0usize;
     for (role, text) in &app.messages {
         let color = match role.as_str() {
             "你" => Color::Green,
@@ -850,30 +1213,26 @@ fn draw(f: &mut Frame, app: &App) {
             "系统" => Color::DarkGray,
             _ => Color::White,
         };
-        for (i, para) in text.split('\n').enumerate() {
-            let prefix = if i == 0 {
-                format!("{role}: ")
-            } else {
-                "   ".to_string()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix,
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(para.to_string()),
-            ]));
-            total += 1 + para.chars().count() / width.max(1);
+        let prefix = format!("{role}: ");
+        for chunk in wrap_display(&prefix, text, width) {
+            lines.push(Line::from(Span::styled(
+                chunk,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )));
         }
-        total += 1;
     }
     let h = cols[1].height.saturating_sub(2) as usize;
-    let scroll = total.saturating_sub(h) as u16;
+    let max_scroll = lines.len().saturating_sub(h);
+    let scroll = max_scroll.saturating_sub(app.chat_scroll.min(max_scroll));
+    let visible: Vec<Line> = lines.into_iter().skip(scroll).take(h).collect();
     f.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("对话"))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
+        Paragraph::new(visible).block(Block::default().borders(Borders::ALL).title(
+            if app.focus == Focus::Chat {
+                "对话 ↑↓ 翻阅 · Esc 返回列表"
+            } else {
+                "对话（Enter 进入会话）"
+            },
+        )),
         cols[1],
     );
 
@@ -883,7 +1242,7 @@ fn draw(f: &mut Frame, app: &App) {
         ctx_lines.push(Line::from("（尚无快照，发送一条消息后出现）"));
     } else {
         let st = &app.ctx["stats"];
-        let window = 8192usize;
+        let window = st["window_tokens"].as_u64().unwrap_or(8192) as usize;
         let total_tokens = st["total_tokens"].as_u64().unwrap_or(0) as usize;
         let pct = if window == 0 {
             0
@@ -933,19 +1292,33 @@ fn draw(f: &mut Frame, app: &App) {
         cols[2],
     );
 
-    // 底：输入
-    let input = format!("› {}", app.input);
+    // 底：输入。按显示宽度（CJK 占 2 列）计算光标，并在超出时横向滚动。
+    let area = chunks[2];
+    let chars: Vec<char> = app.input.chars().collect();
+    let cursor = app.input_cursor.min(chars.len());
+    let avail = area.width.saturating_sub(5) as usize;
+    let mut start = 0usize;
+    while start < cursor && display_width(&chars[start..cursor].iter().collect::<String>()) > avail
+    {
+        start += 1;
+    }
+    let tail: String = chars[start..].iter().collect();
+    let title = if app.focus == Focus::Chat {
+        "输入（Enter 发送，←/→ 移动光标，/help 命令）"
+    } else {
+        "输入（会话列表：Enter 进入，↑↓ 选择，Esc 退出）"
+    };
     f.render_widget(
-        Paragraph::new(input).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("输入（Enter 发送，/help 命令）"),
-        ),
-        chunks[2],
+        Paragraph::new(format!("› {tail}"))
+            .block(Block::default().borders(Borders::ALL).title(title)),
+        area,
     );
-    let x = chunks[2].x + 2 + app.input.chars().count() as u16;
-    let y = chunks[2].y + 1;
-    f.set_cursor(x.min(chunks[2].right().saturating_sub(1)), y);
+    if app.focus == Focus::Chat {
+        let before: String = chars[start..cursor].iter().collect();
+        let x = area.x + 1 + 2 + display_width(&before) as u16;
+        let y = area.y + 1;
+        f.set_cursor(x.min(area.right().saturating_sub(1)), y);
+    }
 }
 
 fn draw_settings(f: &mut Frame, app: &App) {
@@ -961,7 +1334,7 @@ fn draw_settings(f: &mut Frame, app: &App) {
 
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            " FeatherAgent v1.1.6 设置 ",
+            " FeatherAgent v1.1.7 设置 ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
@@ -980,6 +1353,14 @@ fn draw_settings(f: &mut Frame, app: &App) {
         ("Temperature", format!("{}（0.00–2.00）", s.temperature)),
         ("Context window", format!("{} tokens", s.context_window)),
         ("Max turns", s.max_turns.clone()),
+        (
+            "Workspace root",
+            if s.workspace_root.is_empty() {
+                "(安装根/workspace)".into()
+            } else {
+                s.workspace_root.clone()
+            },
+        ),
         (
             "Auto allow safe",
             if s.auto_allow_safe {
@@ -1036,4 +1417,95 @@ fn draw_settings(f: &mut Frame, app: &App) {
             .block(Block::default().borders(Borders::ALL).title("状态")),
         chunks[2],
     );
+}
+
+fn draw_plugins(f: &mut Frame, app: &App) {
+    let Some(p) = &app.plugins else { return };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(4),
+        ])
+        .split(f.size());
+    let head = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " FeatherAgent v1.1.7 插件管理 ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  ↑↓ 选择 · Space/Enter 启停 · r 刷新 · Esc 返回"),
+    ]));
+    f.render_widget(head, chunks[0]);
+
+    let mut lines = Vec::new();
+    if p.items.is_empty() {
+        lines.push(Line::from(
+            "（没有已登记插件；可通过 WebUI 插件页按路径安装）",
+        ));
+    }
+    for (i, item) in p.items.iter().enumerate() {
+        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+        let cat = item.get("category").and_then(|x| x.as_str()).unwrap_or("");
+        let enabled = item
+            .get("enabled")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let state = item
+            .get("live_state")
+            .and_then(|x| x.as_str())
+            .unwrap_or("stopped");
+        let mark = if enabled { "[x]" } else { "[ ]" };
+        let marker = if i == p.selected { "▶ " } else { "  " };
+        let line = format!("{marker}{mark} {name:<22} {cat:<10} live={state}");
+        let mut l = Line::from(line);
+        if i == p.selected {
+            l = l.style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+        lines.push(l);
+    }
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("插件（启停会同步到运行进程）"),
+            )
+            .wrap(Wrap { trim: false }),
+        chunks[1],
+    );
+    f.render_widget(
+        Paragraph::new(p.status.as_str())
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL).title("状态")),
+        chunks[2],
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cjk_display_width_is_two_columns() {
+        assert_eq!(display_width("你好"), 4);
+        assert_eq!(display_width("a你b"), 4);
+        assert_eq!(display_width("abc"), 3);
+    }
+
+    #[test]
+    fn wrap_display_respects_width_and_prefix() {
+        let lines = wrap_display("你: ", "abcdef", 6);
+        assert_eq!(lines[0], "你: ab");
+        assert_eq!(lines[1], "cdef");
+        assert!(lines.iter().all(|l| display_width(l) <= 6));
+    }
 }

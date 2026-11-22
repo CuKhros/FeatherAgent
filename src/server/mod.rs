@@ -647,11 +647,18 @@ fn dispatch(
                 .and_then(|x| x.as_str())
                 .ok_or_else(|| invalid("name required"))?;
             let on = method == "plugin.enable";
-            kernel
+            let entry = kernel
                 .registry
                 .enable(name, on)
                 .ok_or_else(|| (rpc::ERR_NO_SESSION, "插件未登记".to_string()))?;
-            Ok(json!({"ok": true, "enabled": on}))
+            if on {
+                if let Some(spec) = kernel.registry.specs().into_iter().find(|s| s.name == name) {
+                    kernel.plugins.register_spec(spec);
+                }
+            } else {
+                kernel.plugins.unregister(name);
+            }
+            Ok(json!({"ok": true, "enabled": on, "plugin": entry}))
         }
         "plugin.install" => {
             let path = params
@@ -662,6 +669,16 @@ fn dispatch(
                 .registry
                 .install(Path::new(path))
                 .map_err(|e| (rpc::ERR_INTERNAL, e.to_string()))?;
+            if e.enabled {
+                if let Some(spec) = kernel
+                    .registry
+                    .specs()
+                    .into_iter()
+                    .find(|s| s.name == e.name)
+                {
+                    kernel.plugins.register_spec(spec);
+                }
+            }
             Ok(json!({"installed": e}))
         }
         _ => Err((rpc::ERR_METHOD_NOT_FOUND, format!("未知方法 {method}"))),

@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.6**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.1.7**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.6","contract":"1.0","transport":"pipe",
+  "version":"1.1.7","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -166,7 +166,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
 | `plugin.list` | 插件清单 | 无 |
 | `plugin.enable` / `plugin.disable` | 启停插件 | `name` |
-| `plugin.install` | 安装插件 | 见实现 |
+| `plugin.install` | 安装插件 | `path`（含 `plugin.json` 的目录绝对路径） |
 
 完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`。业务错误（路径越界/缺参数/文件不存在）为 `tool.error`；只有插件崩溃/超时/IO 故障才为 `tool.failed`；连续 3 次技术失败会为该工具发 `tool.degraded`。provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
 
@@ -178,7 +178,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `chat` 命令支持 `--allow <tool,...>` / `--yes` 自动确认；未放行时默认立即 deny（`--confirm-timeout` 可保留人工窗口）。
 - 空响应自动重试一次时写入 `model.retry` 事件（`attempt` / `reason` / `temperature`）；仍失败则 `chat.finished status=failed`。
 
-### 5.2 设置与模型发现（v1.1.6）
+### 5.2 设置与模型发现（v1.1.7）
 
 前端设置页统一走以下链路，不要直接改 `config.json`：
 
@@ -186,7 +186,8 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 // 1) 读取
 {"method":"config.get","params":{}}
 // → {"provider_plugin":"provider-ollama","base_url":"...","model":"qwen3.5:4b",
-//    "temperature":0.7,"context_window":8192,"max_turns":6,"auto_allow_safe":true,...}
+//    "temperature":0.7,"context_window":8192,"max_turns":6,"auto_allow_safe":true,
+//    "workspace_root":"",...}
 
 // 2) 发现模型（Ollama 读 /api/tags；OpenAI 兼容读 /v1/models）
 {"method":"provider.models","params":{"provider":"provider-ollama","base_url":"http://127.0.0.1:11434","model":"qwen3.5:4b"}}
@@ -212,9 +213,35 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `config.replace` 才表示整份替换；不要把 `config.set` 的 patch 当作 replace。
 - 温度范围 0.0–2.0；`context_window` 512–131072；`max_turns` 1–32；`provider_plugin` 必须是已登记插件，否则服务端返回 `-32602`。
 - 空响应重试仍固定 `temperature=0.7`，与用户设置无关。
+- `workspace_root` 为空表示 `<安装根>/workspace`；相对路径按安装根解析，绝对路径可指向安装目录外。它是**启动期配置**：`config.set` 会持久化并立即返回新配置，但运行中的内核不热迁移工作区，需重启 `serve`；不要在保存后立刻假设会话目录已切换。
+- 新工作区首次启动会创建 `<workspace>/.featheagent/{worklog.md,memory.md,README.md}`（不覆盖已有内容），system prompt 会要求任务结束写工作日志、更新项目记忆。
 - `ctx.inspect` 是诊断接口，不保证拿到会话锁：锁繁忙时返回 `state:"busy"`、`snapshot:null`，前端不要据此判定回合失败。
 
-### 5.3 工具错误事件
+### 5.3 插件管理（v1.1.7）
+
+插件管理完全走 RPC，不直接改 `data/plugins/registry.json`：
+
+```json
+// 列表：registry 是登记表，live 是当前运行状态
+{"method":"plugin.list","params":{}}
+// → {"registry":[{"name":"tool","program":"...","args":[],"category":"tool",
+//                 "enabled":true,"blake3":"..."}],
+//    "live":[{"name":"tool","state":"ready|stopped","manifest":{...}}]}
+
+// 安装：path 是含 plugin.json 的目录绝对路径
+{"method":"plugin.install","params":{"path":"D:\\plugins\\my-tool"}}
+// → {"installed":{"name":"my-tool","program":"...","enabled":true,...}}
+
+// 启停：同步 registry 与运行进程
+{"method":"plugin.enable","params":{"name":"my-tool"}}
+{"method":"plugin.disable","params":{"name":"my-tool"}}
+```
+
+- `plugin.install` 成功且插件启用时，会立即把 spec 注册进运行 host；`plugin.enable` 重新登记，按需拉起；`plugin.disable` 会终止已运行进程。
+- `plugin.list` 的 `registry` 可用于生成动态侧栏；`live.state` 为 `ready` 表示已运行，`stopped` 表示按需启动。
+- 插件 manifest 的 `api` 必须落在契约 `>=1.0 <2.0`；不满足时安装失败。
+
+### 5.4 工具错误事件
 
 | kind | 语义 | 是否计入熔断 | 前端建议 |
 |---|---|---|---|
@@ -236,7 +263,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `50201` | 插件调用失败 |
 | `40901` | 资源被占用（如单客户端能力被占） |
 
-## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认，1.1.5 补设置）
+## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认，1.1.5 补设置，1.1.7 补插件/工作区）
 
 - Windows 命名管道使用 **overlapped I/O + 每连接独立句柄**，读写互不阻塞。
 - `accept` 遇到客户端连上后立即断开（`ERROR_NO_DATA`）会复位实例并返回错误，由 `Server::run` 继续 `accept`；不会永久占死实例。

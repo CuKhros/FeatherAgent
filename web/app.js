@@ -26,6 +26,8 @@
   let cfg = null;
   let providers = [];
   let cfgModels = [];
+  let pluginData = { registry: [], live: [] };
+  let pluginDetailName = "";
   const pending = new Map();
 
   function esc(s) {
@@ -327,6 +329,169 @@
     }
   }
 
+  function setPluginStatus(text, kind) {
+    const el = $("#plugin-status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color = kind === "err" ? "var(--danger)" : kind === "ok" ? "var(--accent)" : "var(--muted)";
+  }
+
+  function pluginLive(name) {
+    return (pluginData.live || []).find((x) => x.name === name) || {};
+  }
+
+  function pluginRegistry(name) {
+    return (pluginData.registry || []).find((x) => x.name === name) || null;
+  }
+
+  async function refreshPlugins() {
+    const v = await rpc("plugin.list", {}, 15000);
+    pluginData = { registry: v.registry || [], live: v.live || [] };
+    renderPluginNav();
+    renderPluginList();
+  }
+
+  function renderPluginNav() {
+    const nav = $("#plugin-nav");
+    if (!nav) return;
+    nav.innerHTML = "";
+    const regs = [...(pluginData.registry || [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (!regs.length) {
+      const d = document.createElement("div");
+      d.className = "nav-foot";
+      d.textContent = "尚无已登记插件";
+      nav.appendChild(d);
+      return;
+    }
+    for (const r of regs) {
+      const b = document.createElement("button");
+      b.className = "nav-item plugin-nav-item";
+      b.textContent = `${r.enabled === false ? "○" : "●"} ${r.name}`;
+      b.title = `${r.category || "plugin"} · ${r.enabled === false ? "已停用" : "已启用"}`;
+      b.onclick = () => showPluginDetail(r.name);
+      nav.appendChild(b);
+    }
+  }
+
+  function renderPluginList() {
+    const box = $("#plugin-list");
+    if (!box) return;
+    box.innerHTML = "";
+    const regs = [...(pluginData.registry || [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (!regs.length) {
+      box.innerHTML = '<div class="plugin-empty">没有已登记插件。</div>';
+      return;
+    }
+    for (const r of regs) {
+      const live = pluginLive(r.name);
+      const enabled = r.enabled !== false;
+      const row = document.createElement("div");
+      row.className = "plugin-row";
+      const info = document.createElement("div");
+      info.className = "plugin-info";
+      info.innerHTML = `<div><strong>${esc(r.name)}</strong> <span class="tag">${esc(r.category || "plugin")}</span></div>
+        <div class="plugin-meta">${enabled ? (live.state === "ready" ? "运行中" : "按需启动") : "已停用"} · ${esc((r.blake3 || "").slice(0, 12))}</div>
+        <code>${esc(r.program || "")}</code>`;
+      const acts = document.createElement("div");
+      acts.className = "plugin-actions";
+      const detail = document.createElement("button");
+      detail.textContent = "详情";
+      detail.onclick = () => showPluginDetail(r.name);
+      const toggle = document.createElement("button");
+      toggle.textContent = enabled ? "停用" : "启用";
+      toggle.className = enabled ? "ghost" : "primary";
+      toggle.onclick = () => togglePlugin(r.name, enabled);
+      acts.appendChild(detail);
+      acts.appendChild(toggle);
+      row.appendChild(info);
+      row.appendChild(acts);
+      box.appendChild(row);
+    }
+  }
+
+  async function togglePlugin(name, enabled) {
+    setPluginStatus(`${enabled ? "正在停用" : "正在启用"} ${name}…`, "warn");
+    try {
+      await rpc(enabled ? "plugin.disable" : "plugin.enable", { name });
+      setPluginStatus(`${name} 已${enabled ? "停用" : "启用"}（运行进程已同步）`, "ok");
+      await refreshPlugins();
+      if (pluginDetailName === name) showPluginDetail(name);
+    } catch (e) {
+      setPluginStatus(`操作失败：${e.message}`, "err");
+    }
+  }
+
+  async function installPlugin() {
+    const path = ($("#plugin-install-path").value || "").trim();
+    if (!path) {
+      setPluginStatus("请填写插件目录绝对路径", "err");
+      return;
+    }
+    setPluginStatus("正在安装…", "warn");
+    try {
+      const v = await rpc("plugin.install", { path }, 30000);
+      const name = (v.installed && v.installed.name) || path;
+      setPluginStatus(`已安装 ${name}`, "ok");
+      $("#plugin-install-path").value = "";
+      await refreshPlugins();
+    } catch (e) {
+      setPluginStatus(`安装失败：${e.message}`, "err");
+    }
+  }
+
+  function showSettingsView(name) {
+    for (const el of document.querySelectorAll(".settings-view")) el.classList.add("hidden");
+    const view = $(`#view-${name}`);
+    if (view) view.classList.remove("hidden");
+    for (const b of document.querySelectorAll(".settings-nav .nav-item[data-view]")) {
+      b.classList.toggle("active", b.dataset.view === name);
+    }
+    $("#plugin-nav")?.querySelectorAll(".plugin-nav-item").forEach((b) => b.classList.remove("active"));
+    const titles = { general: "设置", plugins: "插件管理", plugin: "插件详情" };
+    $("#settings-title").textContent = titles[name] || "设置";
+    const subtitles = {
+      general: "保存后通过 config.set 提交给内核；工作区改动在下次启动 serve 时生效。",
+      plugins: "插件来自内核登记表；安装会登记清单，启停会同步运行进程。",
+      plugin: "此页由 plugin.list 生成；安装或卸载插件后刷新设置页即可增删侧栏。",
+    };
+    $("#settings-subtitle").textContent = subtitles[name] || subtitles.general;
+    if (name !== "plugin") pluginDetailName = "";
+  }
+
+  function showPluginDetail(name) {
+    const r = pluginRegistry(name);
+    if (!r) return;
+    const live = pluginLive(name);
+    const m = live.manifest || {};
+    pluginDetailName = name;
+    showSettingsView("plugin");
+    $("#settings-title").textContent = `插件 · ${name}`;
+    $("#plugin-nav")?.querySelectorAll(".plugin-nav-item").forEach((b) => {
+      b.classList.toggle("active", b.textContent.includes(name));
+    });
+    const enabled = r.enabled !== false;
+    const caps = Array.isArray(m.capabilities) ? m.capabilities : [];
+    const perms = Array.isArray(m.permissions) ? m.permissions : [];
+    $("#plugin-detail").innerHTML = `
+      <div class="settings-section">
+        <div class="section-title">插件清单</div>
+        <div class="plugin-detail-head">
+          <div><h3>${esc(name)}</h3><p class="warn">${esc(r.category || "plugin")} · 版本 ${esc(m.version || "未运行/未读取")} · ${enabled ? "已启用" : "已停用"}</p></div>
+          <button id="btn-plugin-detail-toggle" class="${enabled ? "ghost" : "primary"}">${enabled ? "停用" : "启用"}</button>
+        </div>
+        <div class="kv-grid">
+          <div><span>API</span><code>${esc(m.api || "-")}</code></div>
+          <div><span>live</span><code>${esc(live.state || "stopped")}</code></div>
+          <div><span>capabilities</span><code>${esc(caps.join(", ") || "-")}</code></div>
+          <div><span>permissions</span><code>${esc(perms.join(", ") || "-")}</code></div>
+          <div class="wide"><span>program</span><code>${esc(r.program || "-")}</code></div>
+          <div class="wide"><span>blake3</span><code>${esc(r.blake3 || "-")}</code></div>
+        </div>
+        <p class="form-hint">该侧栏页由内核 <code>plugin.list</code> 的登记表生成；安装/卸载后刷新设置页即可增删。</p>
+      </div>`;
+    $("#btn-plugin-detail-toggle").onclick = () => togglePlugin(name, enabled);
+  }
+
   async function openSettings() {
     setSettingsStatus("正在读取配置…", "warn");
     $("#settings-page").classList.remove("hidden");
@@ -353,7 +518,14 @@
       $("#cfg-context-window").value = String(cfg.context_window ?? 8192);
       $("#cfg-max-turns").value = String(cfg.max_turns ?? 6);
       $("#cfg-auto-allow-safe").checked = cfg.auto_allow_safe !== false;
+      $("#cfg-workspace-root").value = cfg.workspace_root || "";
       syncTemperature();
+      try {
+        await refreshPlugins();
+      } catch (e) {
+        setPluginStatus("读取插件失败：" + e.message, "err");
+      }
+      showSettingsView("general");
       setSettingsStatus("");
       $("#btn-settings-save").disabled = false;
       $("#btn-settings-refresh").disabled = false;
@@ -367,6 +539,8 @@
 
   function closeSettings() {
     $("#settings-page").classList.add("hidden");
+    pluginDetailName = "";
+    showSettingsView("general");
   }
 
   async function saveSettings() {
@@ -392,6 +566,7 @@
         temperature,
         context_window: contextWindow,
         max_turns: maxTurns,
+        workspace_root: ($("#cfg-workspace-root").value || "").trim(),
         auto_allow_safe: $("#cfg-auto-allow-safe").checked,
       }});
       cfg = v.config || cfg;
@@ -452,10 +627,20 @@
     $("#btn-fork").onclick = fork;
     $("#btn-new").onclick = createSession;
     $("#btn-settings").onclick = openSettings;
+    $("#btn-plugins").onclick = async () => {
+      await openSettings();
+      showSettingsView("plugins");
+    };
     $("#btn-settings-close").onclick = closeSettings;
     $("#btn-settings-cancel").onclick = closeSettings;
     $("#btn-settings-save").onclick = saveSettings;
     $("#btn-settings-refresh").onclick = refreshModels;
+    $("#btn-plugin-refresh").onclick = () => refreshPlugins().then(() => setPluginStatus("插件列表已刷新", "ok")).catch((e) => setPluginStatus("刷新失败：" + e.message, "err"));
+    $("#btn-plugin-install").onclick = installPlugin;
+    $("#plugin-install-path").addEventListener("keydown", (e) => { if (e.key === "Enter") installPlugin(); });
+    for (const b of document.querySelectorAll(".settings-nav .nav-item[data-view]")) {
+      b.onclick = () => showSettingsView(b.dataset.view);
+    }
     $("#cfg-provider").onchange = refreshModels;
     $("#cfg-base-url").onchange = refreshModels;
     $("#cfg-temperature").oninput = syncTemperature;
@@ -470,7 +655,12 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
     });
     $("#new-id").addEventListener("keydown", (e) => { if (e.key === "Enter") createSession(); });
-    window.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSettings(); });
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if ($("#settings-page").classList.contains("hidden")) return;
+      if (pluginDetailName) { showSettingsView("plugins"); return; }
+      closeSettings();
+    });
   }
 
   (async () => {

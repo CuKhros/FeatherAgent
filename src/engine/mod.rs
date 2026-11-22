@@ -46,6 +46,10 @@ pub struct Config {
     pub quota_bytes: u64,
     pub auto_allow_safe: bool,
     pub allowed_sync_names: Vec<String>,
+    /// 工作区根目录；空表示 `<安装根>/workspace`。相对路径按安装根解析。
+    /// 修改后需重启 serve 才会切换；运行中的会话目录不会被迁移。
+    #[serde(default)]
+    pub workspace_root: String,
 }
 
 impl Default for Config {
@@ -65,6 +69,7 @@ impl Default for Config {
             quota_bytes: 4 * 1024 * 1024 * 1024,
             auto_allow_safe: true,
             allowed_sync_names: Vec::new(),
+            workspace_root: String::new(),
         }
     }
 }
@@ -195,6 +200,32 @@ enum ToolExecError {
     Technical(String),
 }
 
+fn prepare_agent_home(workspace: &std::path::Path) -> std::io::Result<()> {
+    let dir = workspace.join(".featheagent");
+    std::fs::create_dir_all(&dir)?;
+    let files = [
+        (
+            "worklog.md",
+            "# 工作日志\n\n> 每个有实际产物的任务结束后，在文件末尾追加：日期、目标、改动、验证、待办。\n",
+        ),
+        (
+            "memory.md",
+            "# 项目记忆\n\n> 只记录稳定的项目事实、决策、约束与用户偏好；不写临时过程。\n",
+        ),
+        (
+            "README.md",
+            "# .featheagent\n\n此目录由 FeatherAgent 自动维护：\n- `worklog.md`：每次工作的流水日志\n- `memory.md`：跨会话项目记忆\n",
+        ),
+    ];
+    for (name, body) in files {
+        let path = dir.join(name);
+        if !path.exists() {
+            std::fs::write(path, body)?;
+        }
+    }
+    Ok(())
+}
+
 impl Kernel {
     pub fn new(paths: Paths, cfg: Config, force: bool) -> Result<Arc<Self>, String> {
         paths
@@ -250,6 +281,11 @@ impl Kernel {
             let _ = registry.scan_builtin(&builtin);
         }
 
+        // `.featheagent/` 是跨会话的项目记忆与工作日志；只创建模板，不覆盖已有内容。
+        prepare_agent_home(&paths.workspace).map_err(|e| format!("创建工作区记忆目录失败: {e}"))?;
+        let workspace_note = format!(
+            "工作区根目录含 `.featheagent/`：`workspace/.featheagent/worklog.md`（工作日志，追加）与 `workspace/.featheagent/memory.md`（项目长期记忆）。完成有实际产物或项目进展的任务时，在最终答复前用文件工具追加本次工作日志；出现稳定事实、决策或用户偏好时更新项目记忆。简单问答不要写。"
+        );
         let sandbox = SandboxCfg {
             strict_temp: cfg.strict_temp,
             runtime_dir: paths.runtime.clone(),
@@ -291,7 +327,10 @@ impl Kernel {
             plugins: host,
             registry,
             gate: Arc::new(gate),
-            ctx: ContextEngine::new(CtxConfig::default()),
+            ctx: ContextEngine::new(CtxConfig {
+                workspace_note: Some(workspace_note),
+                ..CtxConfig::default()
+            }),
             sessions: RwLock::new(HashMap::new()),
             broadcasts: RwLock::new(Vec::new()),
             confirms: Mutex::new(HashMap::new()),
@@ -1129,8 +1168,8 @@ fn merge_json(base: Value, patch: Value) -> Value {
 
 fn default_tools() -> Vec<Value> {
     vec![
-        json!({"name": "tool.fs.read", "description": "读文件；path 必须是相对安装根的路径（如 workspace/foo.txt），不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}),
-        json!({"name": "tool.fs.write", "description": "写文件；path 必须是相对安装根的路径（如 workspace/foo.txt），不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}}),
+        json!({"name": "tool.fs.read", "description": "读文件；以 `workspace/` 前缀访问工作区根（如 workspace/foo.txt），普通相对路径落在当前会话目录，不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}),
+        json!({"name": "tool.fs.write", "description": "写文件；以 `workspace/` 前缀访问工作区根（如 workspace/foo.txt），普通相对路径落在当前会话目录，不要以 / 开头", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}}}),
         json!({"name": "tool.shell", "description": "在工作空间执行 shell 命令", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}),
     ]
 }
@@ -1146,4 +1185,25 @@ pub fn plugin_ready(k: &Kernel, name: &str) -> bool {
         .list()
         .iter()
         .any(|(n, st, _)| n == name && *st == PluginState::Ready)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_agent_home_creates_templates_without_overwrite() {
+        let d = tempfile::tempdir().unwrap();
+        let ws = d.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        prepare_agent_home(&ws).unwrap();
+        let home = ws.join(".featheagent");
+        for f in ["worklog.md", "memory.md", "README.md"] {
+            assert!(home.join(f).is_file(), "{f} missing");
+        }
+        let worklog = home.join("worklog.md");
+        std::fs::write(&worklog, "custom log").unwrap();
+        prepare_agent_home(&ws).unwrap();
+        assert_eq!(std::fs::read_to_string(&worklog).unwrap(), "custom log");
+    }
 }

@@ -272,7 +272,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "featheragent"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "blake3",
  "crc32c",
@@ -286,6 +286,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "unicode-width 0.1.14",
  "wasmi",
  "wat",
  "windows-sys 0.52.0",

@@ -86,6 +86,8 @@ pub struct CtxConfig {
     pub max_tools: usize,
     pub summary_card_chars: usize,
     pub recall_items: usize,
+    /// 工作区/项目记忆说明，追加到稳定 system 前缀。
+    pub workspace_note: Option<String>,
 }
 
 impl Default for CtxConfig {
@@ -95,6 +97,7 @@ impl Default for CtxConfig {
             max_tools: 12,
             summary_card_chars: 240,
             recall_items: 5,
+            workspace_note: None,
         }
     }
 }
@@ -227,10 +230,14 @@ impl ContextEngine {
         );
 
         // ---- 稳定前缀 ----
-        let system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。文件工具参数必须使用相对安装根的路径（如 workspace/foo.txt），不要用前导斜杠。",
+        let mut system = format!(
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。文件工具参数使用工作区路径：以 `workspace/` 前缀访问工作区根（如 workspace/foo.txt），普通相对路径落在当前会话目录；不要用前导斜杠。",
             profile.name
         );
+        if let Some(note) = &self.cfg.workspace_note {
+            system.push('\n');
+            system.push_str(note);
+        }
         let system_tokens = estimate_tokens(&system);
 
         let task_state = build_task_state(events);
@@ -726,6 +733,22 @@ mod tests {
         );
         assert!(a.stats.history_tokens > 0);
         assert!(a.stats.layers.l1_window_messages > 0);
+    }
+
+    #[test]
+    fn workspace_note_is_injected_into_system_prefix() {
+        let engine = ContextEngine::new(CtxConfig {
+            workspace_note: Some("WORKSPACE_NOTE: .featheagent/worklog.md".into()),
+            ..CtxConfig::default()
+        });
+        let profile = ModelProfile {
+            context_window: 4096,
+            max_output: 128,
+            ..Default::default()
+        };
+        let a = engine.assemble(&[], &profile, &[], &[], &[]).unwrap();
+        assert_eq!(a.messages[0].role, "system");
+        assert!(a.messages[0].content.contains(".featheagent/worklog.md"));
     }
 
     #[test]

@@ -61,15 +61,15 @@ cargo build --release --bins
 ./target/release/featheragent-webui --root . --app    # WebUI（Chromium --app 独立窗口）
 ```
 
-出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度与上下文参数；模型下拉显示 `provider.models` 返回的全部模型，保存后经 `config.set` 即时应用。`serve` 启动会立即打印 banner 并写 `runtime/ipc/starting` / `ready`，首次启动较慢时 `chat` 会明确提示“内核未就绪（启动中）”。
+出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度、上下文参数与工作区；WebUI 顶栏“插件”和 TUI `/plugins` 提供插件安装/启停，设置左侧栏会为每个已登记插件生成页面。模型下拉显示 `provider.models` 返回的全部模型，保存后经 `config.set` 即时应用。`serve` 启动会立即打印 banner 并写 `runtime/ipc/starting` / `ready`，首次启动较慢时 `chat` 会明确提示“内核未就绪（启动中）”。
 
 三产物打包：`scripts/package.sh`，输出 `dist/*.tar.gz` + `sha256` + manifest；体积门禁（内核 ≤ 8 MiB）在脚本内断言。
 
-运行时会在安装根下生成 `data/`、`workspace/`、`runtime/`；可用 `--data/--workspace/--runtime` 分别外置。
+运行时会在安装根下生成 `data/`、`workspace/`、`runtime/`；可用 `--data/--workspace/--runtime` 分别外置，或在设置页把 `workspace_root` 指向安装目录外（保存后重启 `serve` 生效）。工作区会自动创建 `.featheagent/`（`worklog.md` / `memory.md`），system 提示要求任务结束写工作日志、更新项目记忆。TUI 进入会话后 ↑↓ 翻阅对话、Esc 返回会话列表；←/→/Home/End 可编辑输入，CJK 光标按显示宽度对齐。
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.1.6-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.1.7-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -81,7 +81,7 @@ cargo build --release --bins
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动约 30–60 s 时 `runtime\ipc\ready` 尚未出现，`chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.md)。
 
-## 平台门禁差异（v1.1.6）
+## 平台门禁差异（v1.1.7）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -99,6 +99,7 @@ cargo build --release --bins
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.1.7 Windows 修复对照](docs/v1.1.7-Windows修复说明.md)** —— v1.1.6 复测 NEW-K、TUI 双模式/光标、外置工作区与 `.featheagent`、插件管理与设置侧栏
 - **[v1.1.6 Windows 修复对照](docs/v1.1.6-Windows修复说明.md)** —— v1.1.5 复测 NEW-H～NEW-J、启动就绪标记、配置单字段原子更新、模型下拉全量展示
 - **[v1.1.5 Windows 修复对照](docs/v1.1.5-Windows修复说明.md)** —— v1.1.4 复测 NEW-E～NEW-G、工具熔断粒度与 WebUI/TUI 设置页
 - **[v1.1.4 Windows 修复对照](docs/v1.1.4-Windows修复说明.md)** —— v1.1.3 复测 NEW-A～NEW-D 与 WebUI 更名
@@ -109,11 +110,11 @@ cargo build --release --bins
 
 ## 状态
 
-`v1.1.6` 是针对 v1.1.5 Windows 真机复测报告的修复版：NEW-E/F/G 已在真机确认修复；本版修复启动可观测性（先打印 banner、写 `starting`/`ready` 标记、`chat` 未就绪提示）、`config.set` 单字段原子更新（`{path,value}`，保留 `patch` 与 `config.replace`）、S3 三档判定；WebUI 模型选择改为真正的下拉列表，显示 `provider.models` 的全部模型。Linux 自动化测试 **65/65** 通过。
+`v1.1.7` 是针对 v1.1.6 Windows 真机复测报告的修复 + 体验升级版：v1.1.6 的 NEW-H/I/J 与 NEW-4 已在真机确认修复；本版修复 NEW-K（bench 与运行内核冲突），新增 TUI 会话/对话双模式与光标编辑、外置工作区与 `.featheagent` 工作记忆、WebUI 设置侧栏/插件管理页/顶栏插件入口，并让插件启停同步运行进程。Linux 自动化测试 **70/70** 通过。
 
 已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、WebUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、多模型下拉与保存、三产物打包与解压运行、1000 次日志随机截断恢复。
 
-Windows x64：v1.1.3 真机确认 NEW-1～NEW-3；v1.1.4 确认 NEW-A～NEW-D；v1.1.5 确认 NEW-E～NEW-G，并暴露 NEW-H～NEW-J。v1.1.6 包 `FeatherAgent-1.1.6-windows-x64.zip` 约 2.09 MiB，内核 `featheragent.exe` 909,824 B（精确哈希以 Release 附带的 `.sha256` 为准）；仍需真机复测 NEW-H/I/J、设置页与模型列表。Wine 6.0.3 的 `version`/`help`/`doctor`/`bench` 通过，同一包目录下 `serve` + 单客户端 `chat` 也跑通；但 boot/RSS 受 Wine 开销影响未过门禁，并发管道/ConPTY 不作 Windows 结论。
+Windows x64：v1.1.3 真机确认 NEW-1～NEW-3；v1.1.4 确认 NEW-A～NEW-D；v1.1.5 确认 NEW-E～NEW-G，并暴露 NEW-H～NEW-J；v1.1.6 真机确认 NEW-H/I/J 与 NEW-4，仅余 NEW-K。v1.1.7 包 `FeatherAgent-1.1.7-windows-x64.zip` 的字节数与哈希以 Release 资产和 manifest 为准；仍需真机复测 NEW-K、TUI 双模式/光标、WebUI 设置侧栏与插件页、外置工作区。Wine 6.0.3 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
 
-未实测：真实 Windows 设置页与模型发现、真实 Ollama / 7B 模型指标（S3 三档）、Windows bench 回归、macOS、四平台 × 双架构矩阵。详见验证报告。
+未实测：Windows 真机 NEW-K/TUI/设置侧栏/插件安装/外置工作区、真实 Ollama / 7B 模型指标（S3 三档）、网络盘/同步盘、24h 浸泡、macOS、四平台 × 双架构矩阵。详见验证报告。
 

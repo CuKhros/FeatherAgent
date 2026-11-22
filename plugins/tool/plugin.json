@@ -1,12 +1,23 @@
 {
   "manifest": {
     "name": "tool",
-    "version": "1.1.6",
+    "version": "1.1.7",
     "api": ">=1.0 <2.0",
-    "capabilities": ["tool.fs.read", "tool.fs.write", "tool.shell", "tool.ping"],
-    "permissions": ["fs:read", "fs:write", "exec:shell"],
+    "capabilities": [
+      "tool.fs.read",
+      "tool.fs.write",
+      "tool.shell",
+      "tool.ping"
+    ],
+    "permissions": [
+      "fs:read",
+      "fs:write",
+      "exec:shell"
+    ],
     "category": "tool"
   },
   "program": "../../feather-plugin",
-  "args": ["tool"]
+  "args": [
+    "tool"
+  ]
 }

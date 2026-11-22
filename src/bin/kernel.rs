@@ -357,10 +357,25 @@ fn load_cfg(paths: &Paths) -> Config {
     cfg
 }
 
+/// 把配置里的外置工作区应用到路径；CLI `--workspace` 优先。
+fn apply_workspace(paths: &mut Paths, cfg: &Config, cli_override: bool) {
+    if cli_override || cfg.workspace_root.trim().is_empty() {
+        return;
+    }
+    let raw = PathBuf::from(cfg.workspace_root.trim());
+    let root = if raw.is_absolute() {
+        raw
+    } else {
+        paths.install_root.join(raw)
+    };
+    paths.workspace = std::path::absolute(&root).unwrap_or(root);
+}
+
 fn serve(args: &featheragent::util::Args) -> Result<(), String> {
     let t0 = Instant::now();
-    let paths = paths_from(args)?;
+    let mut paths = paths_from(args)?;
     let mut cfg = load_cfg(&paths);
+    apply_workspace(&mut paths, &cfg, args.flag("workspace").is_some());
     if let Some(s) = args.flag("sync") {
         cfg.sync = s.to_string();
     }
@@ -413,10 +428,11 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
 
     // 先输出再初始化：Windows 首次启动登记内置插件可能很慢，不能等内核构造完才打 banner。
     println!(
-        "featheragent {} starting  socket={}  data={}  provider={}  codec={}",
+        "featheragent {} starting  socket={}  data={}  workspace={}  provider={}  codec={}",
         featheragent::VERSION,
         socket.display(),
         paths.data.display(),
+        paths.workspace.display(),
         cfg.provider_plugin,
         match codec {
             Codec::Json => "json",
@@ -464,8 +480,9 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
 }
 
 fn doctor(args: &featheragent::util::Args) -> Result<(), String> {
-    let paths = paths_from(args)?;
+    let mut paths = paths_from(args)?;
     let cfg = load_cfg(&paths);
+    apply_workspace(&mut paths, &cfg, args.flag("workspace").is_some());
     if args.has("--check-storage") || args.positional.iter().any(|p| p == "storage") {
         let mut out = serde_json::Map::new();
         for (p, purpose) in [
@@ -619,6 +636,21 @@ fn stress_log(n: usize) -> Result<(), String> {
 
 fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let json_only = args.has("--json");
+    // NEW-K：bench 会自行拉起内核实例；同一安装根已有 serve 时先明确拒绝，
+    // 避免 Windows 命名管道冲突被翻译成裸 os error 2。
+    let probe_paths = paths_from(args)?;
+    let ready_path = ipc_ready_path(&probe_paths.socket());
+    if ready_path.exists() && featheragent::ipc::connect(&probe_paths.socket()).is_ok() {
+        let pid = std::fs::read(&ready_path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .and_then(|v| v.get("pid").and_then(|x| x.as_u64()))
+            .unwrap_or(0);
+        return Err(format!(
+            "检测到内核正在运行（pid {pid}），请先停止 serve 再运行 bench；当前端点 {}",
+            probe_paths.socket().display()
+        ));
+    }
     let dir = std::env::temp_dir().join(format!("fa-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -952,7 +984,7 @@ impl XorShift {
 
 #[cfg(test)]
 mod tests {
-    use super::tool_matches;
+    use super::{apply_workspace, tool_matches};
 
     #[test]
     fn chat_allow_matches_full_short_and_wildcard() {
@@ -961,5 +993,32 @@ mod tests {
         assert!(tool_matches("*", "tool.shell"));
         assert!(!tool_matches("", "tool.fs.read"));
         assert!(!tool_matches("tool.fs.read", "tool.fs.write"));
+    }
+
+    #[test]
+    fn workspace_root_absolute_and_relative_resolve() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("install");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut paths = featheragent::governance::paths::Paths {
+            install_root: root.clone(),
+            data: root.join("data"),
+            workspace: root.join("workspace"),
+            runtime: root.join("runtime"),
+        };
+        let mut cfg = featheragent::engine::Config::default();
+        cfg.workspace_root = "outer-ws".into();
+        apply_workspace(&mut paths, &cfg, false);
+        assert_eq!(paths.workspace, root.join("outer-ws"));
+
+        let abs = d.path().join("abs-ws");
+        cfg.workspace_root = abs.to_string_lossy().into_owned();
+        apply_workspace(&mut paths, &cfg, false);
+        assert_eq!(paths.workspace, abs);
+
+        // CLI --workspace 优先：apply_workspace 不应覆盖
+        let before = paths.workspace.clone();
+        apply_workspace(&mut paths, &cfg, true);
+        assert_eq!(paths.workspace, before);
     }
 }

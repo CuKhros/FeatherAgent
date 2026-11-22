@@ -9,13 +9,14 @@
 </head>
 <body>
   <header>
-    <div class="brand">FeatherAgent <span class="ver">v1.1.6</span></div>
+    <div class="brand">FeatherAgent <span class="ver">v1.1.7</span></div>
     <div class="meta">
       <span id="session-label">未选择会话</span>
       <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
     </div>
     <div class="meta" id="conn">正在连接内核…</div>
     <button id="btn-settings" class="settings-btn" title="服务端、模型与采样设置">⚙ 设置</button>
+    <button id="btn-plugins" class="ghost top-plugins" title="插件管理与插件页面">🧩 插件</button>
   </header>
 
   <main>
@@ -49,63 +50,97 @@
   </main>
 
   <div id="settings-page" class="settings-page hidden">
-    <div class="settings-card">
-      <div class="settings-head">
-        <div>
-          <h2>设置</h2>
-          <p class="warn">保存后通过 <code>config.set</code> 提交给内核，立即应用到下一次推理。</p>
-        </div>
-        <button id="btn-settings-close" class="ghost">关闭</button>
-      </div>
+    <div class="settings-shell">
+      <aside class="settings-nav">
+        <div class="nav-title">设置</div>
+        <button class="nav-item active" data-view="general">常规</button>
+        <button class="nav-item" data-view="plugins">插件管理</button>
+        <div class="nav-subtitle">插件页面</div>
+        <div id="plugin-nav" class="plugin-nav"></div>
+        <div class="nav-foot">安装或启停插件后，侧栏会随内核登记表更新；页面内容由插件清单驱动。</div>
+      </aside>
 
-      <div class="settings-section">
-        <div class="section-title">服务端</div>
-        <div class="settings-grid">
-          <label>Provider 插件
-            <select id="cfg-provider"></select>
-          </label>
-          <label>Base URL
-            <input id="cfg-base-url" placeholder="http://127.0.0.1:11434" autocomplete="off">
-          </label>
+      <div class="settings-card">
+        <div class="settings-head">
+          <div>
+            <h2 id="settings-title">设置</h2>
+            <p id="settings-subtitle" class="warn">保存后通过 <code>config.set</code> 提交给内核；工作区改动在下次启动 serve 时生效。</p>
+          </div>
+          <button id="btn-settings-close" class="ghost">关闭</button>
         </div>
-      </div>
 
-      <div class="settings-section">
-        <div class="section-title">模型与采样</div>
-        <div class="settings-grid">
-          <label>模型
-            <div class="model-row">
-              <input id="cfg-model" placeholder="qwen2.5:7b" autocomplete="off">
-              <select id="cfg-model-select" title="已发现的模型"></select>
+        <div id="view-general" class="settings-view">
+          <div class="settings-section">
+            <div class="section-title">服务端</div>
+            <div class="settings-grid">
+              <label>Provider 插件
+                <select id="cfg-provider"></select>
+              </label>
+              <label>Base URL
+                <input id="cfg-base-url" placeholder="http://127.0.0.1:11434" autocomplete="off">
+              </label>
             </div>
-            <span id="cfg-models-hint" class="form-hint"></span>
-          </label>
-          <label>温度 <span id="cfg-temperature-val" class="value">0.70</span>
-            <input id="cfg-temperature" type="range" min="0" max="2" step="0.05" value="0.7">
-          </label>
-        </div>
-      </div>
+          </div>
 
-      <div class="settings-section">
-        <div class="section-title">上下文高级选项</div>
-        <div class="settings-grid">
-          <label>上下文窗口（tokens）
-            <input id="cfg-context-window" type="number" min="512" max="131072" step="256" value="8192">
-          </label>
-          <label>单轮最大工具回合
-            <input id="cfg-max-turns" type="number" min="1" max="32" step="1" value="6">
-          </label>
-        </div>
-        <label class="check-row">
-          <input id="cfg-auto-allow-safe" type="checkbox"> 自动放行安全工具（如读文件）
-        </label>
-      </div>
+          <div class="settings-section">
+            <div class="section-title">模型与采样</div>
+            <div class="settings-grid">
+              <label>模型
+                <div class="model-row">
+                  <input id="cfg-model" placeholder="qwen2.5:7b" autocomplete="off">
+                  <select id="cfg-model-select" title="已发现的模型"></select>
+                </div>
+                <span id="cfg-models-hint" class="form-hint"></span>
+              </label>
+              <label>温度 <span id="cfg-temperature-val" class="value">0.70</span>
+                <input id="cfg-temperature" type="range" min="0" max="2" step="0.05" value="0.7">
+              </label>
+            </div>
+          </div>
 
-      <div class="settings-actions">
-        <span id="settings-status" class="hint"></span>
-        <button id="btn-settings-refresh">刷新模型列表</button>
-        <button id="btn-settings-cancel" class="ghost">取消</button>
-        <button id="btn-settings-save" class="primary">保存并应用</button>
+          <div class="settings-section">
+            <div class="section-title">上下文与工作区</div>
+            <div class="settings-grid">
+              <label>上下文窗口（tokens）
+                <input id="cfg-context-window" type="number" min="512" max="131072" step="256" value="8192">
+              </label>
+              <label>单轮最大工具回合
+                <input id="cfg-max-turns" type="number" min="1" max="32" step="1" value="6">
+              </label>
+            </div>
+            <label class="stack-row">工作区根目录（留空 = 安装根/workspace）
+              <input id="cfg-workspace-root" placeholder="D:\Projects\my-workspace 或 /home/me/work" autocomplete="off">
+              <span class="form-hint">可指向安装目录外；保存后需重启 serve。内核会在该目录创建 <code>.featheagent/</code>（worklog.md / memory.md）。</span>
+            </label>
+            <label class="check-row">
+              <input id="cfg-auto-allow-safe" type="checkbox"> 自动放行安全工具（如读文件）
+            </label>
+          </div>
+
+          <div class="settings-actions">
+            <span id="settings-status" class="hint"></span>
+            <button id="btn-settings-refresh">刷新模型列表</button>
+            <button id="btn-settings-cancel" class="ghost">取消</button>
+            <button id="btn-settings-save" class="primary">保存并应用</button>
+          </div>
+        </div>
+
+        <div id="view-plugins" class="settings-view hidden">
+          <div class="settings-section">
+            <div class="section-title">已安装插件</div>
+            <div class="plugin-tools">
+              <input id="plugin-install-path" placeholder="插件目录绝对路径（含 plugin.json）" autocomplete="off">
+              <button id="btn-plugin-install">安装</button>
+              <button id="btn-plugin-refresh">刷新</button>
+            </div>
+            <div id="plugin-list" class="plugin-list"></div>
+            <div id="plugin-status" class="form-hint"></div>
+          </div>
+        </div>
+
+        <div id="view-plugin" class="settings-view hidden">
+          <div id="plugin-detail" class="plugin-detail"></div>
+        </div>
       </div>
     </div>
   </div>

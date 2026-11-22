@@ -515,6 +515,14 @@ impl PluginHost {
         Ok(p)
     }
 
+    /// 停用一个已启用的插件：从注册表移除运行规格并终止进程。
+    pub fn unregister(&self, name: &str) {
+        self.specs.write().remove(name);
+        if let Some(p) = self.procs.write().remove(name) {
+            p.terminate(Duration::from_millis(300));
+        }
+    }
+
     pub fn list(&self) -> Vec<(String, PluginState, Option<PluginManifest>)> {
         self.specs
             .read()
