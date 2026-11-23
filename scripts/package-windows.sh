@@ -38,8 +38,9 @@ mkdir -p "$STAGE/$NAME/tools"
 cp tools/*.py "$STAGE/$NAME/tools/" 2>/dev/null || true
 mkdir -p "$STAGE/$NAME/docs"
 cp docs/*.md "$STAGE/$NAME/docs/" 2>/dev/null || true
-cp README.md LICENSE SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md CHANGELOG.md "$STAGE/$NAME/"
-cp docs/Windows测试说明.md "$STAGE/$NAME/START-HERE.md"
+cp README.md README.zh-CN.md LICENSE SECURITY.md SECURITY.zh-CN.md CONTRIBUTING.md CONTRIBUTING.zh-CN.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md "$STAGE/$NAME/"
+cp docs/Windows-Test-Guide.md "$STAGE/$NAME/START-HERE.md"
+cp docs/Windows测试说明.zh-CN.md "$STAGE/$NAME/START-HERE.zh-CN.md"
 
 # 体积门禁：内核 exe ≤ 8 MiB
 CORE_BYTES=$(stat -c %s "$STAGE/$NAME/featheragent.exe")

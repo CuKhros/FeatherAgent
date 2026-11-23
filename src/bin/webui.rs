@@ -26,7 +26,9 @@ use featheragent::server::client::Client;
 use featheragent::util::{base64, random_token, sha1, Args};
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
+const INDEX_HTML_ZH: &str = include_str!("../../web/index.zh-CN.html");
 const APP_JS: &str = include_str!("../../web/app.js");
+const APP_JS_ZH: &str = include_str!("../../web/app.zh-CN.js");
 const STYLE_CSS: &str = include_str!("../../web/style.css");
 const FAVICON_ICO: &[u8] = include_bytes!("../../web/favicon.ico");
 const LOGO_PNG: &[u8] = include_bytes!("../../web/logo.png");
@@ -39,13 +41,30 @@ struct Ctx {
     profile: PathBuf,
     /// 常驻上游连接：会话 holder 绑定在连接上，必须复用同一条连接。
     rpc: Mutex<Client>,
+    /// true = 中文界面；默认英文。
+    lang_zh: bool,
+}
+
+fn is_zh_lang(tag: Option<&str>) -> bool {
+    matches!(tag, Some("zh") | Some("zh-CN") | Some("zh_CN") | Some("cn"))
 }
 
 fn main() {
     let args = Args::parse(std::env::args().skip(1));
+    let lang_zh = is_zh_lang(args.flag("lang"));
     if args.has("--help") || args.positional.iter().any(|p| p == "-h") {
         println!("FeatherAgent WebUI {}", env!("CARGO_PKG_VERSION"));
-        println!("用法: featheragent-webui [--root DIR] [--socket PATH] [--app]");
+        if lang_zh {
+            println!(
+                "用法: featheragent-webui [--root DIR] [--socket PATH] [--app] [--lang en|zh-CN]"
+            );
+            println!("  默认英文界面；--lang zh-CN 切回中文。");
+        } else {
+            println!(
+                "Usage: featheragent-webui [--root DIR] [--socket PATH] [--app] [--lang en|zh-CN]"
+            );
+            println!("  Default UI language is English; pass --lang zh-CN for Chinese.");
+        }
         return;
     }
     if args.has("version") {
@@ -68,7 +87,13 @@ fn main() {
     let rpc_conn = match Client::connect(&socket) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("无法连接内核 {socket:?}: {e}\n先运行 `featheragent serve`");
+            if lang_zh {
+                eprintln!("无法连接内核 {socket:?}: {e}\n请先运行 `featheragent serve`");
+            } else {
+                eprintln!(
+                    "Cannot connect to kernel {socket:?}: {e}\nStart `featheragent serve` first"
+                );
+            }
             std::process::exit(2);
         }
     };
@@ -77,7 +102,11 @@ fn main() {
             .client
             .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
     {
-        eprintln!("内核未就绪（{socket:?}）: {e}");
+        if lang_zh {
+            eprintln!("内核未就绪 ({socket:?}): {e}");
+        } else {
+            eprintln!("Kernel not ready ({socket:?}): {e}");
+        }
         std::process::exit(2);
     }
     // 该连接只做 RPC；通知由 SSE 连接单独订阅。这里排空事件，避免无界通道增长。
@@ -96,6 +125,7 @@ fn main() {
         socket,
         profile,
         rpc,
+        lang_zh,
     });
 
     let url = format!("http://127.0.0.1:{}/#token={}", ctx.port, ctx.token);
@@ -109,18 +139,25 @@ fn main() {
             "token_in_fragment": true,
             "webui_profile": ctx.profile.display().to_string(),
             "app_mode": args.has("--app"),
+            "lang": if ctx.lang_zh { "zh-CN" } else { "en" },
         }))
         .unwrap()
     );
 
     if args.has("--app") {
-        launch_browser(&url, &ctx.profile);
-    } else {
+        launch_browser(&url, &ctx.profile, lang_zh);
+    } else if lang_zh {
         println!("在浏览器打开上面的 url（token 在 #fragment 中，不会进 Referer/日志）");
+    } else {
+        println!("Open the URL above in a browser (the token stays in the #fragment, never in Referer/logs)");
     }
 
     if let Err(e) = serve(listener, ctx) {
-        eprintln!("WebUI 桥退出: {e}");
+        if lang_zh {
+            eprintln!("WebUI 桥退出: {e}");
+        } else {
+            eprintln!("WebUI bridge exited: {e}");
+        }
     }
 }
 
@@ -286,7 +323,12 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     }
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") | ("GET", "/index.html") => {
-            let html = INDEX_HTML.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
+            let source = if ctx.lang_zh {
+                INDEX_HTML_ZH
+            } else {
+                INDEX_HTML
+            };
+            let html = source.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
             respond(
                 &mut stream,
                 200,
@@ -299,6 +341,12 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
             200,
             "application/javascript; charset=utf-8",
             APP_JS.as_bytes(),
+        ),
+        ("GET", "/app.zh-CN.js") => respond(
+            &mut stream,
+            200,
+            "application/javascript; charset=utf-8",
+            APP_JS_ZH.as_bytes(),
         ),
         ("GET", "/style.css") => respond(
             &mut stream,
@@ -632,7 +680,7 @@ fn write_ws_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) -> std::io
     stream.flush()
 }
 
-fn launch_browser(url: &str, profile: &PathBuf) {
+fn launch_browser(url: &str, profile: &PathBuf, lang_zh: bool) {
     #[cfg(unix)]
     let candidates: Vec<(String, bool)> = vec![
         ("chromium".into(), true),
@@ -702,18 +750,37 @@ fn launch_browser(url: &str, profile: &PathBuf) {
         }
         match cmd.spawn() {
             Ok(child) => {
-                println!(
-                    "已启动 WebUI（{}，pid {}，profile {}）",
-                    bin,
-                    child.id(),
-                    profile.display()
-                );
+                if lang_zh {
+                    println!(
+                        "已启动 WebUI（{}，pid {}，profile {}）",
+                        bin,
+                        child.id(),
+                        profile.display()
+                    );
+                } else {
+                    println!(
+                        "WebUI started ({} , pid {}, profile {})",
+                        bin,
+                        child.id(),
+                        profile.display()
+                    );
+                }
                 return;
             }
-            Err(e) => eprintln!("启动 {bin} 失败: {e}"),
+            Err(e) => {
+                if lang_zh {
+                    eprintln!("启动 {bin} 失败: {e}");
+                } else {
+                    eprintln!("Failed to start {bin}: {e}");
+                }
+            }
         }
     }
-    eprintln!("未找到 Chromium 系浏览器；请手动打开 URL（--app 模式跳过）");
+    if lang_zh {
+        eprintln!("未找到 Chromium 系浏览器；请手动打开 URL（--app 模式跳过）");
+    } else {
+        eprintln!("No Chromium-based browser found; open the URL manually (skipped in --app mode)");
+    }
 }
 
 // 供 `cargo test` 里做冒烟检查的最小自测
@@ -742,7 +809,10 @@ mod tests {
         assert!(INDEX_HTML.contains("plugin-install-path"));
         assert!(APP_JS.contains("EventSource"));
         assert!(APP_JS.contains("provider.models"));
-        assert!(APP_JS.contains("RPC 超时"));
+        assert!(APP_JS.contains("RPC timeout"));
+        assert!(APP_JS_ZH.contains("RPC 超时"));
+        assert!(INDEX_HTML_ZH.contains("未选择会话"));
+        assert!(INDEX_HTML_ZH.contains("/app.zh-CN.js"));
         assert!(APP_JS.contains("config.set"));
         assert!(APP_JS.contains("renderModelList"));
         assert!(APP_JS.contains("cfg-model-select"));

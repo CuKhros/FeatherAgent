@@ -322,5 +322,5 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
 - `chat.inject` 先写 `user.message`（`source:"steer"`、`during_turn:true`），再打断当前生成；若会话空闲返回业务错误，请改用 `chat.send`。
 - 压缩写 `context.compacted` 事件（码 24），payload 含 `summary` / `covers_until_seq` / `compacted_events` / `before_chars` / `after_chars`；模型视图只保留 cutoff 之后的事件，旧原文仍在 append-only 日志。
-- `web.search` / `web.fetch` / `web.news` / `web.suggest` / `web.status` 在 `search_provider=none` 时不出现；`local` 不需要 key，`deepseek` 仍需 key。网页返回一律 `untrusted:true`。本地搜索为零 Key，DeepSeek 计费详见 `docs/v1.2.0-rc.1-变更说明.md` §2。
+- `web.search` / `web.fetch` / `web.news` / `web.suggest` / `web.status` 在 `search_provider=none` 时不出现；`local` 不需要 key，`deepseek` 仍需 key。网页返回一律 `untrusted:true`。本地搜索为零 Key，DeepSeek 计费详见 `docs/v1.2.0-rc.1-变更说明.zh-CN.md` §2。
 - `web.search` / `web.news` 的 `count` 在 schema 中声明为 `integer`；小模型发送数字字符串（如 `"5"`）时，内核在转发插件前归一化为整数并保留原 `tool.call` 参数，客户端不应依赖字符串类型。

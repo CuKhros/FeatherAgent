@@ -1,16 +1,16 @@
-## 改动说明
+## What changed
 
-<!-- 现象 / 根因 / 修复 / 验证 -->
+<!-- symptom / root cause / fix / verification -->
 
-## 检查项
+## Checklist
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo clippy --all-targets --locked -- -D warnings`
 - [ ] `cargo test --locked --all-targets`
 - [ ] `scripts/version-check.sh`
-- [ ] 涉及 Windows 时：`scripts/build-windows.sh`，5 个 exe 均有 `.rsrc` 且不依赖 MinGW 运行时 DLL
-- [ ] 未提交密钥、个人路径、`dist/`、`target/`、`runtime/`、日志
+- [ ] Windows-related: `scripts/build-windows.sh`; all five exes have `.rsrc` and do not depend on MinGW runtime DLLs
+- [ ] No secrets, personal paths, `dist/`, `target/`, `runtime/`, or logs committed
 
-## 关联 Issue
+## Related issue
 
-<!-- 无则写“无” -->
+<!-- "None" if not applicable -->

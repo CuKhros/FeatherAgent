@@ -1,26 +1,26 @@
-# 安全策略
+# Security policy
 
-## 支持范围
+## Scope
 
-安全修复只进入当前主线与最近一个已发布版本。历史测试包（`v1.1.x`）不再单独回补，除非缺陷影响当前内核契约或存在在野利用。
+Security fixes target the current mainline and the most recent published version. Historical test packages (`v1.1.x`) are not patched separately unless the issue affects the current kernel contract or is known to be exploited in the wild.
 
-## 报告漏洞
+## Reporting a vulnerability
 
-请**不要**在公开 Issue 中贴出可复现的攻击细节、密钥、私有日志或用户数据。优先使用 GitHub 仓库的 **Security → Report a vulnerability**（私有漏洞报告）。如果该入口不可用，请通过仓库拥有者的 GitHub 主页发起私下联系，并附上最小复现与影响范围。
+Please **do not** post reproducible attack details, keys, private logs, or user data in a public issue. Prefer **Security → Report a vulnerability** on the GitHub repository (private vulnerability reporting). If that entry point is unavailable, contact the repository owner privately through their GitHub profile and include a minimal reproduction and impact.
 
-报告建议包含：
+A useful report includes:
 
-- 受影响版本与平台（Linux / Windows，x64）；
-- 触发路径（命令、会话、插件、WebUI 请求）；
-- 预期行为与实际行为；
-- 是否涉及路径越界、权限绕过、私网抓取（SSRF）、命令执行或凭据泄漏。
+- affected version and platform (Linux / Windows, x64);
+- trigger path (command, session, plugin, WebUI request);
+- expected behavior and actual behavior;
+- whether it involves path escape, permission bypass, private-network fetch (SSRF), command execution, or credential disclosure.
 
-## 处理原则
+## Handling
 
-- 确认后先修主线，再评估是否需要补丁版本；在修复发布前不公开细节。
-- 不要求报告者提供真实密钥、个人文件或第三方系统访问权限。
-- 对公开网页抓取类问题（站点解析变化、限速、robots/ToS）按功能缺陷处理，不作为安全漏洞。
+- After confirmation, fix mainline first, then decide whether a patch release is needed; do not publish details before the fix ships.
+- Do not ask reporters for real keys, personal files, or access to third-party systems.
+- Public-web-search issues (site parser changes, rate limits, robots/ToS) are treated as functional defects, not security vulnerabilities.
 
-## 安全边界
+## Security boundary
 
-FeatherAgent 是本地 Agent 内核，默认只监听环回地址；插件在独立进程运行，工具权限由治理层逐次判定。请勿把 `serve` 直接暴露到公网，也不要把包含密钥的 `.env`、`config.json` 或运行日志提交到仓库。
+FeatherAgent is a local agent kernel and listens on loopback by default. Plugins run in separate processes; tool permissions are decided per call by the governance layer. Do not expose `serve` directly to the public internet, and never commit `.env`, `config.json`, or runtime logs containing keys.

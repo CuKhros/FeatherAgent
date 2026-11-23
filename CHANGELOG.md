@@ -1,55 +1,71 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.0-rc.1` 是公开仓库候选版，尚未替代稳定版。
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.0-rc.1` is the public-repository candidate and does not replace a stable release.
+
+## [Unreleased]
+
+### Added
+
+- English is now the primary documentation language. Chinese editions use the `.zh-CN.md` suffix; root and core documents have both editions.
+- TUI and WebUI default to English and accept `--lang zh-CN` for the Chinese interface. The kernel stays language-neutral.
+- English and Chinese WebUI assets are embedded in the same `featheragent-webui` binary; no extra package is required.
+- English and Chinese TUI labels share one binary and are selected at startup.
+- WebUI package documentation includes both the English test guide and the Chinese edition.
+
+### Changed
+
+- `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, architecture, verification report, Wire Format, Windows test guide, and v1.2.0-rc.1 change note are English by default.
+- Historical Windows retest notes remain Chinese-only and are renamed with `.zh-CN.md`.
+- No version bump: the localization work stays under `1.2.0-rc.1`; existing tag/version semantics are unchanged until the owner decides on a release.
 
 ## [1.2.0-rc.1] - 2026-11-23
 
 ### Added
 
-- MIT `LICENSE`，以及 `SECURITY.md`、`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、本 CHANGELOG。
-- 本地 CI `scripts/ci.sh`：Linux fmt/clippy/test/release build；`--with-windows` 追加 Windows x64 交叉编译并检查 `.rsrc` 与 MinGW 运行时 DLL。
-- `.github/CODEOWNERS` 与 Pull Request 模板。
-- `scripts/version-check.sh`：校验 Cargo、锁文件、5 个插件 manifest 与 WebUI 版本占位一致。
-- `scripts/build-linux.sh`：Linux 版本门禁 + `--locked` 构建入口。
-- `docs/v1.2.0-rc.1-变更说明.md`；README 增加平台支持矩阵与“已实测 / 未实测”表。
+- MIT `LICENSE`, plus `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and this CHANGELOG.
+- Local CI `scripts/ci.sh`: Linux fmt/clippy/test/release build; `--with-windows` adds Windows x64 cross-compilation and checks `.rsrc` and MinGW runtime DLLs.
+- `.github/CODEOWNERS` and a Pull Request template.
+- `scripts/version-check.sh`: validates Cargo, lock file, five plugin manifests, and the WebUI version placeholder.
+- `scripts/build-linux.sh`: Linux version gate + `--locked` build entry point.
+- `docs/v1.2.0-rc.1-Changes.md`; README adds a platform support matrix and a tested/untested table.
 
 ### Fixed
 
-- `web.search` / `web.news` 的 `count` 接受数字字符串（`"5"`）并在内核转发前归一化为整数；schema 仍为 integer。
-- TUI 插件页标题不再硬编码 `v1.1.8`，改为 `CARGO_PKG_VERSION`。
-- WebUI 顶栏版本改为启动时注入 `{{VERSION}}`，不再硬编码。
-- 本地搜索 User-Agent 版本改为 `CARGO_PKG_VERSION`。
-- `featheragent --version` 不再误启动内核；TUI/WebUI 新增 `--version`/`--help`。
-- 修复 clippy 报告的 16 项代码问题（类型别名、范围循环、`&Path`、`checked_div`、排序等），`cargo clippy -D warnings` 清零。
-- 集成测试版本断言改为当前包版本，避免发版时误判。
+- `web.search` / `web.news` `count` accepts numeric strings (`"5"`) and normalizes them to integers before kernel forwarding; the schema remains integer.
+- TUI plugin-page title is no longer hard-coded to `v1.1.8`; it uses `CARGO_PKG_VERSION`.
+- WebUI header version is injected as `{{VERSION}}` at startup instead of being hard-coded.
+- Local-search User-Agent version uses `CARGO_PKG_VERSION`.
+- `featheragent --version` no longer starts the kernel by mistake; TUI/WebUI gain `--version` / `--help`.
+- Fixed 16 clippy findings (type aliases, range loops, `&Path`, `checked_div`, sorting, and more), bringing `cargo clippy -D warnings` to zero.
+- Integration-test version assertions use the current package version, avoiding false failures at release time.
 
 ### Changed
 
-- Windows PE 资源新增 `FileVersion` / `ProductVersion` / MIT 版权，CompanyName 改为 `FeatherAgent contributors`。
-- Linux 与 Windows 打包都带 `LICENSE`；Windows 另带 SECURITY/CONTRIBUTING/CODE_OF_CONDUCT/CHANGELOG。
-- `Cargo.toml` 增加 `license = "MIT"`、`repository`、`readme`、`authors`、`rust-version = "1.80"`。
+- Windows PE resources gain `FileVersion` / `ProductVersion` / MIT copyright; CompanyName becomes `FeatherAgent contributors`.
+- Linux and Windows packages both include `LICENSE`; Windows also includes SECURITY/CONTRIBUTING/CODE_OF_CONDUCT/CHANGELOG.
+- `Cargo.toml` gains `license = "MIT"`, `repository`, `readme`, `authors`, and `rust-version = "1.80"`.
 
 ### Security
 
-- 扫描全部提交历史与工作区：未发现 `sk-*`、`ghp_*`、AKIA、私钥、`.env` 或大体积二进制泄漏；仅 `target/`、`dist/`、`__pycache__/` 被忽略。
+- Scanned all commit history and the working tree: no `sk-*`, `ghp_*`, AKIA, private keys, `.env`, or large-binary leaks; only `target/`, `dist/`, and `__pycache__/` are ignored.
 
 ### Verification
 
-- Linux：**86/86** 自动化测试通过（57 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration），1 个需公网用例单独通过。
-- `cargo fmt --check`、`cargo clippy --all-targets --locked -- -D warnings` 通过。
-- Windows x64 交叉编译 5 个 exe；具体哈希见 Release 资产与 manifest。
+- Linux: **87/87** automation tests pass (58 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration); one network-dependent case passes separately.
+- `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings` pass.
+- Windows x64 cross-compiles five exes; hashes are in the release assets and manifest.
 
 ## [1.1.9] - 2026-11-23
 
 ### Fixed
 
-- 项目工作区路径双重嵌套：`tool_base()` 只去掉一层当前项目名前缀。
-- `/stop` 提前停止误报 `failed`：取消态发 `finish=interrupted` 空消息，状态统一为 `stopped/cancelled`。
-- WebSocket 空闲 15 秒后页面卡 `running`：事件线程超时后继续转发，仅断开连接才退出。
-- `tools/s3_batch.py` 适配项目级工作区、唯一 session 与写盘断言。
+- Project workspace path double nesting: `tool_base()` strips only one current-project prefix.
+- `/stop` reported `failed` after an early stop: cancellation emits an empty `finish=interrupted` message and maps state to `stopped/cancelled`.
+- WebSocket page stuck at `running` after 15 seconds idle: the event thread continues forwarding after timeouts and exits only when the connection closes.
+- `tools/s3_batch.py` adapted to project-level workspaces, unique sessions, and disk-write assertions.
 
 ### Added
 
-- TUI/WebUI 助手消息 Markdown 渲染（标题、列表、引用、代码块、行内样式、链接）。
-- WebUI/Windows 羽毛图标（favicon、logo、5 个 exe 资源段）。
-- 零 Key 本地联网搜索（必应/DuckDuckGo/Wikipedia/HN/GitHub + 新闻/抓取/联想/状态），默认 `search_provider=local`。
+- TUI/WebUI assistant Markdown rendering (headings, lists, quotes, code blocks, inline styles, links).
+- WebUI/Windows feather icons (favicon, logo, resources in all five exes).
+- Keyless local web search (Bing/DuckDuckGo/Wikipedia/HN/GitHub plus news/fetch/suggest/status), `search_provider=local` by default.

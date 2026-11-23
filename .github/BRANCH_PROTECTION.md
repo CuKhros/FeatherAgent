@@ -1,20 +1,20 @@
-# main 分支保护（期望配置）
+# main branch protection (intended configuration)
 
-目标：**拥有者可直接维护 main，其他协作者必须走 Pull Request，不能直接 push / force push / 删除。**
+Goal: **the owner can maintain main directly; every other collaborator must go through a Pull Request and cannot push, force-push, or delete main.**
 
-期望的 GitHub 规则：
+Intended GitHub rule:
 
-- Require a pull request before merging（至少 1 个 approval）
-- Require review from Code Owners（`.github/CODEOWNERS` = `@CuKhros`）
+- Require a pull request before merging (at least 1 approval)
+- Require review from Code Owners (`.github/CODEOWNERS` = `@CuKhros`)
 - Dismiss stale pull request approvals when new commits are pushed
 - Require conversation resolution before merging
 - Do not allow force pushes
 - Do not allow deletions
-- `enforce_admins = false`：拥有者保留应急直推能力；非拥有者没有 push 权限，也无法绕过 PR
+- `enforce_admins = false`: the owner keeps an emergency direct-push path; non-owners have no push permission and cannot bypass the PR flow
 
-当前状态（2026-11-23）：仓库为 **private + GitHub Free**，`branches/main/protection` 与 `rulesets` API 均返回 403（GitHub 要求 Pro 或 public）。现有唯一协作者 `yuyuyuyumin` 只有 `pull` 权限，**实际上不能写 main**；但“可审计的分支保护规则”要等升级 Pro 或仓库公开后才能创建。此文档不表示规则已经生效。
+Current state (2026-11-23): the repository is **private + GitHub Free**; both `branches/main/protection` and `rulesets` APIs return 403 (GitHub requires Pro or public). The only collaborator, `yuyuyuyumin`, has `pull` only and **cannot write main in practice**; an auditable protection rule still needs Pro or a public repository. This document does not claim the rule is active.
 
-升级 Pro 后可执行（拥有者）：
+After upgrading to Pro, the owner can run:
 
 ```bash
 cat <<'JSON' | gh api --method PUT repos/CuKhros/FeatherAgent/branches/main/protection --input -
@@ -34,4 +34,4 @@ cat <<'JSON' | gh api --method PUT repos/CuKhros/FeatherAgent/branches/main/prot
 JSON
 ```
 
-注意：仓库公开前不要为了开启保护而切换可见性；公开是独立决策，必须由拥有者明确执行。
+Note: do not change visibility merely to enable protection; going public is an independent decision that the owner must make explicitly.

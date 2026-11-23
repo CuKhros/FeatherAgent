@@ -1,5 +1,5 @@
-// FeatherAgent WebUI：默认 WebSocket（同连接 RPC + 事件推送），失败回退 HTTP + SSE。
-// token 从 URL fragment 读取后立刻从地址栏抹掉（不进 Referer、不进历史标题）。
+// FeatherAgent WebUI: WebSocket (RPC + events on one connection) by default, falling back to HTTP + SSE.
+// The token is read from the URL fragment and removed from the address bar immediately (never sent as Referer or kept in history).
 
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -11,9 +11,9 @@
     if (token) history.replaceState(null, "", location.pathname + location.search);
   }
   if (!token) {
-    token = (prompt("请输入终端输出的 WebUI token（URL # 后的部分）") || "").trim();
+    token = (prompt("Enter the WebUI token printed by the terminal (the part after # in the URL)") || "").trim();
     if (!token) {
-      $("#conn").textContent = "缺少 token，无法连接";
+      $("#conn").textContent = "Missing token; cannot connect";
       return;
     }
   }
@@ -42,9 +42,9 @@
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }),
     });
-    if (res.status === 401) throw new Error("token 无效");
+    if (res.status === 401) throw new Error("Invalid token");
     const j = await res.json();
-    if (j.error) throw new Error(j.error.message || "RPC 错误");
+    if (j.error) throw new Error(j.error.message || "RPC error");
     return j.result;
   }
 
@@ -53,7 +53,7 @@
       const id = rpcId++;
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error(`RPC 超时：${method}`));
+        reject(new Error(`RPC timeout: ${method}`));
       }, timeoutMs);
       pending.set(id, { resolve, reject, timer });
       try {
@@ -76,7 +76,7 @@
     $("#state-label").textContent = state;
     const dot = $("#state-dot");
     dot.className = "dot " + (state === "running" || state === "generating" ? "running" : state === "cancelled" ? "cancelled" : "idle");
-    $("#session-label").textContent = current ? "会话 " + current : "未选择会话";
+    $("#session-label").textContent = current ? "Session " + current : "No session selected";
   }
 
   function mdInline(src) {
@@ -169,7 +169,7 @@
       const div = document.createElement("div");
       div.className = "session" + (s.id === current ? " active" : "");
       const live = s.live && s.live.state ? s.live.state : "history";
-      div.innerHTML = `<div class="sid">${esc(s.id)}</div><div class="smeta">${esc(s.workspace || "default")} · ${s.records || 0} 条 · ${esc(live)}</div>`;
+      div.innerHTML = `<div class="sid">${esc(s.id)}</div><div class="smeta">${esc(s.workspace || "default")} · ${s.records || 0} records · ${esc(live)}</div>`;
       div.onclick = () => resume(s.id);
       box.appendChild(div);
     }
@@ -181,7 +181,7 @@
       sessions = v.sessions || [];
       renderSessions();
     } catch (e) {
-      $("#conn").textContent = "内核不可用：" + e.message;
+      $("#conn").textContent = "Kernel unavailable: " + e.message;
     }
   }
 
@@ -196,18 +196,18 @@
       const pct = Math.min(100, Math.round((total / world) * 100));
       const layers = st.layers || {};
       const rows = [
-        `<span class="k">预算</span> ${total} / ${world} tokens (${pct}%)<div class="bar"><i style="width:${pct}%"></i></div>`,
-        `<span class="k">L1</span> ${layers.l1_window_messages || 0} 条 · <span class="k">L2</span> ${layers.l2_summary_cards || 0} 卡 · <span class="k">L3</span> ${layers.l3_task_state_tokens || 0} tok · <span class="k">L4</span> ${layers.l4_recalled_items || 0} 项`,
+        `<span class="k">Budget</span> ${total} / ${world} tokens (${pct}%)<div class="bar"><i style="width:${pct}%"></i></div>`,
+        `<span class="k">L1</span> ${layers.l1_window_messages || 0} records · <span class="k">L2</span> ${layers.l2_summary_cards || 0} cards · <span class="k">L3</span> ${layers.l3_task_state_tokens || 0} tok · <span class="k">L4</span> ${layers.l4_recalled_items || 0} items`,
         `<span class="k">system</span> ${st.system_tokens || 0} · <span class="k">tools</span> ${st.tools_tokens || 0} · <span class="k">skills</span> ${st.skills_tokens || 0}`,
         `<span class="k">history</span> ${st.history_tokens || 0} · <span class="k">summary</span> ${st.summary_tokens || 0} · <span class="k">recall</span> ${st.recall_tokens || 0}`,
-        `<span class="k">模型</span> ${esc(snap.model || "-")} · <span class="k">事件</span> ${snap.turns || 0} · <span class="k">回合</span> ${v.turn || 0}`,
+        `<span class="k">Model</span> ${esc(snap.model || "-")} · <span class="k">Events</span> ${snap.turns || 0} · <span class="k">Turns</span> ${v.turn || 0}`,
       ];
       const goal = snap.task_state && snap.task_state.goal;
-      if (goal) rows.push(`<span class="k">目标</span> ${esc(goal)}`);
+      if (goal) rows.push(`<span class="k">Goal</span> ${esc(goal)}`);
       $("#ctx").innerHTML = rows.join("<br>");
       setState(v.state || "idle");
     } catch (e) {
-      $("#ctx").textContent = "读取快照失败：" + e.message;
+      $("#ctx").textContent = "Failed to read snapshot: " + e.message;
     }
   }
 
@@ -215,7 +215,7 @@
     for (const e of events || []) {
       const p = e.payload || {};
       if (e.kind === "user.message") {
-        if (p.source === "steer") addMessage("user steer", "引导：" + (p.text || ""));
+        if (p.source === "steer") addMessage("user steer", "Steer: " + (p.text || ""));
         else addMessage("user", p.text || "");
       } else if (e.kind === "model.message" && p.text) {
         addMessage("assistant", p.text);
@@ -223,9 +223,9 @@
         const r = p.result || {};
         addMessage("tool", `${p.name || "tool"} → ${r.status || "ok"}${r.content ? "\n" + String(r.content).slice(0, 1200) : ""}`);
       } else if (e.kind === "tool.error") {
-        addMessage("system", `工具失败：${p.error || p.name || ""}`);
+        addMessage("system", `Tool failure: ${p.error || p.name || ""}`);
       } else if (e.kind === "context.compacted" && p.summary) {
-        addMessage("system", "上下文已压缩：" + p.summary);
+        addMessage("system", "Context compacted: " + p.summary);
       }
     }
   }
@@ -236,14 +236,14 @@
       current = id;
       $("#messages").innerHTML = "";
       const ws = (v && v.workspace) || "default";
-      addMessage("system", `已恢复会话 ${id}｜项目 ${ws}｜共 ${v.total || 0} 条事件`);
+      addMessage("system", `Restored session ${id} | project ${ws} | ${v.total || 0} events`);
       replayEvents(v.events);
       if ([...$("#new-workspace").options].some((o) => o.value === ws)) $("#new-workspace").value = ws;
       $("#hint").textContent = "";
       renderSessions();
       await refreshCtx();
     } catch (e) {
-      $("#hint").textContent = "恢复失败：" + e.message;
+      $("#hint").textContent = "Restore failed: " + e.message;
     }
   }
 
@@ -257,7 +257,7 @@
       for (const w of workspaces) {
         const o = document.createElement("option");
         o.value = w.name;
-        o.textContent = `${w.name}${w.has_agent ? " · 项目" : ""}`;
+        o.textContent = `${w.name}${w.has_agent ? " · project" : ""}`;
         sel.appendChild(o);
       }
       if (old && workspaces.some((w) => w.name === old)) sel.value = old;
@@ -269,20 +269,20 @@
         sel.appendChild(o);
       }
     } catch (e) {
-      $("#hint").textContent = "读取项目工作区失败：" + e.message;
+      $("#hint").textContent = "Failed to read project workspaces: " + e.message;
     }
   }
 
   async function createWorkspace() {
-    const name = (prompt("新建项目工作区名（将创建在 workspace_root 下一层）", "") || "").trim();
+    const name = (prompt("New project workspace name (created one level under workspace_root)", "") || "").trim();
     if (!name) return;
     try {
       await rpc("workspace.create", { name });
       await refreshWorkspaces();
       $("#new-workspace").value = name;
-      $("#hint").textContent = `已创建项目工作区 ${name}，含独立 .featheagent/`;
+      $("#hint").textContent = `Created project workspace ${name} with its own .featheagent/`;
     } catch (e) {
-      $("#hint").textContent = "创建项目失败：" + e.message;
+      $("#hint").textContent = "Project creation failed: " + e.message;
     }
   }
 
@@ -294,15 +294,15 @@
       $("#new-id").value = "";
       await refreshSessions();
       await resume(id);
-      addMessage("system", "新会话 " + id);
+      addMessage("system", "New session " + id);
     } catch (e) {
-      $("#hint").textContent = "创建失败：" + e.message;
+      $("#hint").textContent = "Creation failed: " + e.message;
     }
   }
 
   async function send() {
     if (!current) {
-      $("#hint").textContent = "先新建或选择会话";
+      $("#hint").textContent = "Create or select a session first";
       return;
     }
     const box = $("#input");
@@ -310,18 +310,18 @@
     if (!text) return;
     box.value = "";
     const running = ["running", "assembling", "generating", "tool_executing"].includes(curState);
-    addMessage(running ? "user steer" : "user", running ? "引导：" + text : text);
+    addMessage(running ? "user steer" : "user", running ? "Steer: " + text : text);
     try {
       if (running) {
         await rpc("chat.inject", { session: current, text });
-        $("#hint").textContent = "引导已插入上下文；当前生成会在边界中断后继续";
+        $("#hint").textContent = "Steer inserted; the current generation will stop at a boundary and continue";
       } else {
         await rpc("chat.send", { session: current, text });
         setState("running");
         $("#hint").textContent = "";
       }
     } catch (e) {
-      addMessage("system", "发送失败：" + e.message);
+      addMessage("system", "Send failed: " + e.message);
       $("#hint").textContent = e.message;
     }
   }
@@ -330,40 +330,40 @@
     if (!current) return;
     try {
       await rpc("chat.stop", { session: current });
-      $("#hint").textContent = "已紧急停止；已生成内容与上下文保留在会话日志";
+      $("#hint").textContent = "Emergency stop complete; generated content and context remain in the session log";
     } catch (e) {
-      $("#hint").textContent = "取消失败：" + e.message;
+      $("#hint").textContent = "Cancel failed: " + e.message;
     }
   }
 
   async function compact() {
     if (!current) return;
-    $("#hint").textContent = "正在生成上下文摘要…";
+    $("#hint").textContent = "Generating context summary…";
     try {
       const v = await rpc("context.compact", { session: current }, 200000);
-      addMessage("system", `已压缩上下文：${v.compacted_events} 个旧事件 → ${v.summary_chars} 字符摘要`);
-      $("#hint").textContent = "压缩完成；旧原文仍保留在会话日志";
+      addMessage("system", `Context compacted: ${v.compacted_events} old events → ${v.summary_chars}-character summary`);
+      $("#hint").textContent = "Compaction complete; original text remains in the session log";
       await refreshCtx();
     } catch (e) {
-      $("#hint").textContent = "压缩失败：" + e.message;
+      $("#hint").textContent = "Compaction failed: " + e.message;
     }
   }
 
   async function fork() {
     if (!current) return;
-    const target = (prompt("fork 为（空则自动）", current + "-fork") || "").trim();
+    const target = (prompt("Fork as (empty = automatic)", current + "-fork") || "").trim();
     try {
       const v = await rpc("session.fork", { session: current, as: target || current + "-fork" });
-      addMessage("system", `已 fork，复制 ${v.copied} 条事件`);
+      addMessage("system", `Forked; copied ${v.copied} events`);
       await refreshSessions();
     } catch (e) {
-      $("#hint").textContent = "fork 失败：" + e.message;
+      $("#hint").textContent = "Fork failed: " + e.message;
     }
   }
 
   function showConfirm(params) {
     pendingConfirm = params.token;
-    $("#modal-tool").textContent = `${params.tool}（风险：${params.risk}）`;
+    $("#modal-tool").textContent = `${params.tool} (risk: ${params.risk}）`;
     $("#modal").classList.remove("hidden");
   }
 
@@ -374,9 +374,9 @@
     if (!token2) return;
     try {
       await rpc(allow ? "tool.confirm" : "tool.deny", { token: token2, allow });
-      addMessage("system", allow ? "已允许危险工具" : "已拒绝危险工具");
+      addMessage("system", allow ? "Dangerous tool allowed" : "Dangerous tool denied");
     } catch (e) {
-      addMessage("system", "确认失败：" + e.message);
+      addMessage("system", "Confirmation failed: " + e.message);
     }
   }
 
@@ -389,31 +389,31 @@
     switch (k) {
       case "model.message": if (p.text) addMessage("assistant", p.text); break;
       case "user.message":
-        if (p.source === "steer") addMessage("user steer", "引导：" + (p.text || ""));
+        if (p.source === "steer") addMessage("user steer", "Steer: " + (p.text || ""));
         break;
       case "context.compacted": {
         const n = p.compacted_events || 0;
-        addMessage("system", `上下文已压缩：${n} 个旧事件 → ${p.after_chars || 0} 字符摘要（原文仍在日志）`);
+        addMessage("system", `Context compacted: ${n} old events → ${p.after_chars || 0}-character summary (original remains in the log)`);
         refreshCtx();
         break;
       }
-      case "tool.requested": addMessage("tool", `请求 ${p.tool || "?"}`); break;
+      case "tool.requested": addMessage("tool", `Request ${p.tool || "?"}`); break;
       case "tool.result": {
         let brief = "";
         try { brief = JSON.stringify(p.result); } catch { brief = String(p.result); }
         addMessage("tool", `${p.name || "?"} → ${brief.slice(0, 400)}`);
         break;
       }
-      case "tool.error": addMessage("tool", `${p.name || "?"} 业务错误: ${p.error || ""}`); break;
-      case "tool.failed": addMessage("tool", `${p.name || "?"} 插件失败: ${p.error || ""}`); break;
-      case "tool.degraded": addMessage("system", `工具熔断：${p.name || "?"}（连续 ${p.failures || 3} 次技术失败）`); break;
-      case "config.changed": addMessage("system", "内核配置已更新"); break;
-      case "permission.denied": addMessage("system", "拒绝：" + (p.reason || "")); break;
-      case "plugin.degraded": addMessage("system", "插件降级（连续失败 3 次）"); break;
-      case "subscriber.lagged": addMessage("system", "订阅落后，已丢弃旧事件"); break;
-      case "memory.recalled": if ((p.items || []).length) addMessage("system", `召回 ${p.items.length} 条记忆`); break;
+      case "tool.error": addMessage("tool", `${p.name || "?"} business error: ${p.error || ""}`); break;
+      case "tool.failed": addMessage("tool", `${p.name || "?"} plugin failure: ${p.error || ""}`); break;
+      case "tool.degraded": addMessage("system", `Tool circuit breaker: ${p.name || "?"} (${p.failures || 3} consecutive technical failures)`); break;
+      case "config.changed": addMessage("system", "Kernel configuration updated"); break;
+      case "permission.denied": addMessage("system", "Denied: " + (p.reason || "")); break;
+      case "plugin.degraded": addMessage("system", "Plugin degraded (3 consecutive failures)"); break;
+      case "subscriber.lagged": addMessage("system", "Subscriber lagged; old events dropped"); break;
+      case "memory.recalled": if ((p.items || []).length) addMessage("system", `Recalled ${p.items.length} memories`); break;
       case "chat.finished":
-        addMessage("system", `— 本轮结束（${p.status || "done"}）`);
+        addMessage("system", `— Turn finished (${p.status || "done"})`);
         setState((p.status === "cancelled" || p.status === "stopped") ? "cancelled" : "idle");
         refreshCtx();
         refreshSessions();
@@ -447,10 +447,10 @@
     const ph = document.createElement("option");
     ph.value = "";
     ph.textContent = cfgModels.length
-      ? `选择已发现模型（${cfgModels.length}）`
-      : "未发现模型（可手填）";
+      ? `Select a discovered model (${cfgModels.length})`
+      : "No models found (manual entry allowed)";
     sel.appendChild(ph);
-    // 原生 datalist 会按当前输入值过滤，导致只显示一项；这里用真正的 select 列全量。
+    // A native datalist filters by the current value, showing only one item; use a real select for the full list.
     for (const m of cfgModels) {
       const o = document.createElement("option");
       o.value = m;
@@ -477,22 +477,22 @@
     const provider = $("#cfg-provider").value;
     const baseUrl = ($("#cfg-base-url").value || "").trim();
     const model = ($("#cfg-model").value || "").trim();
-    $("#cfg-models-hint").textContent = "正在读取模型列表…";
+    $("#cfg-models-hint").textContent = "Reading model list…";
     try {
       const v = await rpc("provider.models", { provider, base_url: baseUrl, model }, 45000);
       cfgModels = [...new Set(Array.isArray(v.models) ? v.models : [])].sort();
       renderModelList();
       if (v.error) {
-        $("#cfg-models-hint").textContent = "无法读取模型列表（可手动填写模型名）";
-        setSettingsStatus("模型列表：" + v.error, "warn");
+        $("#cfg-models-hint").textContent = "Cannot read model list (manual entry allowed)";
+        setSettingsStatus("Model list: " + String(v.error).replace(/provider 插件未安装/g, "provider plugin not installed"), "warn");
       } else {
-        $("#cfg-models-hint").textContent = `${cfgModels.length} 个模型，可直接输入或从列表选择`;
+        $("#cfg-models-hint").textContent = `${cfgModels.length} models; type directly or select from the list`;
       }
     } catch (e) {
       cfgModels = [];
       renderModelList();
-      $("#cfg-models-hint").textContent = "无法读取模型列表（可手动填写模型名）";
-      setSettingsStatus("模型列表失败：" + e.message, "err");
+      $("#cfg-models-hint").textContent = "Cannot read model list (manual entry allowed)";
+      setSettingsStatus("Model list failed: " + e.message, "err");
     }
   }
 
@@ -526,7 +526,7 @@
     if (!regs.length) {
       const d = document.createElement("div");
       d.className = "nav-foot";
-      d.textContent = "尚无已登记插件";
+      d.textContent = "No registered plugins";
       nav.appendChild(d);
       return;
     }
@@ -534,7 +534,7 @@
       const b = document.createElement("button");
       b.className = "nav-item plugin-nav-item";
       b.textContent = `${r.enabled === false ? "○" : "●"} ${r.name}`;
-      b.title = `${r.category || "plugin"} · ${r.enabled === false ? "已停用" : "已启用"}`;
+      b.title = `${r.category || "plugin"} · ${r.enabled === false ? "disabled" : "enabled"}`;
       b.onclick = () => showPluginDetail(r.name);
       nav.appendChild(b);
     }
@@ -546,7 +546,7 @@
     box.innerHTML = "";
     const regs = [...(pluginData.registry || [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
     if (!regs.length) {
-      box.innerHTML = '<div class="plugin-empty">没有已登记插件。</div>';
+      box.innerHTML = '<div class="plugin-empty">No registered plugins.</div>';
       return;
     }
     for (const r of regs) {
@@ -557,15 +557,15 @@
       const info = document.createElement("div");
       info.className = "plugin-info";
       info.innerHTML = `<div><strong>${esc(r.name)}</strong> <span class="tag">${esc(r.category || "plugin")}</span></div>
-        <div class="plugin-meta">${enabled ? (live.state === "ready" ? "运行中" : "按需启动") : "已停用"} · ${esc((r.blake3 || "").slice(0, 12))}</div>
+        <div class="plugin-meta">${enabled ? (live.state === "ready" ? "running" : "on demand") : "disabled"} · ${esc((r.blake3 || "").slice(0, 12))}</div>
         <code>${esc(r.program || "")}</code>`;
       const acts = document.createElement("div");
       acts.className = "plugin-actions";
       const detail = document.createElement("button");
-      detail.textContent = "详情";
+      detail.textContent = "Details";
       detail.onclick = () => showPluginDetail(r.name);
       const toggle = document.createElement("button");
-      toggle.textContent = enabled ? "停用" : "启用";
+      toggle.textContent = enabled ? "Disable" : "Enable";
       toggle.className = enabled ? "ghost" : "primary";
       toggle.onclick = () => togglePlugin(r.name, enabled);
       acts.appendChild(detail);
@@ -577,32 +577,32 @@
   }
 
   async function togglePlugin(name, enabled) {
-    setPluginStatus(`${enabled ? "正在停用" : "正在启用"} ${name}…`, "warn");
+    setPluginStatus(`${enabled ? "Disabling" : "Enabling"} ${name}…`, "warn");
     try {
       await rpc(enabled ? "plugin.disable" : "plugin.enable", { name });
-      setPluginStatus(`${name} 已${enabled ? "停用" : "启用"}（运行进程已同步）`, "ok");
+      setPluginStatus(`${name} ${enabled ? "disabled" : "enabled"} (runtime process synced)`, "ok");
       await refreshPlugins();
       if (pluginDetailName === name) showPluginDetail(name);
     } catch (e) {
-      setPluginStatus(`操作失败：${e.message}`, "err");
+      setPluginStatus(`Operation failed: ${e.message}`, "err");
     }
   }
 
   async function installPlugin() {
     const path = ($("#plugin-install-path").value || "").trim();
     if (!path) {
-      setPluginStatus("请填写插件目录绝对路径", "err");
+      setPluginStatus("Enter the absolute plugin directory path", "err");
       return;
     }
-    setPluginStatus("正在安装…", "warn");
+    setPluginStatus("Installing…", "warn");
     try {
       const v = await rpc("plugin.install", { path }, 30000);
       const name = (v.installed && v.installed.name) || path;
-      setPluginStatus(`已安装 ${name}`, "ok");
+      setPluginStatus(`Installed ${name}`, "ok");
       $("#plugin-install-path").value = "";
       await refreshPlugins();
     } catch (e) {
-      setPluginStatus(`安装失败：${e.message}`, "err");
+      setPluginStatus(`Install failed: ${e.message}`, "err");
     }
   }
 
@@ -614,12 +614,12 @@
       b.classList.toggle("active", b.dataset.view === name);
     }
     $("#plugin-nav")?.querySelectorAll(".plugin-nav-item").forEach((b) => b.classList.remove("active"));
-    const titles = { general: "设置", plugins: "插件管理", plugin: "插件详情" };
-    $("#settings-title").textContent = titles[name] || "设置";
+    const titles = { general: "Settings", plugins: "Plugin management", plugin: "Plugin details" };
+    $("#settings-title").textContent = titles[name] || "Settings";
     const subtitles = {
-      general: "保存后通过 config.set 提交给内核；工作区改动在下次启动 serve 时生效。",
-      plugins: "插件来自内核登记表；安装会登记清单，启停会同步运行进程。",
-      plugin: "此页由 plugin.list 生成；安装或卸载插件后刷新设置页即可增删侧栏。",
+      general: "Saved through config.set; workspace changes apply on the next serve start.",
+      plugins: "Plugins come from the kernel registry; installs register manifests and toggles sync the runtime process.",
+      plugin: "This page is generated from plugin.list; refresh Settings after install/uninstall to update the sidebar.",
     };
     $("#settings-subtitle").textContent = subtitles[name] || subtitles.general;
     if (name !== "plugin") pluginDetailName = "";
@@ -632,7 +632,7 @@
     const m = live.manifest || {};
     pluginDetailName = name;
     showSettingsView("plugin");
-    $("#settings-title").textContent = `插件 · ${name}`;
+    $("#settings-title").textContent = `Plugin · ${name}`;
     $("#plugin-nav")?.querySelectorAll(".plugin-nav-item").forEach((b) => {
       b.classList.toggle("active", b.textContent.includes(name));
     });
@@ -641,10 +641,10 @@
     const perms = Array.isArray(m.permissions) ? m.permissions : [];
     $("#plugin-detail").innerHTML = `
       <div class="settings-section">
-        <div class="section-title">插件清单</div>
+        <div class="section-title">Plugin inventory</div>
         <div class="plugin-detail-head">
-          <div><h3>${esc(name)}</h3><p class="warn">${esc(r.category || "plugin")} · 版本 ${esc(m.version || "未运行/未读取")} · ${enabled ? "已启用" : "已停用"}</p></div>
-          <button id="btn-plugin-detail-toggle" class="${enabled ? "ghost" : "primary"}">${enabled ? "停用" : "启用"}</button>
+          <div><h3>${esc(name)}</h3><p class="warn">${esc(r.category || "plugin")} · version ${esc(m.version || "not running/not read")} · ${enabled ? "enabled" : "disabled"}</p></div>
+          <button id="btn-plugin-detail-toggle" class="${enabled ? "ghost" : "primary"}">${enabled ? "Disable" : "Enable"}</button>
         </div>
         <div class="kv-grid">
           <div><span>API</span><code>${esc(m.api || "-")}</code></div>
@@ -654,13 +654,13 @@
           <div class="wide"><span>program</span><code>${esc(r.program || "-")}</code></div>
           <div class="wide"><span>blake3</span><code>${esc(r.blake3 || "-")}</code></div>
         </div>
-        <p class="form-hint">该侧栏页由内核 <code>plugin.list</code> 的登记表生成；安装/卸载后刷新设置页即可增删。</p>
+        <p class="form-hint">This sidebar page is generated from the kernel <code>plugin.list</code> registry; refresh Settings after install/uninstall.</p>
       </div>`;
     $("#btn-plugin-detail-toggle").onclick = () => togglePlugin(name, enabled);
   }
 
   async function openSettings() {
-    setSettingsStatus("正在读取配置…", "warn");
+    setSettingsStatus("Reading configuration…", "warn");
     $("#settings-page").classList.remove("hidden");
     $("#btn-settings-save").disabled = true;
     $("#btn-settings-refresh").disabled = true;
@@ -694,23 +694,23 @@
         const st = await rpc("search.status");
         if (st.provider === "local") {
           $("#search-status").textContent = st.configured
-            ? `本地搜索可用：必应 / DuckDuckGo / Wikipedia / Hacker News / GitHub，免费且无需 Key`
-            : "本地搜索插件未就绪，请检查插件管理页";
+            ? `Local search available: Bing / DuckDuckGo / Wikipedia / Hacker News / GitHub; free, no key`
+            : "Local search plugin not ready; check Plugin management";
         } else if (st.provider === "none") {
-          $("#search-status").textContent = "联网搜索已关闭；模型不会获得任何联网工具";
+          $("#search-status").textContent = "Web search is off; the model receives no network tools";
         } else {
           $("#search-status").textContent = st.configured
-            ? `已配置：${st.key_env} 已设置；Search/Fetch 按成功请求计费（5 元/1000 次）`
-            : `未配置：设置环境变量 ${st.key_env} 后重启 serve，或切换为本地搜索`;
+            ? `Configured: ${st.key_env} is set; Search/Fetch is billed per successful request (5 CNY / 1,000)`
+            : `Not configured: set ${st.key_env} and restart serve, or switch to local search`;
         }
       } catch (e) {
-        $("#search-status").textContent = "读取联网状态失败：" + e.message;
+        $("#search-status").textContent = "Failed to read web-search status: " + e.message;
       }
       syncTemperature();
       try {
         await refreshPlugins();
       } catch (e) {
-        setPluginStatus("读取插件失败：" + e.message, "err");
+        setPluginStatus("Failed to read plugins: " + e.message, "err");
       }
       showSettingsView("general");
       setSettingsStatus("");
@@ -720,7 +720,7 @@
     } catch (e) {
       $("#btn-settings-save").disabled = false;
       $("#btn-settings-refresh").disabled = false;
-      setSettingsStatus("读取配置失败：" + e.message, "err");
+      setSettingsStatus("Failed to read configuration: " + e.message, "err");
     }
   }
 
@@ -737,14 +737,14 @@
     const contextWindow = Number($("#cfg-context-window").value || 8192);
     const maxTurns = Number($("#cfg-max-turns").value || 6);
     if (!model || !baseUrl) {
-      setSettingsStatus("模型名和 Base URL 不能为空", "err");
+      setSettingsStatus("Model name and Base URL must not be empty", "err");
       return;
     }
     if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
-      setSettingsStatus("温度必须在 0.00–2.00 之间", "err");
+      setSettingsStatus("Temperature must be between 0.00 and 2.00", "err");
       return;
     }
-    setSettingsStatus("正在提交给内核…", "warn");
+    setSettingsStatus("Saving to kernel…", "warn");
     try {
       const v = await rpc("config.set", { patch: {
         provider_plugin: $("#cfg-provider").value,
@@ -761,11 +761,11 @@
         search_count: Number($("#cfg-search-count").value || 5),
       }});
       cfg = v.config || cfg;
-      setSettingsStatus("已保存并应用，下一轮推理使用新配置", "ok");
-      addMessage("system", `配置已应用：${cfg.provider_plugin} / ${cfg.model} / T=${cfg.temperature}`);
-      // 上下文面板在下一轮 chat.finished 后刷新；此处不阻塞设置保存。
+      setSettingsStatus("Saved and applied; the next inference uses the new configuration", "ok");
+      addMessage("system", `Configuration applied: ${cfg.provider_plugin} / ${cfg.model} / T=${cfg.temperature}`);
+      // The context panel refreshes after the next chat.finished; this does not block saving settings.
     } catch (e) {
-      setSettingsStatus("保存失败：" + e.message, "err");
+      setSettingsStatus("Save failed: " + e.message, "err");
     }
   }
 
@@ -774,12 +774,12 @@
       let settled = false;
       ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
       ws.onopen = () => { settled = true; resolve(); };
-      ws.onerror = () => { if (!settled) reject(new Error("WS 连接失败")); };
+      ws.onerror = () => { if (!settled) reject(new Error("WebSocket connection failed")); };
       ws.onclose = () => {
-        $("#conn").textContent = "WS 已断开（刷新页面重连）";
+        $("#conn").textContent = "WebSocket disconnected (refresh to reconnect)";
         for (const [, p] of pending) {
           clearTimeout(p.timer);
-          p.reject(new Error("WS 已断开"));
+          p.reject(new Error("WebSocket disconnected"));
         }
         pending.clear();
         ws = null;
@@ -791,20 +791,20 @@
           const p = pending.get(v.id);
           pending.delete(v.id);
           clearTimeout(p.timer);
-          if (v.error) p.reject(new Error(v.error.message || "RPC 错误"));
+          if (v.error) p.reject(new Error(v.error.message || "RPC error"));
           else p.resolve(v.result);
           return;
         }
         handleNotification(v);
       };
-      setTimeout(() => { if (!settled) reject(new Error("WS 握手超时")); }, 3000);
+      setTimeout(() => { if (!settled) reject(new Error("WebSocket handshake timed out")); }, 3000);
     });
   }
 
   function openSse() {
     const es = new EventSource("/events?token=" + encodeURIComponent(token));
-    es.onopen = () => { $("#conn").textContent = "已连接内核（HTTP/SSE 回退）"; };
-    es.onerror = () => { $("#conn").textContent = "SSE 重连中…"; };
+    es.onopen = () => { $("#conn").textContent = "Connected to kernel (HTTP/SSE fallback)"; };
+    es.onerror = () => { $("#conn").textContent = "SSE reconnecting…"; };
     es.onmessage = (ev) => {
       let v;
       try { v = JSON.parse(ev.data); } catch { return; }
@@ -828,7 +828,7 @@
     $("#btn-settings-cancel").onclick = closeSettings;
     $("#btn-settings-save").onclick = saveSettings;
     $("#btn-settings-refresh").onclick = refreshModels;
-    $("#btn-plugin-refresh").onclick = () => refreshPlugins().then(() => setPluginStatus("插件列表已刷新", "ok")).catch((e) => setPluginStatus("刷新失败：" + e.message, "err"));
+    $("#btn-plugin-refresh").onclick = () => refreshPlugins().then(() => setPluginStatus("Plugin list refreshed", "ok")).catch((e) => setPluginStatus("Refresh failed: " + e.message, "err"));
     $("#btn-plugin-install").onclick = installPlugin;
     $("#plugin-install-path").addEventListener("keydown", (e) => { if (e.key === "Enter") installPlugin(); });
     for (const b of document.querySelectorAll(".settings-nav .nav-item[data-view]")) {
@@ -860,10 +860,10 @@
     bindUi();
     try {
       await openWs();
-      $("#conn").textContent = "已连接内核（WebSocket）";
+      $("#conn").textContent = "Connected to kernel (WebSocket)";
     } catch {
       openSse();
-      $("#conn").textContent = "WebSocket 不可用，回退 HTTP/SSE";
+      $("#conn").textContent = "WebSocket unavailable; falling back to HTTP/SSE";
     }
     try {
       await rpc("initialize");
@@ -874,7 +874,7 @@
       if (sessions.length) await resume(sessions[0].id);
       else await createSession();
     } catch (e) {
-      $("#conn").textContent = "初始化失败：" + e.message;
+      $("#conn").textContent = "Initialization failed: " + e.message;
     }
   })();
 })();

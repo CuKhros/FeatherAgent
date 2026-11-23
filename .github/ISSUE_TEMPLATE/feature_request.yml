@@ -1,24 +1,24 @@
-name: 功能建议
-description: 提出可验证的功能或文档改进
+name: Feature request
+description: Propose a verifiable feature or documentation improvement
 title: "[feat] "
 labels: ["enhancement"]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: 要解决的问题
-      description: 描述使用场景和当前限制，不要只写“加个功能”。
+      label: Problem to solve
+      description: Describe the use case and current limitation, not just "add a feature".
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: 建议方案
-      description: 尽量说明是否需要改内核契约、插件 manifest 或平台构建。
+      label: Proposed approach
+      description: Note whether it changes the kernel contract, plugin manifest, or platform build.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: 替代方案 / 影响面
-      description: 是否影响 Linux/Windows 双平台、体积门禁或权限模型。
+      label: Alternatives / impact
+      description: Does it affect Linux/Windows parity, size gates, or the permission model?

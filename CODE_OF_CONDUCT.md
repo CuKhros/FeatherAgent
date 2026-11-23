@@ -1,55 +1,55 @@
-# 贡献者公约行为准则
+# Contributor Covenant Code of Conduct
 
-## 我们的承诺
+## Our pledge
 
-作为成员、贡献者和领导者，我们承诺让参与本项目成为无骚扰的体验，不论年龄、体型、可见或不可见的残障、族裔、性别认同与表达、经验水平、教育程度、社会经济地位、国籍、个人外貌、种族、宗教或性取向。
+We as members, contributors, and leaders pledge to make participation in this project a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity and orientation.
 
-我们承诺以有助于建设开放、友好、多元、包容和健康社区的方式行动和互动。
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
-## 行为标准
+## Our standards
 
-有助于营造积极环境的行为包括：
+Examples of behavior that contributes to a positive environment:
 
-- 对他人表现出同理心和善意；
-- 尊重不同的意见、观点和经历；
-- 给出并优雅地接受建设性反馈；
-- 对自己的错误负责，向受影响者道歉，并从中学习；
-- 关注对社区整体最有利的事情，而不仅是个人利益。
+- demonstrating empathy and kindness toward other people;
+- respecting differing opinions, viewpoints, and experiences;
+- giving and gracefully accepting constructive feedback;
+- accepting responsibility for our mistakes, apologizing to those affected, and learning from the experience;
+- focusing on what is best for the overall community, not just for us as individuals.
 
-不可接受的行为包括：
+Examples of unacceptable behavior:
 
-- 使用性化语言或图像，以及任何形式的性关注或性挑逗；
-- 挑衅、侮辱或贬损性评论，以及人身或政治攻击；
-- 公开或私下的骚扰；
-- 未经明确许可，发布他人的私人信息，如住址或电子邮箱；
-- 在专业场合可合理视为不当的其他行为。
+- sexualized language or imagery, and sexual attention or advances of any kind;
+- trolling, insulting or derogatory comments, and personal or political attacks;
+- public or private harassment;
+- publishing others' private information, such as a physical or email address, without their explicit permission;
+- other conduct which could reasonably be considered inappropriate in a professional setting.
 
-## 执行责任
+## Enforcement responsibilities
 
-项目维护者负责解释和执行本行为准则，并将对任何他们认为不当、威胁、冒犯或有害的行为采取适当且公平的纠正措施。
+Project maintainers are responsible for clarifying and enforcing this code of conduct and will take appropriate and fair corrective action in response to any behavior they deem inappropriate, threatening, offensive, or harmful.
 
-项目维护者有权删除、编辑或拒绝不符合本准则的评论、提交、代码、Issue 和其他贡献，并在适当时说明 moderation 理由。
+Project maintainers have the right and responsibility to remove, edit, or reject comments, commits, code, issues, and other contributions that do not align with this code of conduct, and will communicate reasons for moderation decisions when appropriate.
 
-## 范围
+## Scope
 
-本准则适用于所有项目空间，也适用于个人在公共空间正式代表项目时。代表项目的情形包括使用官方电子邮箱、官方社交媒体账号，或在线上/线下活动中担任指定代表。
+This code of conduct applies within all project spaces and when an individual is officially representing the project in public spaces. Examples include using an official email address, posting through an official social-media account, or acting as an appointed representative at an online or offline event.
 
-## 执行
+## Enforcement
 
-如遇滥用、骚扰或其他不可接受行为，请通过仓库拥有者的 GitHub 主页私下联系维护者。所有投诉将及时、公平地审阅和调查。
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported privately to the maintainers through the repository owner's GitHub profile. All complaints will be reviewed and investigated promptly and fairly.
 
-维护者有义务尊重举报者的隐私和安全。
+Maintainers are obligated to respect the privacy and security of the reporter of any incident.
 
-## 执行指南
+## Enforcement guidelines
 
-维护者将按以下社区影响指南决定后果：
+Maintainers will follow these community-impact guidelines when determining consequences:
 
-1. **纠正**：私下书面警告，说明行为影响并解释为何不当；可要求公开道歉。
-2. **警告**：对持续行为发出警告，并在指定期限内限制与相关人员的互动。
-3. **临时封禁**：对严重或持续不当行为临时禁止参与项目互动。
-4. **永久封禁**：对持续不当行为、骚扰个人或对群体进行攻击/贬损，永久禁止参与项目。
+1. **Correction** — a private written warning explaining the impact and why the behavior was inappropriate; a public apology may be requested.
+2. **Warning** — a warning for continued behavior, with a specified period of no interaction with the people involved.
+3. **Temporary ban** — a temporary ban from interaction or participation for serious or sustained inappropriate behavior.
+4. **Permanent ban** — a permanent ban for sustained inappropriate behavior, harassment of an individual, or aggression toward or disparagement of classes of individuals.
 
-## 归属
+## Attribution
 
-本行为准则改编自 [Contributor Covenant](https://www.contributor-covenant.org/) 2.1 版：
+This code of conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org/), version 2.1:
 https://www.contributor-covenant.org/version/2/1/code_of_conduct/
