@@ -1,8 +1,10 @@
-# main branch protection (intended configuration)
+# main branch protection
 
 Goal: **the owner can maintain main directly; every other collaborator must go through a Pull Request and cannot push, force-push, or delete main.**
 
-Intended GitHub rule:
+**Status: active.** The rule was applied through the GitHub API on 2026-11-23 after the repository became public. The owner keeps the `enforce_admins = false` emergency direct-push path; non-owners still need a Pull Request.
+
+Effective rule:
 
 - Require a pull request before merging (at least 1 approval)
 - Require review from Code Owners (`.github/CODEOWNERS` = `@CuKhros`)
@@ -12,9 +14,9 @@ Intended GitHub rule:
 - Do not allow deletions
 - `enforce_admins = false`: the owner keeps an emergency direct-push path; non-owners have no push permission and cannot bypass the PR flow
 
-Current state (2026-11-23): the repository is **private + GitHub Free**; both `branches/main/protection` and `rulesets` APIs return 403 (GitHub requires Pro or public). The only collaborator, `yuyuyuyumin`, has `pull` only and **cannot write main in practice**; an auditable protection rule still needs Pro or a public repository. This document does not claim the rule is active.
+Current state (2026-11-23): the repository is **public** and the protection rule above is active. `yuyuyuyumin` has `pull` only; any future write access still goes through a Pull Request.
 
-After upgrading to Pro, the owner can run:
+The same payload can be re-applied with:
 
 ```bash
 cat <<'JSON' | gh api --method PUT repos/CuKhros/FeatherAgent/branches/main/protection --input -
@@ -34,4 +36,4 @@ cat <<'JSON' | gh api --method PUT repos/CuKhros/FeatherAgent/branches/main/prot
 JSON
 ```
 
-Note: do not change visibility merely to enable protection; going public is an independent decision that the owner must make explicitly.
+Visibility is public by explicit owner decision (2026-11-23); branch protection is a separate control and should not be used as a reason to change visibility silently.
