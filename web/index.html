@@ -9,7 +9,7 @@
 </head>
 <body>
   <header>
-    <div class="brand">FeatherAgent <span class="ver">v1.1.7</span></div>
+    <div class="brand">FeatherAgent <span class="ver">v1.1.8</span></div>
     <div class="meta">
       <span id="session-label">未选择会话</span>
       <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
@@ -26,6 +26,10 @@
         <input id="new-id" placeholder="新会话 id（可空）">
         <button id="btn-new">新建</button>
       </div>
+      <div class="new-row">
+        <select id="new-workspace" title="会话所属项目工作区"></select>
+        <button id="btn-new-workspace" class="ghost" title="在 workspace_root 下新建项目">＋项目</button>
+      </div>
       <div id="session-list" class="list"></div>
     </aside>
 
@@ -36,7 +40,8 @@
         <textarea id="input" rows="3" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
         <div class="actions">
           <button id="btn-send" class="primary">发送</button>
-          <button id="btn-cancel">取消</button>
+          <button id="btn-stop" class="danger">停止并保存</button>
+          <button id="btn-compact">压缩上下文</button>
           <button id="btn-fork">Fork</button>
           <span id="hint" class="hint"></span>
         </div>
@@ -108,13 +113,35 @@
                 <input id="cfg-max-turns" type="number" min="1" max="32" step="1" value="6">
               </label>
             </div>
-            <label class="stack-row">工作区根目录（留空 = 安装根/workspace）
-              <input id="cfg-workspace-root" placeholder="D:\Projects\my-workspace 或 /home/me/work" autocomplete="off">
-              <span class="form-hint">可指向安装目录外；保存后需重启 serve。内核会在该目录创建 <code>.featheagent/</code>（worklog.md / memory.md）。</span>
+            <label class="stack-row">项目工作区容器（留空 = 安装根/workspace）
+              <input id="cfg-workspace-root" placeholder="D:\Projects\featheragent-workspaces 或 /home/me/work" autocomplete="off">
+              <span class="form-hint">这里不是单个工作区，而是项目容器：每个直接子目录是一个独立项目，各自拥有 <code>.featheagent/</code>（worklog.md / memory.md）。可指向安装目录外；保存后需重启 serve。</span>
             </label>
             <label class="check-row">
               <input id="cfg-auto-allow-safe" type="checkbox"> 自动放行安全工具（如读文件）
             </label>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">联网搜索</div>
+            <div class="settings-grid">
+              <label>提供方
+                <select id="cfg-search-provider">
+                  <option value="deepseek">DeepSeek Search API</option>
+                  <option value="none">关闭</option>
+                </select>
+              </label>
+              <label>API Base URL
+                <input id="cfg-search-base-url" placeholder="https://api.deepseek.com" autocomplete="off">
+              </label>
+              <label>API Key 环境变量
+                <input id="cfg-search-key-env" placeholder="DEEPSEEK_API_KEY" autocomplete="off">
+              </label>
+              <label>单次结果数
+                <input id="cfg-search-count" type="number" min="1" max="20" step="1" value="5">
+              </label>
+            </div>
+            <span id="search-status" class="form-hint">密钥只从环境变量读取，不落盘、不进日志。</span>
           </div>
 
           <div class="settings-actions">

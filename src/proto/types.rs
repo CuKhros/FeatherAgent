@@ -35,6 +35,7 @@ pub enum EventKind {
     ConfigChanged,
     ChatFinished,
     ModelRetry,
+    ContextCompacted,
 }
 
 impl EventKind {
@@ -64,6 +65,7 @@ impl EventKind {
             ConfigChanged => 19,
             ChatFinished => 20,
             ModelRetry => 21,
+            ContextCompacted => 24,
         }
     }
 
@@ -93,6 +95,7 @@ impl EventKind {
             19 => ConfigChanged,
             20 => ChatFinished,
             21 => ModelRetry,
+            24 => ContextCompacted,
             _ => return None,
         })
     }
@@ -123,6 +126,7 @@ impl EventKind {
             ConfigChanged => "config.changed",
             ChatFinished => "chat.finished",
             ModelRetry => "model.retry",
+            ContextCompacted => "context.compacted",
         }
     }
 
@@ -153,6 +157,7 @@ impl EventKind {
             "config.changed" => ConfigChanged,
             "chat.finished" => ChatFinished,
             "model.retry" => ModelRetry,
+            "context.compacted" => ContextCompacted,
             _ => return None,
         })
     }
@@ -181,6 +186,7 @@ impl EventKind {
         Self::ConfigChanged,
         Self::ChatFinished,
         Self::ModelRetry,
+        Self::ContextCompacted,
     ];
 }
 
@@ -266,11 +272,13 @@ mod tests {
             EventKind::ToolError,
             EventKind::ToolDegraded,
             EventKind::ModelRetry,
+            EventKind::ContextCompacted,
         ] {
             assert_eq!(EventKind::from_code(kind.code()), Some(kind));
             assert_eq!(EventKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(EventKind::ToolError.code(), 22);
         assert_eq!(EventKind::ToolDegraded.code(), 23);
+        assert_eq!(EventKind::ContextCompacted.code(), 24);
     }
 }

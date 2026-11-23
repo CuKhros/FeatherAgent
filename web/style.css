@@ -85,6 +85,7 @@ aside, section { background: var(--panel); display: flex; flex-direction: column
 .msg.assistant { align-self: flex-start; background: #1a2029; border: 1px solid var(--line); }
 .msg.tool { align-self: flex-start; background: #2a2418; border: 1px solid #4a3f25; color: #e8d9b0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-width: 96%; }
 .msg.system { align-self: center; color: var(--muted); font-size: 12px; background: none; }
+.msg.user.steer { background: #2b2518; border-color: #5a4a28; }
 .msg .role { display: block; font-size: 11px; opacity: .65; margin-bottom: 3px; }
 
 .composer { border-top: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 8px; }

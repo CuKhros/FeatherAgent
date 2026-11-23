@@ -39,6 +39,12 @@ struct SettingsState {
     field: usize,
     status: String,
     models_hint: String,
+    search_hint: String,
+    /// 左侧栏：0 = 常规设置，之后是登记表里的插件。
+    nav: Vec<Value>,
+    nav_idx: usize,
+    nav_focus: bool,
+    detail: bool,
 }
 
 const SETTINGS_FIELDS: usize = 10;
@@ -196,9 +202,13 @@ impl App {
                 self.session = Some(id.to_string());
                 self.state = v["state"].as_str().unwrap_or("idle").to_string();
                 self.messages.clear();
+                let ws = v
+                    .get("workspace")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("default");
                 self.messages.push((
                     "系统".into(),
-                    format!("已恢复会话 {id}（{} 条事件）", v["total"]),
+                    format!("已恢复会话 {id}｜项目 {ws}｜{} 条事件", v["total"]),
                 ));
                 if let Some(events) = v.get("events").and_then(|x| x.as_array()) {
                     for e in events {
@@ -220,8 +230,12 @@ impl App {
         }
     }
 
-    fn create(&mut self, id: &str) {
-        match self.conn.client.call("session.create", json!({"id": id})) {
+    fn create(&mut self, id: &str, workspace: &str) {
+        let mut params = json!({"id": id});
+        if !workspace.trim().is_empty() {
+            params["workspace"] = json!(workspace.trim());
+        }
+        match self.conn.client.call("session.create", params) {
             Ok(_) => {
                 self.session = Some(id.to_string());
                 self.messages.clear();
@@ -435,11 +449,116 @@ impl App {
                 .and_then(|x| x.as_bool())
                 .unwrap_or(true),
             field: 2,
-            status: "读取配置成功；Tab 切换字段，Ctrl+S 保存并应用".into(),
+            status: "读取配置成功；←/↑↓ 侧栏，Tab 表单，Ctrl+S 保存".into(),
             models_hint: "正在读取模型列表…".into(),
+            search_hint: match self.conn.client.call("search.status", json!({})) {
+                Ok(v) => format!(
+                    "联网：{} · {} · {}",
+                    v["provider"].as_str().unwrap_or("?"),
+                    v["key_env"].as_str().unwrap_or("?"),
+                    if v["configured"].as_bool().unwrap_or(false) {
+                        "已配置"
+                    } else {
+                        "未配置"
+                    }
+                ),
+                Err(e) => format!("联网状态读取失败: {e}"),
+            },
+            nav: Vec::new(),
+            nav_idx: 0,
+            nav_focus: true,
+            detail: false,
         };
         self.settings = Some(state);
+        self.refresh_settings_plugins();
         self.refresh_settings_models(false);
+    }
+
+    fn refresh_settings_plugins(&mut self) {
+        let v = match self.conn.client.call("plugin.list", json!({})) {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(s) = &mut self.settings {
+                    s.status = format!("读取插件侧栏失败: {e}");
+                }
+                return;
+            }
+        };
+        let live: Vec<Value> = v
+            .get("live")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut nav = Vec::new();
+        for e in v
+            .get("registry")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let name = e.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let live_state = live
+                .iter()
+                .find(|x| x.get("name").and_then(|y| y.as_str()) == Some(name))
+                .and_then(|x| x.get("state"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("stopped");
+            let mut item = e.clone();
+            item["live_state"] = json!(live_state);
+            nav.push(item);
+        }
+        nav.sort_by(|a, b| {
+            a["name"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["name"].as_str().unwrap_or(""))
+        });
+        if let Some(s) = &mut self.settings {
+            s.nav_idx = s.nav_idx.min(nav.len().saturating_sub(1));
+            s.nav = nav;
+        }
+    }
+
+    fn toggle_settings_plugin(&mut self) {
+        let (name, enabled) = {
+            let Some(s) = &self.settings else { return };
+            let Some(item) = s.nav.get(s.nav_idx.saturating_sub(1)) else {
+                return;
+            };
+            (
+                item.get("name")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                item.get("enabled")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false),
+            )
+        };
+        if name.is_empty() {
+            return;
+        }
+        let method = if enabled {
+            "plugin.disable"
+        } else {
+            "plugin.enable"
+        };
+        match self.conn.client.call(method, json!({"name": name})) {
+            Ok(_) => {
+                self.refresh_settings_plugins();
+                if let Some(s) = &mut self.settings {
+                    s.status = format!(
+                        "{name} → {}（运行进程已同步）",
+                        if enabled { "停用" } else { "启用" }
+                    );
+                }
+            }
+            Err(e) => {
+                if let Some(s) = &mut self.settings {
+                    s.status = format!("启停失败: {e}");
+                }
+            }
+        }
     }
 
     fn refresh_settings_models(&mut self, prefer_first: bool) {
@@ -559,14 +678,77 @@ impl App {
             self.save_settings();
             return;
         }
+        let (nav_idx, nav_focus, detail) = match &self.settings {
+            Some(s) => (s.nav_idx, s.nav_focus, s.detail),
+            None => return,
+        };
+        if detail {
+            match code {
+                KeyCode::Esc => {
+                    if let Some(s) = &mut self.settings {
+                        s.detail = false;
+                        s.nav_focus = true;
+                    }
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => self.toggle_settings_plugin(),
+                KeyCode::Char('r') => self.refresh_settings_plugins(),
+                _ => {}
+            }
+            return;
+        }
+        if nav_focus {
+            match code {
+                KeyCode::Up => {
+                    if let Some(s) = &mut self.settings {
+                        s.nav_idx = s.nav_idx.saturating_sub(1);
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(s) = &mut self.settings {
+                        if s.nav_idx + 1 < s.nav.len() + 1 {
+                            s.nav_idx += 1;
+                        }
+                    }
+                }
+                KeyCode::Enter => {
+                    if nav_idx == 0 {
+                        if let Some(s) = &mut self.settings {
+                            s.nav_focus = false;
+                            s.field = 0;
+                        }
+                    } else if let Some(s) = &mut self.settings {
+                        s.detail = true;
+                    }
+                }
+                KeyCode::Tab => {
+                    if nav_idx == 0 {
+                        if let Some(s) = &mut self.settings {
+                            s.nav_focus = false;
+                            s.field = 0;
+                        }
+                    } else if let Some(s) = &mut self.settings {
+                        s.detail = true;
+                    }
+                }
+                KeyCode::Char('r') => self.refresh_settings_plugins(),
+                KeyCode::Esc => {
+                    self.settings = None;
+                    self.status = "已关闭设置页（未保存的修改已丢弃）".into();
+                }
+                _ => {}
+            }
+            return;
+        }
         let field = match &self.settings {
             Some(s) => s.field,
             None => return,
         };
         match code {
             KeyCode::Esc => {
-                self.settings = None;
-                self.status = "已关闭设置页（未保存的修改已丢弃）".into();
+                if let Some(s) = &mut self.settings {
+                    s.nav_focus = true;
+                    s.detail = false;
+                }
             }
             KeyCode::Enter => {
                 if field == 9 {
@@ -826,9 +1008,13 @@ impl App {
         let mut it = cmd.split_whitespace();
         let name = it.next().unwrap_or("");
         let arg = it.next().unwrap_or("");
+        let rest = it.collect::<Vec<_>>().join(" ");
         match name {
             "quit" | "q" => self.quit = true,
-            "new" => self.create(if arg.is_empty() { "s-tui" } else { arg }),
+            "new" => {
+                let id = if arg.is_empty() { "s-tui" } else { arg };
+                self.create(id, &rest);
+            }
             "use" | "resume" => {
                 if arg.is_empty() {
                     self.status = "用法: /use <session>".into();
@@ -836,6 +1022,46 @@ impl App {
                     self.resume(arg);
                 }
             }
+            "workspace" | "project" => {
+                if arg.is_empty() {
+                    self.status = "用法: /workspace <项目名>；项目位于 workspace_root 下一层".into();
+                } else {
+                    match self
+                        .conn
+                        .client
+                        .call("workspace.create", json!({"name": arg}))
+                    {
+                        Ok(v) => self.status = format!(
+                            "已创建项目 {}（{}）；/new <会话> {} 可绑定",
+                            v["name"].as_str().unwrap_or(arg),
+                            v["path"].as_str().unwrap_or(""),
+                            arg
+                        ),
+                        Err(e) => self.status = format!("创建项目失败: {e}"),
+                    }
+                }
+            }
+            "workspaces" => match self.conn.client.call("workspace.list", json!({})) {
+                Ok(v) => {
+                    let items = v["workspaces"].as_array().cloned().unwrap_or_default();
+                    let text = items
+                        .iter()
+                        .map(|w| {
+                            format!(
+                                "{}  {}",
+                                w["name"].as_str().unwrap_or("?"),
+                                if w["has_agent"].as_bool().unwrap_or(false) { "(.featheagent)" } else { "" }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    self.messages.push((
+                        "系统".into(),
+                        format!("项目容器 {}\n{text}", v["root"].as_str().unwrap_or("")),
+                    ));
+                }
+                Err(e) => self.status = format!("读取项目失败: {e}"),
+            },
             "fork" => {
                 let Some(id) = self.session.clone() else {
                     self.status = "先 /new 或 /use".into();
@@ -858,12 +1084,54 @@ impl App {
                     Err(e) => self.status = format!("fork 失败: {e}"),
                 }
             }
-            "cancel" => {
+            "stop" | "cancel" => {
                 if let Some(id) = &self.session {
-                    match self.conn.client.call("chat.cancel", json!({"session": id})) {
-                        Ok(_) => self.status = "已请求取消".into(),
-                        Err(e) => self.status = format!("取消失败: {e}"),
+                    match self.conn.client.call("chat.stop", json!({"session": id})) {
+                        Ok(_) => self.status = "已紧急停止；已生成内容与上下文已保存在会话日志".into(),
+                        Err(e) => self.status = format!("停止失败: {e}"),
                     }
+                }
+            }
+            "steer" | "inject" => {
+                let Some(id) = self.session.clone() else {
+                    self.status = "先 /new 或 /use".into();
+                    return;
+                };
+                let text = if rest.is_empty() { arg.to_string() } else { format!("{arg} {rest}") };
+                if text.trim().is_empty() {
+                    self.status = "用法: /steer <插入给模型的引导>".into();
+                    return;
+                }
+                match self
+                    .conn
+                    .client
+                    .call("chat.inject", json!({"session": id, "text": text}))
+                {
+                    Ok(_) => {
+                        self.messages.push(("你（引导）".into(), text));
+                        self.status = "引导已写入上下文；当前生成会在边界中断并重新开始".into();
+                    }
+                    Err(e) => self.status = format!("插入引导失败: {e}"),
+                }
+            }
+            "compact" => {
+                let Some(id) = self.session.clone() else {
+                    self.status = "先 /new 或 /use".into();
+                    return;
+                };
+                match self.conn.client.call("context.compact", json!({"session": id})) {
+                    Ok(v) => {
+                        self.messages.push((
+                            "系统".into(),
+                            format!(
+                                "已压缩上下文：{} 事件 → 摘要 {} 字符（覆盖至 #{}）",
+                                v["compacted_events"], v["summary_chars"], v["covers_until_seq"]
+                            ),
+                        ));
+                        self.status = "上下文压缩完成；旧原文仍保留在会话日志".into();
+                        self.refresh_ctx();
+                    }
+                    Err(e) => self.status = format!("压缩失败: {e}"),
                 }
             }
             "settings" | "config" => self.open_settings(),
@@ -874,7 +1142,7 @@ impl App {
             "clear" => self.messages.clear(),
             "help" => self.messages.push((
                 "系统".into(),
-                "/new [id] /use <id> /fork [id] /cancel /settings /plugins /clear /quit".into(),
+                "/new [id] [项目] /workspace <项目> /workspaces /use <id> /fork [id]\n/stop /steer <引导> /compact /settings /plugins /clear /quit\n运行中直接输入文本=插入引导；/stop=紧急停止并保存上下文".into(),
             )),
             _ => self.status = format!("未知命令 /{name}"),
         }
@@ -887,6 +1155,26 @@ impl App {
         };
         self.focus = Focus::Chat;
         self.chat_scroll = 0;
+        let running = matches!(
+            self.state.as_str(),
+            "running" | "assembling" | "generating" | "tool_executing"
+        );
+        if running {
+            self.messages.push(("你（引导）".into(), text.to_string()));
+            match self
+                .conn
+                .client
+                .call("chat.inject", json!({"session": id, "text": text}))
+            {
+                Ok(_) => self.status = "引导已插入上下文；当前生成中断后继续".into(),
+                Err(e) => {
+                    self.messages
+                        .push(("系统".into(), format!("插入引导失败: {e}")));
+                    self.status = e;
+                }
+            }
+            return;
+        }
         self.messages.push(("你".into(), text.to_string()));
         match self
             .conn
@@ -938,8 +1226,12 @@ impl App {
                 continue;
             }
             match kind {
-                // user.message 自己发的已在本地回显；其他客户端的输入不重复追加
-                "user.message" => {}
+                "user.message" => {
+                    if p.get("source").and_then(|x| x.as_str()) == Some("steer") {
+                        let t = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
+                        self.messages.push(("你（引导）".into(), t.to_string()));
+                    }
+                }
                 "model.message" => {
                     let t = p.get("text").and_then(|x| x.as_str()).unwrap_or("");
                     self.messages.push(("助手".into(), t.to_string()));
@@ -986,6 +1278,18 @@ impl App {
                 "config.changed" => {
                     self.messages.push(("系统".into(), "内核配置已更新".into()));
                 }
+                "context.compacted" => {
+                    let n = p
+                        .get("compacted_events")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(0);
+                    let chars = p.get("after_chars").and_then(|x| x.as_u64()).unwrap_or(0);
+                    self.messages.push((
+                        "系统".into(),
+                        format!("上下文已压缩：{n} 个旧事件 → {chars} 字符摘要（原文仍在日志）"),
+                    ));
+                    self.refresh_ctx();
+                }
                 "permission.denied" => {
                     self.messages.push((
                         "系统".into(),
@@ -1007,7 +1311,7 @@ impl App {
                     let s = p.get("status").and_then(|x| x.as_str()).unwrap_or("done");
                     self.messages
                         .push(("系统".into(), format!("— 本轮结束（{s}）")));
-                    self.state = if s == "cancelled" {
+                    self.state = if s == "cancelled" || s == "stopped" {
                         "cancelled".into()
                     } else {
                         "idle".into()
@@ -1148,7 +1452,7 @@ fn draw(f: &mut Frame, app: &App) {
         Focus::Chat => "对话",
     };
     let head = format!(
-        " FeatherAgent v1.1.7  {}  会话: {}  状态: {}  |  {}",
+        " FeatherAgent v1.1.8  {}  会话: {}  状态: {}  |  {}",
         mode,
         app.session.as_deref().unwrap_or("-"),
         app.state,
@@ -1177,7 +1481,8 @@ fn draw(f: &mut Frame, app: &App) {
             let id = s["id"].as_str().unwrap_or("?");
             let n = s["records"].as_u64().unwrap_or(0);
             let live = s["live"]["state"].as_str().unwrap_or("");
-            let text = format!("{id}\n{n} 条 {live}");
+            let ws = s["workspace"].as_str().unwrap_or("default");
+            let text = format!("{id}\n{ws} · {n} 条 {live}");
             let style = if i == app.selected && app.focus == Focus::Sessions {
                 Style::default().bg(Color::DarkGray)
             } else if i == app.selected {
@@ -1334,77 +1639,215 @@ fn draw_settings(f: &mut Frame, app: &App) {
 
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            " FeatherAgent v1.1.7 设置 ",
+            format!(" FeatherAgent {} 设置 ", featheragent::VERSION),
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(
-            "  Tab/↑↓ 切字段 · ←/→ 选 provider/model/调数值 · Ctrl+S 或 Enter 保存 · Esc 返回",
-        ),
+        Span::raw(if s.nav_focus {
+            "  ↑↓ 侧栏 · Enter 打开 · Tab 到表单 · Esc 关闭"
+        } else if s.detail {
+            "  Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
+        } else {
+            "  Tab/↑↓ 切字段 · ←/→ 选 provider/model/调数值 · Esc 回侧栏"
+        }),
     ]));
     f.render_widget(head, chunks[0]);
 
-    let values = [
-        ("Provider", s.provider.clone()),
-        ("Base URL", s.base_url.clone()),
-        ("Model", s.model.clone()),
-        ("Temperature", format!("{}（0.00–2.00）", s.temperature)),
-        ("Context window", format!("{} tokens", s.context_window)),
-        ("Max turns", s.max_turns.clone()),
-        (
-            "Workspace root",
-            if s.workspace_root.is_empty() {
-                "(安装根/workspace)".into()
-            } else {
-                s.workspace_root.clone()
-            },
-        ),
-        (
-            "Auto allow safe",
-            if s.auto_allow_safe {
-                "[x] 开".into()
-            } else {
-                "[ ] 关".into()
-            },
-        ),
-        ("保存并应用", "按 Enter / Ctrl+S".into()),
-        ("取消", "按 Enter 关闭".into()),
-    ];
-    let mut lines = Vec::new();
-    for (i, (label, val)) in values.iter().enumerate() {
-        let marker = if i == s.field { "▶ " } else { "  " };
-        let text = format!("{marker}{label:<16} {val}");
-        let mut line = Line::from(text);
-        if i == s.field {
-            line = line.style(
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(27), Constraint::Min(30)])
+        .split(chunks[1]);
+
+    // 左侧栏：常规设置 + 插件动态条目（与 WebUI 同构）。
+    let mut nav_lines: Vec<Line> = Vec::new();
+    let general_selected = s.nav_idx == 0;
+    let mut g = Line::from(format!(
+        "{} ⚙ 常规设置",
+        if general_selected && s.nav_focus {
+            "▶"
+        } else {
+            " "
+        }
+    ));
+    if general_selected && s.nav_focus {
+        g = g.style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+    nav_lines.push(g);
+    nav_lines.push(Line::from(Span::styled(
+        "插件页面",
+        Style::default().fg(Color::DarkGray),
+    )));
+    for (i, item) in s.nav.iter().enumerate() {
+        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+        let enabled = item
+            .get("enabled")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let live = item
+            .get("live_state")
+            .and_then(|x| x.as_str())
+            .unwrap_or("stopped");
+        let selected = s.nav_idx == i + 1;
+        let marker = if selected && s.nav_focus { "▶" } else { " " };
+        let mut l = Line::from(format!(
+            "{marker} {} {name}",
+            if enabled { "●" } else { "○" }
+        ));
+        if selected && s.nav_focus {
+            l = l.style(
                 Style::default()
                     .bg(Color::DarkGray)
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             );
+        } else if !enabled {
+            l = l.style(Style::default().fg(Color::DarkGray));
         }
-        lines.push(line);
+        nav_lines.push(l);
+        if selected && s.nav_focus {
+            nav_lines.push(Line::from(Span::styled(
+                format!("    live={live}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        &s.models_hint,
+    nav_lines.push(Line::from(""));
+    nav_lines.push(Line::from(Span::styled(
+        "插件由内核登记表生成",
         Style::default().fg(Color::DarkGray),
     )));
-    for m in s.models.iter().take(12) {
-        lines.push(Line::from(format!("  · {m}")));
-    }
     f.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("配置（保存后提交 config.set）"),
-            )
+        Paragraph::new(nav_lines)
+            .block(Block::default().borders(Borders::ALL).title("侧栏"))
             .wrap(Wrap { trim: false }),
-        chunks[1],
+        body[0],
     );
+
+    if s.nav_idx > 0 {
+        let item = s.nav.get(s.nav_idx - 1).cloned().unwrap_or(Value::Null);
+        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+        let enabled = item
+            .get("enabled")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let live = item
+            .get("live_state")
+            .and_then(|x| x.as_str())
+            .unwrap_or("stopped");
+        let category = item
+            .get("category")
+            .and_then(|x| x.as_str())
+            .unwrap_or("plugin");
+        let program = item.get("program").and_then(|x| x.as_str()).unwrap_or("-");
+        let hash = item.get("blake3").and_then(|x| x.as_str()).unwrap_or("-");
+        let version = item.get("version").and_then(|x| x.as_str()).unwrap_or("-");
+        let caps = item.get("capabilities").cloned().unwrap_or(Value::Null);
+        let perms = item.get("permissions").cloned().unwrap_or(Value::Null);
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(name, Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(format!("  [{category}]")),
+            ]),
+            Line::from(""),
+            Line::from(format!(
+                "状态      {}",
+                if enabled { "已启用" } else { "已停用" }
+            )),
+            Line::from(format!("live      {live}")),
+            Line::from(format!("版本      {version}")),
+            Line::from(format!("capabilities  {}", caps)),
+            Line::from(format!("permissions   {}", perms)),
+            Line::from(format!("program   {program}")),
+            Line::from(format!("blake3    {hash}")),
+            Line::from(""),
+            Line::from(if s.detail {
+                "Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
+            } else {
+                "Enter 打开详情"
+            }),
+        ];
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(Block::default().borders(Borders::ALL).title("插件详情"))
+                .wrap(Wrap { trim: false }),
+            body[1],
+        );
+    } else {
+        let values = [
+            ("Provider", s.provider.clone()),
+            ("Base URL", s.base_url.clone()),
+            ("Model", s.model.clone()),
+            ("Temperature", format!("{}（0.00–2.00）", s.temperature)),
+            ("Context window", format!("{} tokens", s.context_window)),
+            ("Max turns", s.max_turns.clone()),
+            (
+                "Workspace root",
+                if s.workspace_root.is_empty() {
+                    "(安装根/workspace：项目容器)".into()
+                } else {
+                    s.workspace_root.clone()
+                },
+            ),
+            (
+                "Auto allow safe",
+                if s.auto_allow_safe {
+                    "[x] 开".into()
+                } else {
+                    "[ ] 关".into()
+                },
+            ),
+            ("保存并应用", "按 Enter / Ctrl+S".into()),
+            ("取消/返回", "Esc 回侧栏".into()),
+        ];
+        let mut lines = Vec::new();
+        for (i, (label, val)) in values.iter().enumerate() {
+            let marker = if i == s.field && !s.nav_focus {
+                "▶ "
+            } else {
+                "  "
+            };
+            let text = format!("{marker}{label:<16} {val}");
+            let mut line = Line::from(text);
+            if i == s.field && !s.nav_focus {
+                line = line.style(
+                    Style::default()
+                        .bg(Color::DarkGray)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+            lines.push(line);
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            &s.models_hint,
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            &s.search_hint,
+            Style::default().fg(Color::DarkGray),
+        )));
+        for m in s.models.iter().take(12) {
+            lines.push(Line::from(format!("  · {m}")));
+        }
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("常规（保存后提交 config.set）"),
+                )
+                .wrap(Wrap { trim: false }),
+            body[1],
+        );
+    }
 
     let status = if s.status.is_empty() {
         "设置页已打开"
@@ -1431,7 +1874,7 @@ fn draw_plugins(f: &mut Frame, app: &App) {
         .split(f.size());
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            " FeatherAgent v1.1.7 插件管理 ",
+            " FeatherAgent v1.1.8 插件管理 ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)

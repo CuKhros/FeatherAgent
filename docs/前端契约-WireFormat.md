@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.7**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.1.8**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.7","contract":"1.0","transport":"pipe",
+  "version":"1.1.8","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -152,15 +152,19 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 |---|---|---|
 | `initialize` | 握手、返回版本/路径/实际 codec | 无 |
 | `system.info` | 内核状态、告警、门禁 | 无 |
-| `session.create` | 创建/复用会话 | `session`（可选） |
+| `session.create` | 创建/复用会话 | `session`（可选）、`workspace`（项目名，可选） |
 | `session.list` | 列出会话 | 无 |
 | `session.resume` | 恢复已有会话 | `session` |
-| `session.fork` | 从某会话分叉 | `session`、`from_seq` 等 |
+| `session.fork` | 从某会话分叉 | `session`、`as`、`from_seq` 等 |
 | `event.subscribe` | 订阅事件 | `kinds`（可选字符串数组） |
 | `chat.send` | 发送用户消息，流式返回事件 | `text` 必填、`session` |
-| `chat.cancel` | 取消当前生成 | `session` |
+| `chat.stop` / `chat.cancel` | 紧急停止并保留上下文 / 兼容别名 | `session` |
+| `chat.inject` | 运行中插入引导（打断后继续） | `session`、`text` |
 | `tool.confirm` / `tool.deny` | 确认/拒绝待执行工具 | `token`（来自 `tool.confirm_request`）、`allow` |
 | `ctx.inspect` | 查看上下文组装细节 | 见实现 |
+| `context.compact` | 手动压缩旧回合为检查点 | `session` |
+| `workspace.list` / `workspace.create` | 列出/创建项目工作区 | `name`（仅 create） |
+| `search.status` | 联网搜索配置状态（不验证 key 有效性） | 无 |
 | `config.get` / `config.set` / `config.replace` | 读取/修改运行配置 | `config.get`：无参数返回完整配置；`path` 支持 `temperature` 或 `/temperature`，返回 `{value, config}`。`config.set`：`{patch}` 或 `{path,value}`。`config.replace`：`{config}` 整份替换 |
 | `provider.models` | 读取 provider 的模型列表 | `provider`、`base_url`、`model`（均可选） |
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
@@ -213,8 +217,9 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `config.replace` 才表示整份替换；不要把 `config.set` 的 patch 当作 replace。
 - 温度范围 0.0–2.0；`context_window` 512–131072；`max_turns` 1–32；`provider_plugin` 必须是已登记插件，否则服务端返回 `-32602`。
 - 空响应重试仍固定 `temperature=0.7`，与用户设置无关。
-- `workspace_root` 为空表示 `<安装根>/workspace`；相对路径按安装根解析，绝对路径可指向安装目录外。它是**启动期配置**：`config.set` 会持久化并立即返回新配置，但运行中的内核不热迁移工作区，需重启 `serve`；不要在保存后立刻假设会话目录已切换。
-- 新工作区首次启动会创建 `<workspace>/.featheagent/{worklog.md,memory.md,README.md}`（不覆盖已有内容），system prompt 会要求任务结束写工作日志、更新项目记忆。
+- `workspace_root` 为空表示 `<安装根>/workspace`；相对路径按安装根解析，绝对路径可指向安装目录外。它是**项目容器**，不是某个会话的沙箱：容器下一层 `<workspace_root>/<project>/` 才是工作区。它是**启动期配置**：`config.set` 会持久化并立即返回新配置，但运行中的内核不热迁移工作区，需重启 `serve`。
+- 每个项目工作区各自拥有 `<workspace_root>/<project>/.featheagent/{worklog.md,memory.md,README.md}`（不覆盖已有内容）。内核自动追加 worklog（真实 UTC 时间、目标、工具、状态），模型不手写时间；容器根不再创建 `.featheagent`。
+- 会话创建时可传 `workspace` 绑定项目；旧日志无 workspace 时回落 `default`。工具路径 `workspace/xxx` 与 `xxx` 都落在当前项目根。
 - `ctx.inspect` 是诊断接口，不保证拿到会话锁：锁繁忙时返回 `state:"busy"`、`snapshot:null`，前端不要据此判定回合失败。
 
 ### 5.3 插件管理（v1.1.7）
@@ -263,7 +268,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `50201` | 插件调用失败 |
 | `40901` | 资源被占用（如单客户端能力被占） |
 
-## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认，1.1.5 补设置，1.1.7 补插件/工作区）
+## 7. 多客户端与断连语义（1.1.2 起；1.1.3 补取消，1.1.4 补确认，1.1.5 补设置，1.1.7 补插件/工作区，1.1.8 补停止/引导/压缩/联网）
 
 - Windows 命名管道使用 **overlapped I/O + 每连接独立句柄**，读写互不阻塞。
 - `accept` 遇到客户端连上后立即断开（`ERROR_NO_DATA`）会复位实例并返回错误，由 `Server::run` 继续 `accept`；不会永久占死实例。
@@ -277,3 +282,44 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `--codec json` 是**调试/参考实现**能力；WebUI 与 TUI 内置客户端固定使用 MsgPack，默认 `serve` 即可。
 - 第三方若选 JSON，必须让服务端也用 `--codec json`，并在 `initialize.result.codec` 校验一致；不一致时不要继续发请求。
 - 帧头/上限/方法集属于契约 `1.0`；新增方法只增不改，破坏性变更才升 `CONTRACT_API`。
+
+
+### 5.4 项目工作区、停止/引导、压缩与联网（v1.1.8）
+
+```json
+// 项目容器：root 是容器，workspaces 是容器下一层项目
+{"method":"workspace.list","params":{}}
+// → {"root":".../workspace","workspaces":[{"name":"default","path":".../default",
+//    "has_agent":true,"has_hidden":false}]}
+
+{"method":"workspace.create","params":{"name":"proj-a"}}
+// → {"ok":true,"name":"proj-a","path":".../workspace/proj-a","workspaces":[...]}
+
+// 会话绑定项目
+{"method":"session.create","params":{"session":"s1","workspace":"proj-a"}}
+// → {"session":"s1","workspace":"proj-a"}
+
+// 紧急停止：保留已生成文本；status=stopped（chat.cancel 兼容返回 cancelled）
+{"method":"chat.stop","params":{"session":"s1"}}
+// → {"ok":true,"preserve_context":true}
+
+// 回合内引导：仅在运行中可用
+{"method":"chat.inject","params":{"session":"s1","text":"先别改代码，先列计划"}}
+// → {"ok":true,"during_turn":true}
+
+// 手动压缩：至少两个 ChatFinished；保留最后两个完整回合
+{"method":"context.compact","params":{"session":"s1"}}
+// → {"ok":true,"summary":"...","covers_until_seq":42,"compacted_events":30,
+//    "before_chars":9000,"after_chars":600}
+
+// 联网搜索配置状态（configured 只表示环境变量非空）
+{"method":"search.status","params":{}}
+// → {"provider":"deepseek","base_url":"https://api.deepseek.com",
+//    "key_env":"DEEPSEEK_API_KEY","configured":false,"count":5,
+//    "billing":"Search/Fetch 按成功请求计费，5 元/1000 次"}
+```
+
+- `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- `chat.inject` 先写 `user.message`（`source:"steer"`、`during_turn:true`），再打断当前生成；若会话空闲返回业务错误，请改用 `chat.send`。
+- 压缩写 `context.compacted` 事件（码 24），payload 含 `summary` / `covers_until_seq` / `compacted_events` / `before_chars` / `after_chars`；模型视图只保留 cutoff 之后的事件，旧原文仍在 append-only 日志。
+- `web.search` / `web.fetch` 在 `search_provider=none` 或 API key 环境变量为空时不会出现在 `available_tools`；网页返回一律 `untrusted:true`。DeepSeek Search API 不是免费，详见 `docs/v1.1.8-Windows修复说明.md` §5。

@@ -20,5 +20,6 @@ pub mod proto;
 pub mod runtime;
 pub mod server;
 pub mod util;
+pub mod websearch;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

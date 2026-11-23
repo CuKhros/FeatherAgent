@@ -28,6 +28,8 @@
   let cfgModels = [];
   let pluginData = { registry: [], live: [] };
   let pluginDetailName = "";
+  let workspaces = [];
+  let curState = "idle";
   const pending = new Map();
 
   function esc(s) {
@@ -70,6 +72,7 @@
   }
 
   function setState(state) {
+    curState = state || "idle";
     $("#state-label").textContent = state;
     const dot = $("#state-dot");
     dot.className = "dot " + (state === "running" || state === "generating" ? "running" : state === "cancelled" ? "cancelled" : "idle");
@@ -92,7 +95,7 @@
       const div = document.createElement("div");
       div.className = "session" + (s.id === current ? " active" : "");
       const live = s.live && s.live.state ? s.live.state : "history";
-      div.innerHTML = `<div class="sid">${esc(s.id)}</div><div class="smeta">${s.records || 0} 条 · ${esc(live)}</div>`;
+      div.innerHTML = `<div class="sid">${esc(s.id)}</div><div class="smeta">${esc(s.workspace || "default")} · ${s.records || 0} 条 · ${esc(live)}</div>`;
       div.onclick = () => resume(s.id);
       box.appendChild(div);
     }
@@ -134,12 +137,34 @@
     }
   }
 
+  function replayEvents(events) {
+    for (const e of events || []) {
+      const p = e.payload || {};
+      if (e.kind === "user.message") {
+        if (p.source === "steer") addMessage("user steer", "引导：" + (p.text || ""));
+        else addMessage("user", p.text || "");
+      } else if (e.kind === "model.message" && p.text) {
+        addMessage("assistant", p.text);
+      } else if (e.kind === "tool.result") {
+        const r = p.result || {};
+        addMessage("tool", `${p.name || "tool"} → ${r.status || "ok"}${r.content ? "\n" + String(r.content).slice(0, 1200) : ""}`);
+      } else if (e.kind === "tool.error") {
+        addMessage("system", `工具失败：${p.error || p.name || ""}`);
+      } else if (e.kind === "context.compacted" && p.summary) {
+        addMessage("system", "上下文已压缩：" + p.summary);
+      }
+    }
+  }
+
   async function resume(id) {
     try {
-      await rpc("session.resume", { session: id });
+      const v = await rpc("session.resume", { session: id });
       current = id;
       $("#messages").innerHTML = "";
-      addMessage("system", "已恢复会话 " + id);
+      const ws = (v && v.workspace) || "default";
+      addMessage("system", `已恢复会话 ${id}｜项目 ${ws}｜共 ${v.total || 0} 条事件`);
+      replayEvents(v.events);
+      if ([...$("#new-workspace").options].some((o) => o.value === ws)) $("#new-workspace").value = ws;
       $("#hint").textContent = "";
       renderSessions();
       await refreshCtx();
@@ -148,10 +173,50 @@
     }
   }
 
+  async function refreshWorkspaces() {
+    try {
+      const v = await rpc("workspace.list");
+      workspaces = v.workspaces || [];
+      const sel = $("#new-workspace");
+      const old = sel.value;
+      sel.innerHTML = "";
+      for (const w of workspaces) {
+        const o = document.createElement("option");
+        o.value = w.name;
+        o.textContent = `${w.name}${w.has_agent ? " · 项目" : ""}`;
+        sel.appendChild(o);
+      }
+      if (old && workspaces.some((w) => w.name === old)) sel.value = old;
+      else if (workspaces.some((w) => w.name === "default")) sel.value = "default";
+      if (!workspaces.length) {
+        const o = document.createElement("option");
+        o.value = "default";
+        o.textContent = "default";
+        sel.appendChild(o);
+      }
+    } catch (e) {
+      $("#hint").textContent = "读取项目工作区失败：" + e.message;
+    }
+  }
+
+  async function createWorkspace() {
+    const name = (prompt("新建项目工作区名（将创建在 workspace_root 下一层）", "") || "").trim();
+    if (!name) return;
+    try {
+      await rpc("workspace.create", { name });
+      await refreshWorkspaces();
+      $("#new-workspace").value = name;
+      $("#hint").textContent = `已创建项目工作区 ${name}，含独立 .featheagent/`;
+    } catch (e) {
+      $("#hint").textContent = "创建项目失败：" + e.message;
+    }
+  }
+
   async function createSession() {
     const id = ($("#new-id").value || "").trim() || "s-webui-" + Date.now().toString(36);
+    const workspace = ($("#new-workspace").value || "default").trim();
     try {
-      await rpc("session.create", { id });
+      await rpc("session.create", { id, workspace });
       $("#new-id").value = "";
       await refreshSessions();
       await resume(id);
@@ -170,11 +235,17 @@
     const text = box.value.trim();
     if (!text) return;
     box.value = "";
-    addMessage("user", text);
+    const running = ["running", "assembling", "generating", "tool_executing"].includes(curState);
+    addMessage(running ? "user steer" : "user", running ? "引导：" + text : text);
     try {
-      await rpc("chat.send", { session: current, text });
-      setState("running");
-      $("#hint").textContent = "";
+      if (running) {
+        await rpc("chat.inject", { session: current, text });
+        $("#hint").textContent = "引导已插入上下文；当前生成会在边界中断后继续";
+      } else {
+        await rpc("chat.send", { session: current, text });
+        setState("running");
+        $("#hint").textContent = "";
+      }
     } catch (e) {
       addMessage("system", "发送失败：" + e.message);
       $("#hint").textContent = e.message;
@@ -184,10 +255,23 @@
   async function cancel() {
     if (!current) return;
     try {
-      await rpc("chat.cancel", { session: current });
-      $("#hint").textContent = "已请求取消";
+      await rpc("chat.stop", { session: current });
+      $("#hint").textContent = "已紧急停止；已生成内容与上下文保留在会话日志";
     } catch (e) {
       $("#hint").textContent = "取消失败：" + e.message;
+    }
+  }
+
+  async function compact() {
+    if (!current) return;
+    $("#hint").textContent = "正在生成上下文摘要…";
+    try {
+      const v = await rpc("context.compact", { session: current }, 200000);
+      addMessage("system", `已压缩上下文：${v.compacted_events} 个旧事件 → ${v.summary_chars} 字符摘要`);
+      $("#hint").textContent = "压缩完成；旧原文仍保留在会话日志";
+      await refreshCtx();
+    } catch (e) {
+      $("#hint").textContent = "压缩失败：" + e.message;
     }
   }
 
@@ -230,6 +314,15 @@
     if (p.session && p.session !== current && p.session !== "_system") return;
     switch (k) {
       case "model.message": if (p.text) addMessage("assistant", p.text); break;
+      case "user.message":
+        if (p.source === "steer") addMessage("user steer", "引导：" + (p.text || ""));
+        break;
+      case "context.compacted": {
+        const n = p.compacted_events || 0;
+        addMessage("system", `上下文已压缩：${n} 个旧事件 → ${p.after_chars || 0} 字符摘要（原文仍在日志）`);
+        refreshCtx();
+        break;
+      }
       case "tool.requested": addMessage("tool", `请求 ${p.tool || "?"}`); break;
       case "tool.result": {
         let brief = "";
@@ -247,7 +340,7 @@
       case "memory.recalled": if ((p.items || []).length) addMessage("system", `召回 ${p.items.length} 条记忆`); break;
       case "chat.finished":
         addMessage("system", `— 本轮结束（${p.status || "done"}）`);
-        setState(p.status === "cancelled" ? "cancelled" : "idle");
+        setState((p.status === "cancelled" || p.status === "stopped") ? "cancelled" : "idle");
         refreshCtx();
         refreshSessions();
         break;
@@ -519,6 +612,18 @@
       $("#cfg-max-turns").value = String(cfg.max_turns ?? 6);
       $("#cfg-auto-allow-safe").checked = cfg.auto_allow_safe !== false;
       $("#cfg-workspace-root").value = cfg.workspace_root || "";
+      $("#cfg-search-provider").value = cfg.search_provider || "deepseek";
+      $("#cfg-search-base-url").value = cfg.search_base_url || "https://api.deepseek.com";
+      $("#cfg-search-key-env").value = cfg.search_api_key_env || "DEEPSEEK_API_KEY";
+      $("#cfg-search-count").value = String(cfg.search_count ?? 5);
+      try {
+        const st = await rpc("search.status");
+        $("#search-status").textContent = st.configured
+          ? `已配置：${st.key_env} 已设置；Search/Fetch 按成功请求计费（5 元/1000 次）`
+          : `未配置：设置环境变量 ${st.key_env} 后重启 serve；Search/Fetch 按成功请求计费，不是免费额度`;
+      } catch (e) {
+        $("#search-status").textContent = "读取联网状态失败：" + e.message;
+      }
       syncTemperature();
       try {
         await refreshPlugins();
@@ -568,6 +673,10 @@
         max_turns: maxTurns,
         workspace_root: ($("#cfg-workspace-root").value || "").trim(),
         auto_allow_safe: $("#cfg-auto-allow-safe").checked,
+        search_provider: $("#cfg-search-provider").value,
+        search_base_url: ($("#cfg-search-base-url").value || "").trim(),
+        search_api_key_env: ($("#cfg-search-key-env").value || "").trim(),
+        search_count: Number($("#cfg-search-count").value || 5),
       }});
       cfg = v.config || cfg;
       setSettingsStatus("已保存并应用，下一轮推理使用新配置", "ok");
@@ -623,9 +732,11 @@
 
   function bindUi() {
     $("#btn-send").onclick = send;
-    $("#btn-cancel").onclick = cancel;
+    $("#btn-stop").onclick = cancel;
+    $("#btn-compact").onclick = compact;
     $("#btn-fork").onclick = fork;
     $("#btn-new").onclick = createSession;
+    $("#btn-new-workspace").onclick = createWorkspace;
     $("#btn-settings").onclick = openSettings;
     $("#btn-plugins").onclick = async () => {
       await openSettings();
@@ -676,6 +787,7 @@
       await rpc("initialize");
       cfg = await rpc("config.get").catch(() => null);
       await rpc("event.subscribe", { kinds: [] });
+      await refreshWorkspaces();
       await refreshSessions();
       if (sessions.length) await resume(sessions[0].id);
       else await createSession();

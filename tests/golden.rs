@@ -183,7 +183,7 @@ fn golden_pipeline_replay() {
     conn.client
         .call("session.create", json!({"id": "golden"}))
         .unwrap();
-    let ws = kernel.paths.workspace.join("golden");
+    let ws = kernel.paths.workspace.join("default");
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("golden.txt"), "golden-content").unwrap();
 

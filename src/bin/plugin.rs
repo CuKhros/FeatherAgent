@@ -601,7 +601,7 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
             ] {
                 c.env_remove(v);
             }
-            c.env("HOME", workspace.join(".home"));
+            c.env("HOME", workspace.join(".featheagent").join(".home"));
             // 让 shell 成为新进程组组长：超时杀 -pid，连带杀掉 sleep 等子孙进程。
             // 只 kill shell 会让子进程继续持有 stdout 管道，wait_with_output 会挂住。
             #[cfg(unix)]
@@ -656,32 +656,23 @@ fn tools(method: &str, params: &Value) -> Result<Value, String> {
     }
 }
 
-/// 路径守卫：只允许工作空间内的文件（越界直接拒绝）。
-/// 模型常把根工作区写成 `workspace/xxx`；此时相对安装根解析，避免落到
-/// `<root>/workspace/<session>/workspace/xxx`。普通相对路径仍相对会话工作区。
+/// 路径守卫：只允许当前项目工作区内的文件（越界直接拒绝）。
+/// `workspace` 参数现在就是项目根（不是 `<workspace_root>/<session>`）。
+/// `workspace/xxx` 与普通 `xxx` 都解析到同一项目根，避免模型把容器根写进路径。
 fn tool_base(workspace: &Path, user: &str) -> (PathBuf, String) {
     let mut norm = user.replace('\\', "/");
     while let Some(rest) = norm.strip_prefix("./") {
         norm = rest.to_string();
     }
-    // 模型常把安装根工作区写成 `/workspace/x`。Windows 上这是当前盘符根，
-    // 不能直接当绝对路径；先归一化成安装根相对路径，再做越界检查。
     if let Some(rest) = norm.strip_prefix('/') {
         if rest == "workspace" || rest.starts_with("workspace/") {
             norm = rest.to_string();
         }
     }
     if norm == "workspace" {
-        (
-            workspace.parent().unwrap_or(workspace).to_path_buf(),
-            ".".to_string(),
-        )
+        (workspace.to_path_buf(), ".".to_string())
     } else if let Some(rest) = norm.strip_prefix("workspace/") {
-        // <root>/workspace/<session> + workspace/xxx → <root>/workspace/xxx
-        (
-            workspace.parent().unwrap_or(workspace).to_path_buf(),
-            rest.to_string(),
-        )
+        (workspace.to_path_buf(), rest.to_string())
     } else {
         (workspace.to_path_buf(), norm)
     }
@@ -720,28 +711,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn leading_slash_workspace_is_install_relative() {
-        let root = Path::new("/tmp/fa-root");
-        let session = root.join("workspace").join("s1");
+    fn workspace_prefix_resolves_to_project_root() {
+        let project = Path::new("/tmp/fa-root/workspace/proj");
         for p in [
             "workspace/a.txt",
             "/workspace/a.txt",
             "\\workspace\\a.txt",
             "./workspace/a.txt",
         ] {
-            let (base, rel) = tool_base(&session, p);
-            assert_eq!(base, root.join("workspace"), "base for {p}");
+            let (base, rel) = tool_base(project, p);
+            assert_eq!(base, project, "base for {p}");
             assert_eq!(rel, "a.txt", "rel for {p}");
         }
-        let (base, rel) = tool_base(&session, "/etc/passwd");
-        assert_eq!(base, root.join("workspace").join("s1"));
+        let (base, rel) = tool_base(project, "/etc/passwd");
+        assert_eq!(base, project);
         assert_eq!(rel, "/etc/passwd");
     }
 
     #[test]
     fn safe_path_rejects_parent_escape() {
         let root = temp_root("escape");
-        let ws = root.join("workspace").join("s1");
+        let ws = root.join("workspace").join("proj");
         std::fs::create_dir_all(&ws).unwrap();
         assert!(safe_path(&ws, "ok.txt").is_ok());
         assert!(safe_path(&ws, "../outside.txt").is_err());

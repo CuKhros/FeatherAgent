@@ -163,6 +163,16 @@ fn tool_matches(allow: &str, tool: &str) -> bool {
         || format!("tool.{allow}") == tool
 }
 
+/// 统一展示路径分隔符：Windows 上 `D:/x` 也显示为 `D:\\x`，避免日志/报告歧义。
+fn normalized_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) {
+        s.replace('/', "\\")
+    } else {
+        s
+    }
+}
+
 fn ipc_ready_path(socket: &Path) -> PathBuf {
     socket
         .parent()
@@ -216,7 +226,7 @@ fn welcome_connect(
                 ));
             }
             return Err(format!(
-                "内核未就绪（启动中，约 {}s）：{}\n请等 serve 输出“serve ready”或 {} 出现后重试；Windows 首次启动可能 30–60s。",
+                "内核未就绪（启动中，约 {}s）：{}\n请等 serve 输出“serve ready”或 {} 出现后重试；Windows 首次启动可能 60–120s，期间会打印 [init] 插件登记进度。",
                 age_s,
                 socket.display(),
                 ready.display()
@@ -431,15 +441,17 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         "featheragent {} starting  socket={}  data={}  workspace={}  provider={}  codec={}",
         featheragent::VERSION,
         socket.display(),
-        paths.data.display(),
-        paths.workspace.display(),
+        normalized_path(&paths.data),
+        normalized_path(&paths.workspace),
         cfg.provider_plugin,
         match codec {
             Codec::Json => "json",
             Codec::MsgPack => "msgpack",
         }
     );
-    println!("serve: 初始化内核（首次启动需登记内置插件，Windows 首次可能 30–60s）");
+    println!(
+        "serve: 初始化内核（首次启动需登记内置插件，Windows 首次可能 60–120s，会打印 [init] 进度）"
+    );
     let _ = std::io::stdout().flush();
 
     let kernel = match Kernel::new(paths.clone(), cfg.clone(), force) {
@@ -646,10 +658,23 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
             .and_then(|v| v.get("pid").and_then(|x| x.as_u64()))
             .unwrap_or(0);
-        return Err(format!(
+        let msg = format!(
             "检测到内核正在运行（pid {pid}），请先停止 serve 再运行 bench；当前端点 {}",
-            probe_paths.socket().display()
-        ));
+            normalized_path(&probe_paths.socket())
+        );
+        if json_only {
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "ok": false, "error": msg, "code": "kernel_running"
+                }))
+                .unwrap()
+            );
+        } else {
+            eprintln!("error: {msg}");
+        }
+        // 明确以专用退出码结束，避免 Windows 下被包装脚本/管道吞成 0。
+        std::process::exit(2);
     }
     let dir = std::env::temp_dir().join(format!("fa-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

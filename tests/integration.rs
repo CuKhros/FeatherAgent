@@ -228,7 +228,7 @@ fn tool_execution_and_permission_gate() {
         .call("session.create", json!({"id": "stool"}))
         .unwrap();
     // 预置工作空间文件
-    let ws = h.kernel.paths.workspace.join("stool");
+    let ws = h.kernel.paths.workspace.join("default");
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join("note.txt"), "feather-note").unwrap();
 
@@ -523,8 +523,9 @@ fn leading_slash_workspace_and_business_error_are_not_fatal() {
     conn.client
         .call("session.create", json!({"id": "spath"}))
         .unwrap();
-    std::fs::create_dir_all(h.kernel.paths.workspace.join("spath")).unwrap();
-    std::fs::write(h.kernel.paths.workspace.join("lead.txt"), "LEAD_CONTENT").unwrap();
+    let ws = h.kernel.paths.workspace.join("default");
+    std::fs::create_dir_all(&ws).unwrap();
+    std::fs::write(ws.join("lead.txt"), "LEAD_CONTENT").unwrap();
 
     let seen = send_and_wait(
         &conn,
@@ -658,4 +659,180 @@ fn config_api_applies_and_lists_models() {
         .call("config.replace", json!({"config": full}))
         .unwrap();
     assert_eq!(replaced["config"]["temperature"].as_f64(), Some(0.55));
+}
+
+fn wait_finished(conn: &client::Connect, session: &str, timeout: Duration) -> Vec<Value> {
+    let deadline = Instant::now() + timeout;
+    let mut seen = Vec::new();
+    while Instant::now() < deadline {
+        if let Ok(v) = conn.events.recv_timeout(Duration::from_millis(200)) {
+            if is_kind(&v, "chat.finished", session) {
+                seen.push(v);
+                return seen;
+            }
+            if v.get("params").and_then(|p| p.get("payload")).is_some() {
+                seen.push(v);
+            }
+        }
+    }
+    panic!("等待 chat.finished 超时（{session}）");
+}
+
+#[test]
+fn project_workspace_has_own_agent_home_and_worklog() {
+    let (h, conn) = start("project", |_| {});
+    conn.client
+        .call(
+            "session.create",
+            json!({"id": "sproj", "workspace": "proj-alpha"}),
+        )
+        .unwrap();
+    let ws = h.kernel.paths.workspace.join("proj-alpha");
+    assert!(
+        ws.join(".featheagent/worklog.md").exists(),
+        "项目应自有 .featheagent"
+    );
+    std::fs::write(ws.join("note.txt"), "project-note").unwrap();
+
+    let v = conn.client.call("workspace.list", json!({})).unwrap();
+    let names: Vec<&str> = v["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|w| w["name"].as_str())
+        .collect();
+    assert!(names.contains(&"default"));
+    assert!(names.contains(&"proj-alpha"));
+
+    let _ = send_and_wait(&conn, "sproj", "READ:note.txt", Duration::from_secs(10));
+    thread::sleep(Duration::from_millis(300));
+    let log = std::fs::read_to_string(ws.join(".featheagent/worklog.md")).unwrap();
+    assert!(
+        log.contains("- 工具：tool.fs.read"),
+        "worklog 应记录真实工具：{log}"
+    );
+    assert!(
+        log.contains("## 20"),
+        "worklog 应有内核写入的 UTC 日期：{log}"
+    );
+
+    let resumed = conn
+        .client
+        .call("session.resume", json!({"session": "sproj"}))
+        .unwrap();
+    assert_eq!(resumed["workspace"], "proj-alpha");
+
+    conn.client
+        .call(
+            "session.create",
+            json!({"id": "sproj2", "workspace": "proj-beta"}),
+        )
+        .unwrap();
+    assert!(h
+        .kernel
+        .paths
+        .workspace
+        .join("proj-beta/.featheagent/memory.md")
+        .exists());
+}
+
+#[test]
+fn stop_preserves_partial_output_and_session_remains_usable() {
+    let (_h, conn) = start("stop", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "sstop"}))
+        .unwrap();
+    conn.client
+        .call("chat.send", json!({"session": "sstop", "text": "SPIN"}))
+        .unwrap();
+    thread::sleep(Duration::from_millis(450));
+    conn.client
+        .call("chat.stop", json!({"session": "sstop"}))
+        .unwrap();
+    let seen = wait_finished(&conn, "sstop", Duration::from_secs(10));
+    assert_eq!(
+        seen.last()
+            .and_then(|v| v.pointer("/params/payload/status"))
+            .and_then(|x| x.as_str()),
+        Some("stopped")
+    );
+    assert!(
+        seen.iter()
+            .any(
+                |v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("model.message")
+                    && v.pointer("/params/payload/finish").and_then(|x| x.as_str())
+                        == Some("interrupted")
+            ),
+        "停止时应发出一条 finish=interrupted 的部分输出"
+    );
+    let after = send_and_wait(&conn, "sstop", "after-stop", Duration::from_secs(10));
+    assert!(last_model_text(&after).starts_with("echo: after-stop"));
+}
+
+#[test]
+fn inject_steers_running_turn() {
+    let (_h, conn) = start("steer", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "ssteer"}))
+        .unwrap();
+    conn.client
+        .call("chat.send", json!({"session": "ssteer", "text": "SPIN"}))
+        .unwrap();
+    thread::sleep(Duration::from_millis(450));
+    let v = conn
+        .client
+        .call(
+            "chat.inject",
+            json!({"session": "ssteer", "text": "改做总结"}),
+        )
+        .unwrap();
+    assert!(v["ok"].as_bool().unwrap_or(false));
+    let seen = wait_finished(&conn, "ssteer", Duration::from_secs(15));
+    assert!(
+        seen.iter().any(|e| is_kind(e, "user.message", "ssteer")
+            && e.pointer("/params/payload/source").and_then(|x| x.as_str()) == Some("steer")),
+        "应把引导作为 during_turn 用户消息写入事件日志"
+    );
+    assert_eq!(
+        seen.last()
+            .and_then(|v| v.pointer("/params/payload/status"))
+            .and_then(|x| x.as_str()),
+        Some("ok")
+    );
+}
+
+#[test]
+fn manual_compaction_creates_checkpoint_and_keeps_log() {
+    let (_h, conn) = start("compact", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "scomp"}))
+        .unwrap();
+    for i in 0..3 {
+        let _ = send_and_wait(
+            &conn,
+            "scomp",
+            &format!("compact round {i}"),
+            Duration::from_secs(10),
+        );
+    }
+    let v = conn
+        .client
+        .call("context.compact", json!({"session": "scomp"}))
+        .unwrap();
+    assert!(v["compacted_events"].as_u64().unwrap_or(0) > 0);
+    assert!(v["covers_until_seq"].as_u64().unwrap_or(0) > 0);
+    let resumed = conn
+        .client
+        .call("session.resume", json!({"session": "scomp"}))
+        .unwrap();
+    assert!(
+        resumed["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "context.compacted"),
+        "压缩必须在事件日志留下可回放的检查点"
+    );
+    let after = send_and_wait(&conn, "scomp", "after-compact", Duration::from_secs(10));
+    assert!(last_model_text(&after).starts_with("echo: after-compact"));
 }

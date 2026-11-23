@@ -231,7 +231,7 @@ impl ContextEngine {
 
         // ---- 稳定前缀 ----
         let mut system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。文件工具参数使用工作区路径：以 `workspace/` 前缀访问工作区根（如 workspace/foo.txt），普通相对路径落在当前会话目录；不要用前导斜杠。",
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
             profile.name
         );
         if let Some(note) = &self.cfg.workspace_note {
@@ -240,8 +240,13 @@ impl ContextEngine {
         }
         let system_tokens = estimate_tokens(&system);
 
-        let task_state = build_task_state(events);
+        let (compaction, active_events) = compacted_view(events);
+        let task_state = build_task_state(active_events);
         let task_state_tokens = estimate_tokens(&task_state);
+        let mut summary_tokens = compaction
+            .as_ref()
+            .map(|(_, text)| estimate_tokens(&format!("[compacted_summary]\n{text}")))
+            .unwrap_or(0);
 
         let tools_json = if tools.is_empty() {
             String::new()
@@ -252,11 +257,11 @@ impl ContextEngine {
         let tools_tokens = estimate_tokens(&tools_json);
 
         let (skill_text, skill_tokens, skill_refs) =
-            inject_skills(skills, &latest_user_text(events));
+            inject_skills(skills, &latest_user_text(active_events));
         let _ = skill_refs;
 
         // ---- 历史（L1） ----
-        let mut history = events_to_messages(events);
+        let mut history = events_to_messages(active_events);
         let mut kept: Vec<Message> = Vec::new();
         let mut history_tokens = 0usize;
         let mut dropped = 0usize;
@@ -275,14 +280,14 @@ impl ContextEngine {
 
         // ---- L2 摘要卡：被裁掉的前缀 ----
         let mut cards: Vec<Value> = Vec::new();
-        let mut summary_tokens = 0usize;
         if dropped > 0 {
-            let cut = events.len().min(dropped);
-            let (card_text, refs) = summarize_prefix(&events[..cut], self.cfg.summary_card_chars);
+            let cut = active_events.len().min(dropped);
+            let (card_text, refs) =
+                summarize_prefix(&active_events[..cut], self.cfg.summary_card_chars);
             if !card_text.is_empty() {
-                summary_tokens = estimate_tokens(&card_text);
+                summary_tokens += estimate_tokens(&card_text);
                 cards.push(json!({
-                    "covers_until_seq": events.get(cut.saturating_sub(1)).map(|e| e.seq).unwrap_or(0),
+                    "covers_until_seq": active_events.get(cut.saturating_sub(1)).map(|e| e.seq).unwrap_or(0),
                     "text": card_text,
                     "refs": refs,
                     "pinned": false,
@@ -309,7 +314,7 @@ impl ContextEngine {
         }
 
         // ---- 多模态预算 ----
-        let media_count = events
+        let media_count = active_events
             .iter()
             .filter(|e| e.kind == EventKind::UserMessage && e.payload.get("media").is_some())
             .count();
@@ -322,6 +327,16 @@ impl ContextEngine {
                 "system",
                 format!("[task_state]\n{task_state}"),
             ));
+        }
+        if let Some((seq, summary)) = &compaction {
+            let mut m = Message::new(
+                "system",
+                format!(
+                    "[compacted_summary]\n{summary}\n（覆盖至事件 #{seq}；更早原文仍在会话日志中）"
+                ),
+            );
+            m.pinned = true;
+            messages.push(m);
         }
         if !tools_json.is_empty() {
             messages.push(Message::new("system", format!("[tools]\n{tools_json}")));
@@ -388,6 +403,37 @@ impl ContextEngine {
             task_state,
         })
     }
+}
+
+/// 返回最新一次手动压缩检查点（覆盖到哪个 seq + 摘要）以及检查点之后的活动事件切片。
+/// 压缩事件本身不产生消息，只把更早历史替换为 pinned 摘要，避免每轮重放旧原文。
+pub fn compacted_view(events: &[Event]) -> (Option<(u64, String)>, &[Event]) {
+    let Some((idx, ev)) = events
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, e)| e.kind == EventKind::ContextCompacted)
+    else {
+        return (None, events);
+    };
+    let cutoff = ev
+        .payload
+        .get("covers_until_seq")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0);
+    let summary = ev
+        .payload
+        .get("summary")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let start = events
+        .iter()
+        .position(|e| e.seq > cutoff)
+        .unwrap_or(events.len());
+    // events[idx] 本身位于 start 之后（seq 更大），但不应生成消息；events_to_messages 忽略它。
+    let _ = idx;
+    (Some((cutoff, summary)), &events[start..])
 }
 
 fn latest_user_text(events: &[Event]) -> String {
@@ -791,6 +837,48 @@ mod tests {
         assert!(s.contains("回合数: 1"));
         assert!(s.contains("最近工具失败"));
         assert!(s.contains("取消"));
+    }
+
+    #[test]
+    fn compaction_checkpoint_hides_older_events_from_model_view() {
+        let events = vec![
+            ev(1, EventKind::UserMessage, json!({"text":"旧问题"})),
+            ev(2, EventKind::ModelMessage, json!({"text":"旧回答"})),
+            ev(3, EventKind::ChatFinished, json!({"status":"ok"})),
+            ev(
+                4,
+                EventKind::ContextCompacted,
+                json!({"summary":"旧回合摘要","covers_until_seq":3,"compacted_events":3}),
+            ),
+            ev(5, EventKind::UserMessage, json!({"text":"新问题"})),
+            ev(6, EventKind::ModelMessage, json!({"text":"新回答"})),
+        ];
+        let (checkpoint, tail) = compacted_view(&events);
+        assert_eq!(checkpoint.as_ref().map(|x| x.0), Some(3));
+        assert!(tail.iter().all(|e| e.seq > 3));
+        assert!(!tail
+            .iter()
+            .any(|e| e.payload.get("text").and_then(|x| x.as_str()) == Some("旧问题")));
+
+        let engine = ContextEngine::default();
+        let profile = ModelProfile {
+            context_window: 4096,
+            max_output: 128,
+            ..Default::default()
+        };
+        let a = engine.assemble(&events, &profile, &[], &[], &[]).unwrap();
+        assert!(
+            a.messages
+                .iter()
+                .any(|m| m.content.contains("[compacted_summary]")
+                    && m.content.contains("旧回合摘要")),
+            "摘要应作为 pinned system 前缀"
+        );
+        assert!(
+            !a.messages.iter().any(|m| m.content.contains("旧问题")),
+            "压缩后模型视图不应再看到旧原文"
+        );
+        assert!(a.messages.iter().any(|m| m.content == "新问题"));
     }
 
     #[test]

@@ -330,10 +330,42 @@ fn dispatch(
                 .and_then(|x| x.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("s-{}", crate::util::random_token(4)));
-            let s = kernel.session(&id);
+            let workspace = params
+                .get("workspace")
+                .and_then(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .or_else(|| kernel.workspace_from_log(&id))
+                .unwrap_or_else(|| crate::engine::DEFAULT_WORKSPACE.to_string());
+            let s = kernel
+                .session_in_workspace(&id, &workspace)
+                .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
             *s.holder.write() = Some(conn_id);
-            kernel.emit(&id, EventKind::SessionCreated, json!({"conn": conn_id}));
-            Ok(s.info())
+            kernel.emit(
+                &id,
+                EventKind::SessionCreated,
+                json!({"conn": conn_id, "workspace": workspace}),
+            );
+            let mut info = s.info();
+            info["workspace"] = json!(workspace);
+            Ok(info)
+        }
+        "workspace.list" => Ok(json!({
+            "root": kernel.paths.workspace,
+            "workspaces": kernel.workspace_list(),
+            "default": crate::engine::DEFAULT_WORKSPACE,
+        })),
+        "workspace.create" => {
+            let name = params
+                .get("name")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("name required"))?;
+            let path = kernel
+                .ensure_workspace(name)
+                .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
+            Ok(
+                json!({"ok": true, "name": name.trim(), "path": path, "workspaces": kernel.workspace_list()}),
+            )
         }
         "session.list" => {
             let log_sessions = kernel.store.list_sessions().unwrap_or_default();
@@ -346,7 +378,14 @@ fn dispatch(
             let mut list: Vec<Value> = log_sessions
                 .iter()
                 .map(|(id, n, ts)| {
-                    json!({"id": id, "records": n, "last_ts": ts, "live": live.get(id)})
+                    let ws = live
+                        .get(id)
+                        .and_then(|v| v.get("workspace"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| kernel.workspace_from_log(id))
+                        .unwrap_or_else(|| crate::engine::DEFAULT_WORKSPACE.to_string());
+                    json!({"id": id, "records": n, "last_ts": ts, "live": live.get(id), "workspace": ws})
                 })
                 .collect();
             for (id, info) in live {
@@ -389,6 +428,7 @@ fn dispatch(
             Ok(json!({
                 "session": id,
                 "role": role,
+                "workspace": s.workspace.read().clone(),
                 "state": s.state.read().as_str(),
                 "snapshot": s.snapshot.read().clone(),
                 "events": tail,
@@ -405,8 +445,11 @@ fn dispatch(
                 .store
                 .fork(id, as_id)
                 .map_err(|e| (rpc::ERR_INTERNAL, e.to_string()))?;
-            kernel.session(as_id);
-            Ok(json!({"session": as_id, "copied": n}))
+            let src_ws = kernel.session(id).workspace.read().clone();
+            kernel
+                .session_in_workspace(as_id, &src_ws)
+                .map_err(|e| (rpc::ERR_INTERNAL, e))?;
+            Ok(json!({"session": as_id, "copied": n, "workspace": src_ws}))
         }
         "chat.send" => {
             let id = params
@@ -437,7 +480,9 @@ fn dispatch(
             ) {
                 return Err((rpc::ERR_OCCUPIED, "会话正忙".into()));
             }
-            *s.state.write() = SessionState::Idle;
+            *s.state.write() = SessionState::Assembling;
+            s.interrupt.store(0, Ordering::SeqCst);
+            s.cancel.store(false, Ordering::SeqCst);
             let k = kernel.clone();
             let ss = s.clone();
             let t = text.to_string();
@@ -454,12 +499,17 @@ fn dispatch(
             });
             Ok(json!({"session": id, "accepted": true, "turn": s.turn.load(Ordering::Relaxed)}))
         }
-        "chat.cancel" => {
+        "chat.stop" | "chat.cancel" => {
             let id = params
                 .get("session")
                 .and_then(|x| x.as_str())
                 .ok_or_else(|| invalid("session required"))?;
             let s = kernel.session(id);
+            // 1 = 紧急停止；3 = 兼容旧 chat.cancel（状态仍回报 cancelled）。
+            s.interrupt.store(
+                if method == "chat.cancel" { 3 } else { 1 },
+                Ordering::SeqCst,
+            );
             s.cancel.store(true, Ordering::SeqCst);
             let active = s.active_req.lock().clone();
             if let Some((plugin, req)) = active {
@@ -470,9 +520,56 @@ fn dispatch(
             kernel.emit(
                 id,
                 EventKind::ToolCancelled,
-                json!({"reason": "chat.cancel"}),
+                json!({"reason": "chat.stop", "preserve_context": true}),
             );
-            Ok(json!({"ok": true}))
+            Ok(json!({"ok": true, "stopping": true, "preserve_context": true}))
+        }
+        "chat.inject" => {
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
+            let text = params
+                .get("text")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("text required"))?;
+            if text.trim().is_empty() {
+                return Err(invalid("text 不能为空"));
+            }
+            let s = kernel.session(id);
+            if matches!(
+                *s.state.read(),
+                SessionState::Idle | SessionState::Cancelled | SessionState::Failed
+            ) {
+                return Err((
+                    rpc::ERR_OCCUPIED,
+                    "当前没有正在运行的回合；请用 chat.send".into(),
+                ));
+            }
+            // 先写入上下文，再中断当前生成；run_turn 会在本轮边界消费 interrupt=2 并继续。
+            kernel.emit(
+                &id,
+                EventKind::UserMessage,
+                json!({"text": text, "source": "steer", "during_turn": true, "ts": crate::proto::types::now_wall_ns()}),
+            );
+            s.interrupt.store(2, Ordering::SeqCst);
+            let active = s.active_req.lock().clone();
+            if let Some((plugin, req)) = active {
+                if let Ok(p) = kernel.plugins.get(&plugin) {
+                    p.cancel(req);
+                }
+            }
+            Ok(json!({"ok": true, "injected": true, "mode": "steer"}))
+        }
+        "context.compact" => {
+            let id = params
+                .get("session")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("session required"))?;
+            let v = kernel
+                .compact_session(id)
+                .map_err(|e| (rpc::ERR_OCCUPIED, e))?;
+            Ok(v)
         }
         "event.subscribe" => {
             let ks = params
@@ -588,6 +685,21 @@ fn dispatch(
                 .and_then(|x| x.as_bool())
                 .unwrap_or(true);
             Ok(kernel.storage_gc(dry))
+        }
+        "search.status" => {
+            let cfg = kernel.cfg.read().clone();
+            let configured = std::env::var(&cfg.search_api_key_env)
+                .ok()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            Ok(json!({
+                "provider": cfg.search_provider,
+                "base_url": cfg.search_base_url,
+                "key_env": cfg.search_api_key_env,
+                "count": cfg.search_count,
+                "configured": configured,
+                "billing": "DeepSeek Search/Fetch 每 1,000 次成功请求 5 元；服务端工具搜索不单独计费但消耗模型 token",
+            }))
         }
         "provider.models" => {
             let cfg = kernel.config_json();

@@ -183,6 +183,7 @@ impl Registry {
                 if existing.iter().any(|n| n == &name) {
                     continue;
                 }
+                eprintln!("[init] 登记内置插件 {name}（首次启动可能被杀毒软件扫描，耗时较长）");
                 if let Ok(entry) = self.install(&p) {
                     installed.push(entry);
                 }
