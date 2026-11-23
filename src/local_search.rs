@@ -12,7 +12,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FeatherAgent/1.1.9 Chrome/120 Safari/537.36";
+const UA: &str = concat!(
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FeatherAgent/",
+    env!("CARGO_PKG_VERSION"),
+    " Chrome/120 Safari/537.36"
+);
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_FETCH_CHARS: usize = 24_000;
 
@@ -136,8 +140,7 @@ fn html_decode(s: &str) -> String {
         .replace("&#x27;", "'")
         .replace("&#x2F;", "/");
     // 数字实体
-    loop {
-        let Some(start) = out.find("&#") else { break };
+    while let Some(start) = out.find("&#") {
         let Some(rel_end) = out[start..].find(';') else {
             break;
         };
@@ -537,7 +540,10 @@ pub fn search(params: &Value) -> Result<Value, String> {
     if query.chars().count() > 128 {
         return Err("query 最多 128 个字符".into());
     }
-    let count = params.get("count").and_then(|x| x.as_u64()).unwrap_or(5) as usize;
+    let count = params
+        .get("count")
+        .and_then(crate::util::json_u64)
+        .unwrap_or(5) as usize;
     let count = count.clamp(1, 10);
     let engine = params
         .get("engine")
@@ -661,7 +667,10 @@ pub fn news(params: &Value) -> Result<Value, String> {
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .trim();
-    let count = params.get("count").and_then(|x| x.as_u64()).unwrap_or(8) as usize;
+    let count = params
+        .get("count")
+        .and_then(crate::util::json_u64)
+        .unwrap_or(8) as usize;
     let count = count.clamp(1, 15);
     let lang = params
         .get("lang")
@@ -859,12 +868,12 @@ fn is_private_ip(ip: IpAddr) -> bool {
                 || (o[0] == 198 && (18..=19).contains(&o[1]))
         }
         IpAddr::V6(v) => {
+            let seg0 = v.segments()[0];
             v.is_loopback()
                 || v.is_unspecified()
-                || v.is_unique_local()
-                || v.is_unicast_link_local()
-                || v.segments()[0] == 0xfe80
-                || v.segments()[0] == 0xff00
+                || (seg0 & 0xfe00) == 0xfc00 // fc00::/7 unique local
+                || (seg0 & 0xffc0) == 0xfe80 // fe80::/10 link local
+                || (seg0 & 0xff00) == 0xff00 // ff00::/8 multicast
         }
     }
 }
@@ -964,7 +973,7 @@ pub fn suggest(params: &Value) -> Result<Value, String> {
         for part in body[start + 1..end].split(',') {
             let t = part.trim().trim_matches('"').trim();
             if !t.is_empty() {
-                out.push(t.replace("\"", "\""));
+                out.push(t.to_string());
             }
         }
     }

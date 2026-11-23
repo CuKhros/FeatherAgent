@@ -16,9 +16,11 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::proto::types::{Event, EventKind};
 
+type BusSlot = Mutex<Option<(u64, Arc<Event>)>>;
+
 pub struct Bus {
     cap: usize,
-    slots: Vec<Mutex<Option<(u64, Arc<Event>)>>>,
+    slots: Vec<BusSlot>,
     tail: AtomicU64,
     changed: Condvar,
     changed_lock: Mutex<()>,

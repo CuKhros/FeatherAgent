@@ -26,6 +26,14 @@ fn main() {
         print_help(args.positional.first().map(|s| s.as_str()));
         return;
     }
+    if args.has("version") {
+        println!(
+            "featheragent {} (contract {})",
+            featheragent::VERSION,
+            featheragent::proto::CONTRACT_API
+        );
+        return;
+    }
     let cmd = args
         .positional
         .first()
@@ -363,8 +371,7 @@ fn paths_from(args: &featheragent::util::Args) -> Result<Paths, String> {
 }
 
 fn load_cfg(paths: &Paths) -> Config {
-    let cfg = Config::load(&paths.data.join("config.json"));
-    cfg
+    Config::load(&paths.data.join("config.json"))
 }
 
 /// 把配置里的外置工作区应用到路径；CLI `--workspace` 优先。
@@ -846,9 +853,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let mut rpc = Vec::new();
     for _ in 0..200 {
         let t = Instant::now();
-        conn.client
-            .call("system.info", serde_json::json!({}))
-            .map_err(|e| e)?;
+        conn.client.call("system.info", serde_json::json!({}))?;
         rpc.push(t.elapsed().as_secs_f64() * 1000.0);
     }
     rpc.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -1031,8 +1036,10 @@ mod tests {
             workspace: root.join("workspace"),
             runtime: root.join("runtime"),
         };
-        let mut cfg = featheragent::engine::Config::default();
-        cfg.workspace_root = "outer-ws".into();
+        let mut cfg = featheragent::engine::Config {
+            workspace_root: "outer-ws".into(),
+            ..Default::default()
+        };
         apply_workspace(&mut paths, &cfg, false);
         assert_eq!(paths.workspace, root.join("outer-ws"));
 

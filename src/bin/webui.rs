@@ -43,6 +43,15 @@ struct Ctx {
 
 fn main() {
     let args = Args::parse(std::env::args().skip(1));
+    if args.has("--help") || args.positional.iter().any(|p| p == "-h") {
+        println!("FeatherAgent WebUI {}", env!("CARGO_PKG_VERSION"));
+        println!("用法: featheragent-webui [--root DIR] [--socket PATH] [--app]");
+        return;
+    }
+    if args.has("version") {
+        println!("featheragent-webui {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-webui"));
     let overrides = Overrides {
         install_root: args.flag("root").map(PathBuf::from),
@@ -276,12 +285,15 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
         );
     }
     match (req.method.as_str(), req.path.as_str()) {
-        ("GET", "/") | ("GET", "/index.html") => respond(
-            &mut stream,
-            200,
-            "text/html; charset=utf-8",
-            INDEX_HTML.as_bytes(),
-        ),
+        ("GET", "/") | ("GET", "/index.html") => {
+            let html = INDEX_HTML.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
+            respond(
+                &mut stream,
+                200,
+                "text/html; charset=utf-8",
+                html.as_bytes(),
+            )
+        }
         ("GET", "/app.js") => respond(
             &mut stream,
             200,

@@ -469,7 +469,7 @@ impl LogStore {
             let last_ts = evs.last().map(|e| e.ts_wall_ns).unwrap_or(0);
             out.push((name, evs.len() as u64, last_ts));
         }
-        out.sort_by(|a, b| b.2.cmp(&a.2));
+        out.sort_by_key(|a| std::cmp::Reverse(a.2));
         Ok(out)
     }
 

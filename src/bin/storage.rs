@@ -232,7 +232,7 @@ impl Storage {
         let ts = p
             .get("ts")
             .and_then(|x| x.as_u64())
-            .unwrap_or_else(|| featheragent::proto::types::now_wall_ns()) as i64;
+            .unwrap_or_else(featheragent::proto::types::now_wall_ns) as i64;
         let item = VecItem {
             id: id.to_string(),
             session: session.to_string(),

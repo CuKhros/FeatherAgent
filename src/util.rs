@@ -6,6 +6,8 @@
 use std::io::Read;
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 /// 极简参数解析：支持 `--k v`、`--k=v`、`-h`。
 #[derive(Debug, Default, Clone)]
 pub struct Args {
@@ -218,6 +220,20 @@ pub fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Re
     }
 }
 
+/// 把 JSON 数字或数字字符串解析为 u64。
+/// 小模型常把 `{"count":5}` 写成 `{"count":"5"}`；这类容错只用于计数类参数，
+/// 不放宽契约中的 integer 声明，也不接受负数/小数。
+pub fn json_u64(v: &Value) -> Option<u64> {
+    if let Some(n) = v.as_u64() {
+        return Some(n);
+    }
+    let s = v.as_str()?.trim();
+    if s.is_empty() || s.starts_with('-') {
+        return None;
+    }
+    s.parse::<u64>().ok()
+}
+
 pub fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -262,6 +278,17 @@ mod tests {
         assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(t.chars().any(|c| c != '0'));
         assert_ne!(random_token(24), random_token(24));
+    }
+
+    #[test]
+    fn json_u64_accepts_integer_and_numeric_string() {
+        assert_eq!(json_u64(&serde_json::json!(5)), Some(5));
+        assert_eq!(json_u64(&serde_json::json!("5")), Some(5));
+        assert_eq!(json_u64(&serde_json::json!(" 5 ")), Some(5));
+        assert_eq!(json_u64(&serde_json::json!("-1")), None);
+        assert_eq!(json_u64(&serde_json::json!("5.0")), None);
+        assert_eq!(json_u64(&serde_json::json!("five")), None);
+        assert_eq!(json_u64(&serde_json::Value::Null), None);
     }
 
     #[test]

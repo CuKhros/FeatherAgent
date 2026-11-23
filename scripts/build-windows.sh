@@ -6,6 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export PATH="${HOME}/.cargo/bin:${PATH}"
+scripts/version-check.sh
 TARGET=x86_64-pc-windows-gnu
 
 command -v x86_64-w64-mingw32-gcc >/dev/null || {
@@ -21,6 +22,6 @@ export AR_x86_64_pc_windows_gnu=x86_64-w64-mingw32-ar
 # 静态 CRT，最终 exe 只依赖 Windows 系统 DLL（已验证无 libgcc/libwinpthread）。
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS:--C target-feature=+crt-static}"
 
-cargo build --release --target "$TARGET" --bins
+cargo build --release --target "$TARGET" --bins --locked
 echo "built:"
 ls -lh target/$TARGET/release/*.exe

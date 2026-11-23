@@ -1,5 +1,7 @@
 # FeatherAgent（轻羽）
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 面向 **1B~14B 本地小模型**的「上下文引擎」+ 一个**体积极小、零运行时依赖**的可移植 Agent 内核。
 
 ## 三个卖点
@@ -50,12 +52,42 @@
 
 不内置推理引擎、不分发权重、不做云账号、不遥测、不做移动端。
 
+## 平台支持矩阵
+
+> 这是**当前验证状态**，不是对未来平台的承诺。未实测的平台不进入发布门禁。
+
+| 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
+|---|---|---|---|---|
+| Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.0-rc.1 待复测） |
+| Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
+| Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
+| Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
+| macOS x64 / arm64 | x86_64 / aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
+
+## 已实测 / 未实测
+
+| 能力 | Linux x64 | Windows x64 | 证据与说明 |
+|---|---|---|---|
+| 内核启动、事件日志、插件 RPC | ✅ 自动化 | ✅ v1.1.9 真机 | Linux `cargo test`；Windows 真机 serve/chat |
+| bench 6 项门禁 | ✅ 6/6 | ✅ 6/6（v1.1.9） | 平台阈值见下表 |
+| 项目级工作区 / `.featheagent` | ✅ 自动化 | ✅ v1.1.9 真机 | 路径去重、S3 写盘 |
+| TUI 交互 | ✅ PTY | ✅ v1.1.9 真机 | Markdown、`/stop`、`/settings` |
+| WebUI | ✅ 浏览器 | ✅ v1.1.9 真机 | Markdown、图标、WS 空闲复验（Linux） |
+| 零 Key 本地联网搜索 | ✅ 实测 | ✅ v1.1.9 真机 | 必应/百度/中新网回落、`web.search` 二次检索 |
+| S3 工具三档 | ✅ 4/5 | ✅ 4/5（v1.1.9） | 真失败 0；脚本仍需真实 Ollama |
+| 回合内 steer / `/compact` | ⚠️ 有单测，未两回合实测 | ⚠️ 未构造场景 | v1.1.9 报告明确未验证 |
+| DeepSeek 计费搜索 | ❌ 未调用 | ❌ 未调用 | 需 API Key，按成功请求计费 |
+| 高 DPI / 中文渲染 | ⚠️ 常规 DPI | ❌ 未实测 | Windows 高 DPI 待复测 |
+| 网络盘 / 同步盘 / 24h 浸泡 | ❌ 未实测 | ❌ 未实测 | 不作为发布结论 |
+| macOS / arm64 | ❌ 未支持 | ❌ 未支持 | 无构建产物 |
+
 ## 快速开始（Linux x64）
 
 要求 Rust 1.80+，无其他运行时依赖。
 
 ```bash
-cargo build --release --bins
+scripts/build-linux.sh                                  # 版本门禁 + --locked 构建
 ./target/release/featheragent serve --root .          # 内核 + UDS
 ./target/release/featheragent-tui --root .            # TUI（另开终端）
 ./target/release/featheragent-webui --root . --app    # WebUI（Chromium --app 独立窗口）
@@ -69,7 +101,7 @@ cargo build --release --bins
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.1.9-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.0-rc.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -81,7 +113,7 @@ cargo build --release --bins
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.md)。
 
-## 平台门禁差异（v1.1.9）
+## 平台门禁差异（v1.2.0-rc.1）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -94,11 +126,22 @@ cargo build --release --bins
 
 `bench --json` 会返回 `platform`、`boot_limit_ms`、`write_limit_us`，不会把 Windows 固定标红。
 
+## 参与与许可
+
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全问题：[SECURITY.md](SECURITY.md)（不要公开贴攻击细节/密钥）
+- 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 分支保护：[main 规则说明](.github/BRANCH_PROTECTION.md)
+- 变更记录：[CHANGELOG.md](CHANGELOG.md)
+- 本地 CI：[scripts/ci.sh](scripts/ci.sh)（`--with-windows` 追加交叉编译）
+- 许可证：[MIT](LICENSE)
+
 ## 文档
 
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.0-rc.1 变更说明](docs/v1.2.0-rc.1-变更说明.md)** —— Q1/Q2、双平台版本/构建对齐、MIT 与公开仓库材料、平台矩阵
 - **[v1.1.9 Windows 修复对照](docs/v1.1.9-Windows修复说明.md)** —— P1 路径双重嵌套、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索
 - **[v1.1.8 Windows 修复对照](docs/v1.1.8-Windows修复说明.md)** —— 项目级工作区与每项目 `.featheagent`、TUI 设置侧栏、紧急停止/引导/压缩、联网搜索，以及 v1.1.7 复测 N1/N2/N3/N4/N6/N7
 - **[v1.1.7 Windows 修复对照](docs/v1.1.7-Windows修复说明.md)** —— v1.1.6 复测 NEW-K、TUI 双模式/光标、外置工作区与 `.featheagent`、插件管理与设置侧栏
@@ -112,11 +155,7 @@ cargo build --release --bins
 
 ## 状态
 
-`v1.1.9` 是基于 v1.1.8 Windows 真机复测报告的产品能力版：修复 P1 项目工作区路径双重嵌套、TUI 提前 `/stop` 误报 failed；TUI/WebUI 助手消息支持 Markdown；WebUI/任务栏/程序图标接入用户提供的羽毛图标；内置零 Key 本地联网搜索（必应/DuckDuckGo/Wikipedia/Hacker News/GitHub + 新闻/抓取/联想），默认 `search_provider=local`，DeepSeek 保留为可选计费后端。Linux 自动化测试 **85/85** 通过（56 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration；另有 1 个需公网的集成用例单独跑通）。
+`v1.2.0-rc.1` 是公开仓库候选版：修复 v1.1.9 真机复测的 Q1/Q2 小项，统一 Linux/Windows 的版本源、`--locked` 构建与 PE 版本资源，补齐 MIT LICENSE、SECURITY、CONTRIBUTING、CODE_OF_CONDUCT、CHANGELOG、本地 CI 脚本与 CODEOWNERS。核心能力沿用 v1.1.9：项目级工作区路径去重、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索（默认 `search_provider=local`，DeepSeek 保留为可选计费后端）。Linux 自动化测试 **86/86** 通过（新增 `json_u64` 字符串计数容错用例；另有 1 个需公网的集成用例单独跑通）。
 
-已实测范围：Linux x64、mock provider 全链路、TUI（PTY 交互）、WebUI（HTTP + WebSocket + SSE 回退，`--app` 独立 Profile 启动 Chromium）、多模型下拉与保存、三产物打包与解压运行、1000 次日志随机截断恢复。
-
-Windows x64：v1.1.3 真机确认 NEW-1～NEW-3；v1.1.4 确认 NEW-A～NEW-D；v1.1.5 确认 NEW-E～NEW-G，并暴露 NEW-H～NEW-J；v1.1.6 确认 NEW-H/I/J 与 NEW-4，仅余 NEW-K；v1.1.7 已发布并进入复测；v1.1.8 已发布并完成 P1/P2/P3/P4 与 §6.1 修复。v1.1.9 包 `FeatherAgent-1.1.9-windows-x64.zip` 的字节数与哈希以 Release 资产和 manifest 为准；仍需真机复测项目级路径、TUI/WebUI Markdown 与图标、本地联网搜索、`/stop` 状态及高 DPI/中文渲染。Wine 6.0.3 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
-
-未实测：Windows 真机项目级工作区、TUI 设置侧栏、停止/引导/压缩、联网搜索、高 DPI/中文渲染；DeepSeek Search API 真实调用（需 `DEEPSEEK_API_KEY`，按成功请求计费）；真实 Ollama / 7B 模型指标（S3 三档）、网络盘/同步盘、24h 浸泡、macOS、四平台 × 双架构矩阵。详见验证报告。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.0-rc.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；Q1/Q2、Markdown、图标、本地搜索、项目路径与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。本轮未实测项见上表。
 

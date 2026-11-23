@@ -161,7 +161,7 @@ fn last_model_text(seen: &[Value]) -> String {
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string())
         })
-        .last()
+        .next_back()
         .unwrap_or_default()
 }
 
@@ -513,7 +513,7 @@ fn wasm_and_log_unit_paths_smoke() {
     // 集成测试里也验证一下内核侧没有把业务存储塞进来
     let (_h, conn) = start("smoke", |_| {});
     let info = conn.client.call("system.info", json!({})).unwrap();
-    assert!(info["version"].as_str().unwrap().starts_with("1.1"));
+    assert_eq!(info["version"].as_str().unwrap(), env!("CARGO_PKG_VERSION"));
     assert_eq!(info["gate"], "collaborative");
 }
 

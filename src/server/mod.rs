@@ -548,7 +548,7 @@ fn dispatch(
             }
             // 先写入上下文，再中断当前生成；run_turn 会在本轮边界消费 interrupt=2 并继续。
             kernel.emit(
-                &id,
+                id,
                 EventKind::UserMessage,
                 json!({"text": text, "source": "steer", "during_turn": true, "ts": crate::proto::types::now_wall_ns()}),
             );

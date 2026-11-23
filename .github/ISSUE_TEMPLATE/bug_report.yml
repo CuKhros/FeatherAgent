@@ -1,0 +1,51 @@
+name: Bug 报告
+description: 报告可复现的功能缺陷或平台构建问题
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请不要在 Issue 中粘贴密钥、私人路径、完整日志或安全漏洞细节。安全问题请走 SECURITY.md 的私有报告流程。
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Linux x64
+        - Windows x64
+        - 其他（未支持平台）
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 例如 v1.2.0-rc.1
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 命令、会话、插件、WebUI 请求；请给出最小复现。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      description: 删除 token、用户名、私有路径、API Key 后再贴。
+      render: text

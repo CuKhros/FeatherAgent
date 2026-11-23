@@ -82,6 +82,15 @@ struct App {
 
 fn main() {
     let args = Args::parse(std::env::args().skip(1));
+    if args.has("--help") || args.positional.iter().any(|p| p == "-h") {
+        println!("FeatherAgent TUI {}", env!("CARGO_PKG_VERSION"));
+        println!("用法: featheragent-tui [--root DIR] [--socket PATH]");
+        return;
+    }
+    if args.has("version") {
+        println!("featheragent-tui {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-tui"));
     let overrides = Overrides {
         install_root: args.flag("root").map(PathBuf::from),
@@ -1842,11 +1851,10 @@ fn draw(f: &mut Frame, app: &App) {
         let st = &app.ctx["stats"];
         let window = st["window_tokens"].as_u64().unwrap_or(8192) as usize;
         let total_tokens = st["total_tokens"].as_u64().unwrap_or(0) as usize;
-        let pct = if window == 0 {
-            0
-        } else {
-            total_tokens * 100 / window
-        };
+        let pct = total_tokens
+            .saturating_mul(100)
+            .checked_div(window)
+            .unwrap_or(0);
         ctx_lines.push(Line::from(format!("预算 {total_tokens}/{window} ({pct}%)")));
         ctx_lines.push(Line::from(format!(
             "分层 L1 {} 条 / L2 {} 卡 / L3 {} tok / L4 {} 项",
@@ -2167,7 +2175,7 @@ fn draw_plugins(f: &mut Frame, app: &App) {
         .split(f.size());
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            " FeatherAgent v1.1.8 插件管理 ",
+            format!(" FeatherAgent v{} 插件管理 ", env!("CARGO_PKG_VERSION")),
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)

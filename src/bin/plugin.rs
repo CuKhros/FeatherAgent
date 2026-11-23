@@ -225,7 +225,7 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             }
             if let Some(rest) = last_user.split_once("SEARCH:").map(|(_, r)| r) {
                 return Ok((
-                    json!({"name":"web.search","arguments":{"query": rest.trim(),"count":3}})
+                    json!({"name":"web.search","arguments":{"query": rest.trim(),"count":"3"}})
                         .to_string(),
                     0,
                 ));
@@ -457,9 +457,7 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                             let e = openai_calls.entry(idx).or_default();
                             if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str())
                             {
-                                if e.0.is_empty() {
-                                    e.0.push_str(name);
-                                } else if !e.0.ends_with(name) {
+                                if !e.0.ends_with(name) {
                                     e.0.push_str(name);
                                 }
                             }

@@ -22,6 +22,7 @@ DIST=dist
 NAME=FeatherAgent-$VERSION-$ARCH
 STAGE=$DIST/.stage-$NAME
 
+scripts/version-check.sh
 [ "$SKIP_BUILD" -eq 1 ] || scripts/build-windows.sh
 
 for e in featheragent featheragent-tui featheragent-webui feather-plugin feather-storage; do
@@ -37,7 +38,7 @@ mkdir -p "$STAGE/$NAME/tools"
 cp tools/*.py "$STAGE/$NAME/tools/" 2>/dev/null || true
 mkdir -p "$STAGE/$NAME/docs"
 cp docs/*.md "$STAGE/$NAME/docs/" 2>/dev/null || true
-cp README.md "$STAGE/$NAME/"
+cp README.md LICENSE SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md CHANGELOG.md "$STAGE/$NAME/"
 cp docs/Windows测试说明.md "$STAGE/$NAME/START-HERE.md"
 
 # 体积门禁：内核 exe ≤ 8 MiB

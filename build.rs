@@ -8,8 +8,15 @@ fn main() {
     res.set_icon("assets/featheragent.ico");
     res.set("ProductName", "FeatherAgent");
     res.set("FileDescription", "FeatherAgent");
-    res.set("CompanyName", "FeatherAgent");
-    res.set("LegalCopyright", "FeatherAgent");
+    res.set("CompanyName", "FeatherAgent contributors");
+    // 版本资源与 Cargo 包版本保持一致，避免 Windows 文件属性落后于 Linux 二进制。
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    res.set("FileVersion", &version);
+    res.set("ProductVersion", &version);
+    res.set(
+        "LegalCopyright",
+        "Copyright (c) 2026 FeatherAgent contributors. MIT License.",
+    );
     // Linux 上交叉编译到 windows-gnu 时，MinGW 工具带目标前缀。
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
         let host = std::env::var("HOST").unwrap_or_default();

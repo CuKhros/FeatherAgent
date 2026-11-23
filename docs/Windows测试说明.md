@@ -1,15 +1,15 @@
-# FeatherAgent 1.1.9 · Windows x64 修复版测试说明
+# FeatherAgent 1.2.0-rc.1 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.1.9-windows-x64.zip`
-> 基线：v1.1.8 真机复测报告（P1/P2/P3/P4/§6.1）
-> 说明：v1.1.9 修复 P1 路径双重嵌套与 `/stop` 状态，新增 TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 被测包：`FeatherAgent-1.2.0-rc.1-windows-x64.zip`
+> 基线：v1.1.9 真机复测报告（Q1/Q2）
+> 说明：v1.2.0-rc.1 修复 TUI 取消状态拼写与 `web.search` 的 `count` 字符串容错，统一 Linux/Windows 版本与构建门禁，补齐 MIT 许可与公开仓库材料。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.1.9\
+D:\FeatherAgent-1.2.0-rc.1\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.1.9\
 ...
 ```
 
-看到 `serve ready: 1.1.9` 后再操作。
+看到 `serve ready: 1.2.0-rc.1` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.1.9
+cd D:\FeatherAgent-1.2.0-rc.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -126,18 +126,24 @@ echo "bench exit=$LASTEXITCODE"
 
 预期 `bench` 冲突时打印“检测到内核正在运行（pid N）”且 `exit=2`，不再被脚本吞成 0。
 
+Q1/Q2 小项：
+
+- `/stop` 后 TUI 状态栏应显示 `cancelled`（源码与二进制均已核对；`findstr /C:"cancelled" .\featheragent-tui.exe`）。
+- 模型把 `count` 写成字符串 `"5"` 时，`web.search` 仍返回 5 条；`tool.result.count` 与请求一致。
+- `web.search` 的 schema 声明是 `integer`，字符串容错只发生在内核转发层，不改变对外契约。
+
 ## 7. 已知边界
 
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.1.9 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.0-rc.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.1.9-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.0-rc.1-windows-x64.zip -Algorithm SHA256
 ```
 
-以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL。
+以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

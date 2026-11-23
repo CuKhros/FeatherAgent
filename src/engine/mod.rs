@@ -4,7 +4,7 @@
 //! provider / tool / storage 全部经 `PluginHost` 的进程外契约调用。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Weak};
@@ -25,7 +25,7 @@ use crate::log::LogStore;
 use crate::proto::types::{Event, EventKind};
 use crate::runtime::registry::Registry;
 use crate::runtime::{PluginError, PluginHost, PluginState};
-use crate::util::now_ms;
+use crate::util::{json_u64, now_ms};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -107,14 +107,14 @@ fn default_search_count() -> u32 {
 }
 
 impl Config {
-    pub fn load(path: &PathBuf) -> Self {
+    pub fn load(path: &Path) -> Self {
         std::fs::read(path)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
     }
 
-    pub fn save(&self, path: &PathBuf) -> std::io::Result<()> {
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).unwrap())?;
         crate::util::replace_file(&tmp, path)
@@ -183,7 +183,7 @@ impl Session {
     }
 
     pub fn info(&self) -> Value {
-        let holder = self.holder.read().clone();
+        let holder = *self.holder.read();
         let error = self.error.read().clone();
         json!({
             "id": self.id,
@@ -216,9 +216,11 @@ pub struct Kernel {
     config_lock: Mutex<()>,
     next_conn: AtomicU64,
     pub started: Instant,
-    index_tx: Mutex<Option<Sender<(String, Arc<Event>)>>>,
+    index_tx: IndexSender,
     pub warnings: RwLock<Vec<String>>,
 }
+
+type IndexSender = Mutex<Option<Sender<(String, Arc<Event>)>>>;
 
 struct ModelReply {
     text: String,
@@ -1549,8 +1551,16 @@ impl Kernel {
             let mut p = args.clone();
             if let Some(o) = p.as_object_mut() {
                 o.remove("allow_private");
-                if name == "web.search" && !o.contains_key("count") {
-                    o.insert("count".into(), json!(cfg.search_count));
+                // 小模型常把 integer 参数写成字符串；在转发给插件前归一化，
+                // 让插件和事件里看到的 count 类型保持稳定。
+                if matches!(name, "web.search" | "web.news") {
+                    let default = if name == "web.news" {
+                        8
+                    } else {
+                        cfg.search_count
+                    };
+                    let n = o.get("count").and_then(json_u64).unwrap_or(default as u64);
+                    o.insert("count".into(), json!(n));
                 }
             }
             let method = match name {
@@ -1589,7 +1599,7 @@ impl Kernel {
                     .ok_or_else(|| ToolExecError::Business("web.search 缺少 query".into()))?;
                 let count = args
                     .get("count")
-                    .and_then(|x| x.as_u64())
+                    .and_then(json_u64)
                     .map(|n| n as u32)
                     .unwrap_or(cfg.search_count);
                 let need_content = args
@@ -1624,13 +1634,13 @@ impl Kernel {
         if self.tool_degraded(name) {
             return Err(ToolExecError::Technical(format!("工具已熔断: {name}")));
         }
-        if name.starts_with("web.") {
-            if matches!(
+        if name.starts_with("web.")
+            && matches!(
                 name,
                 "web.search" | "web.fetch" | "web.news" | "web.suggest" | "web.status"
-            ) {
-                return self.execute_web_tool(cfg, name, args);
-            }
+            )
+        {
+            return self.execute_web_tool(cfg, name, args);
         }
         let plugin_name = if name.starts_with("tool.") {
             cfg.tool_plugin.clone()

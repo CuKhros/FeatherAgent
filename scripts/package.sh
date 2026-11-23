@@ -20,8 +20,9 @@ DIST=dist
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
+scripts/version-check.sh
 if [ "$SKIP_BUILD" -eq 0 ]; then
-  cargo build --release --bins
+  scripts/build-linux.sh
 fi
 BIN=target/release
 
@@ -32,7 +33,7 @@ CORE="$STAGE/featheragent-core"
 mkdir -p "$CORE/plugins"
 cp "$BIN/featheragent" "$BIN/feather-plugin" "$BIN/feather-storage" "$BIN/featheragent-tui" "$CORE/"
 cp -r plugins/* "$CORE/plugins/"
-cp README.md "$CORE/"
+cp README.md LICENSE SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md CHANGELOG.md "$CORE/"
 mkdir -p "$CORE/docs"
 cp docs/*.md "$CORE/docs/" 2>/dev/null || true
 
@@ -41,14 +42,14 @@ WEBUI="$STAGE/featheragent-webui"
 mkdir -p "$WEBUI/web"
 cp "$BIN/featheragent-webui" "$WEBUI/"
 cp web/index.html web/app.js web/style.css "$WEBUI/web/"
-cp README.md "$WEBUI/"
+cp README.md LICENSE SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md CHANGELOG.md "$WEBUI/"
 mkdir -p "$WEBUI/docs" && cp docs/*.md "$WEBUI/docs/" 2>/dev/null || true
 
 # ---------- plugins ----------
 PLUG="$STAGE/featheragent-plugins"
 mkdir -p "$PLUG/plugins"
 cp -r plugins/* "$PLUG/plugins/"
-cp README.md "$PLUG/"
+cp README.md LICENSE SECURITY.md CONTRIBUTING.md CODE_OF_CONDUCT.md CHANGELOG.md "$PLUG/"
 
 # 体积门禁：内核二进制 ≤ 8 MiB（§2.3；未测不写数字，超了直接失败）
 CORE_BIN_BYTES=$(stat -c %s "$CORE/featheragent")

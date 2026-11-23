@@ -184,8 +184,8 @@ fn balanced_end(text: &str, start: usize) -> Option<usize> {
     let mut depth = 0i32;
     let mut in_str = false;
     let mut escape = false;
-    for i in start..bytes.len() {
-        let b = bytes[i];
+    for (i, b) in bytes.iter().enumerate().skip(start) {
+        let b = *b;
         if in_str {
             if escape {
                 escape = false;
@@ -251,9 +251,9 @@ pub fn repair(s: &str) -> String {
             }
             ',' if !in_str => {
                 // 尾逗号：后面跳过空白后若是 } 或 ] 则不写
-                let mut look = chars.clone();
+                let look = chars.clone();
                 let mut next = None;
-                while let Some(x) = look.next() {
+                for x in look {
                     if !x.is_whitespace() {
                         next = Some(x);
                         break;

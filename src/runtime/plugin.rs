@@ -235,7 +235,6 @@ impl PluginProc {
         if let Some(req) = req {
             if let Some(tx) = self.streams.lock().get(&req) {
                 let _ = tx.send(v);
-                return;
             }
         }
     }
@@ -538,7 +537,7 @@ impl PluginHost {
     }
 
     pub fn stop_all(&self) {
-        for (_, p) in self.procs.read().iter() {
+        for p in self.procs.read().values() {
             p.terminate(Duration::from_millis(300));
         }
         self.procs.write().clear();

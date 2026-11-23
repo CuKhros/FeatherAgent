@@ -517,6 +517,14 @@ plugin.list / enable / disable / install
 - Markdown：TUI 与 WebUI 的助手消息按 Markdown 渲染；WebUI 先转义再插入固定标签，链接只允许 `http(s)`；TUI 按显示宽度折行，代码块/列表/引用保留结构。
 - 图标：WebUI 用 `web/logo.png` / `favicon.ico`；Windows 资源用 `assets/featheragent.ico` + `build.rs`（winres），GNU 工具链把 `resource.o` 直接交给链接器以规避无符号静态库不被拉取的问题。
 
+### 7.3.2 版本与构建对齐（v1.2.0-rc.1）
+
+- 版本源：`Cargo.toml` 的 `version`；`Cargo.lock` 根包、全部 `plugins/*/plugin.json` 与 WebUI `v{{VERSION}}` 必须一致，由 `scripts/version-check.sh` 作为打包前置门禁。
+- 构建：Linux `scripts/build-linux.sh`、Windows `scripts/build-windows.sh` 均使用 `--locked`；Windows 交叉编译额外使用静态 CRT 与目标前缀 `windres/ar`。
+- 资源：Windows `build.rs` 写图标、ProductName、CompanyName、`FileVersion`/`ProductVersion`、MIT 版权；Linux 无资源段，但二进制 `--version` 与 WebUI 版本同源。
+- 分发：Linux 三产物 tar.gz；Windows 5 exe 单 zip。两边都带 README 与 LICENSE，Windows 另带 SECURITY/CONTRIBUTING/CODE_OF_CONDUCT/CHANGELOG。
+- 开源材料：MIT LICENSE、SECURITY、CONTRIBUTING、CODE_OF_CONDUCT、CHANGELOG、CI（Linux fmt/clippy/test/build + Windows 交叉编译资源检查）与 CODEOWNERS。
+
 ### 7.4 WebUI 功能（v1.1.8）
 
 三栏布局：

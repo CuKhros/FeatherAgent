@@ -450,18 +450,12 @@ pub mod permission {
         /// 前端 `tool.confirm / deny` 调到这里；返回是否被授权。
         pub fn resolve(&self, token: &str, allow: bool) -> bool {
             let mut p = self.pending.lock();
+            let found = p.contains_key(token);
             if let Some(e) = p.get_mut(token) {
                 e.allowed = Some(allow);
-                let ok = allow;
-                if !allow {
-                    p.remove(token);
-                } else {
-                    p.remove(token);
-                }
-                ok
-            } else {
-                false
             }
+            p.remove(token);
+            found && allow
         }
 
         /// 人类可读的拒绝原因，用于 `permission.denied` 事件。
