@@ -770,6 +770,43 @@ fn stop_preserves_partial_output_and_session_remains_usable() {
 }
 
 #[test]
+#[ignore = "需要公网访问 Bing；发布前手动运行验证本地搜索链路"]
+fn local_web_search_tool_via_kernel() {
+    let (_h, conn) = start("websearch", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "sweb"}))
+        .unwrap();
+    let seen = send_and_wait(
+        &conn,
+        "sweb",
+        "SEARCH:rust markdown",
+        Duration::from_secs(40),
+    );
+    assert!(
+        seen.iter().any(|v| {
+            is_kind(v, "tool.call", "sweb")
+                && v.pointer("/params/payload/name").and_then(|x| x.as_str()) == Some("web.search")
+        }),
+        "应产生 web.search 工具调用"
+    );
+    let result = seen
+        .iter()
+        .find(|v| is_kind(v, "tool.result", "sweb"))
+        .and_then(|v| v.pointer("/params/payload/result"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert!(
+        result
+            .get("results")
+            .and_then(|x| x.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
+        "本地搜索结果不应为空：{result}"
+    );
+    assert!(last_model_text(&seen).contains("已完成"));
+}
+
+#[test]
 fn inject_steers_running_turn() {
     let (_h, conn) = start("steer", |_| {});
     conn.client

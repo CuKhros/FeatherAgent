@@ -1,0 +1,12 @@
+{
+  "manifest": {
+    "name": "search",
+    "version": "1.1.9",
+    "api": ">=1.0 <2.0",
+    "capabilities": ["search", "search.fetch", "search.news", "search.suggest"],
+    "permissions": ["net:public"],
+    "category": "search"
+  },
+  "program": "../../feather-plugin",
+  "args": ["search"]
+}

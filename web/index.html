@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FeatherAgent</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/logo-tile.png">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header>
-    <div class="brand">FeatherAgent <span class="ver">v1.1.8</span></div>
+    <div class="brand"><img class="brand-logo" src="/logo.png" alt="FeatherAgent">FeatherAgent <span class="ver">v1.1.9</span></div>
     <div class="meta">
       <span id="session-label">未选择会话</span>
       <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
@@ -127,21 +129,22 @@
             <div class="settings-grid">
               <label>提供方
                 <select id="cfg-search-provider">
-                  <option value="deepseek">DeepSeek Search API</option>
+                  <option value="local">本地搜索（免费，无需 Key）</option>
+                  <option value="deepseek">DeepSeek Search API（可选）</option>
                   <option value="none">关闭</option>
                 </select>
               </label>
-              <label>API Base URL
+              <label>API Base URL（仅 DeepSeek）
                 <input id="cfg-search-base-url" placeholder="https://api.deepseek.com" autocomplete="off">
               </label>
-              <label>API Key 环境变量
+              <label>API Key 环境变量（仅 DeepSeek）
                 <input id="cfg-search-key-env" placeholder="DEEPSEEK_API_KEY" autocomplete="off">
               </label>
               <label>单次结果数
                 <input id="cfg-search-count" type="number" min="1" max="20" step="1" value="5">
               </label>
             </div>
-            <span id="search-status" class="form-hint">密钥只从环境变量读取，不落盘、不进日志。</span>
+            <span id="search-status" class="form-hint">本地模式无需密钥；DeepSeek 密钥只从环境变量读取，不落盘、不进日志。</span>
           </div>
 
           <div class="settings-actions">

@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.1.8**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.1.9**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.1.8","contract":"1.0","transport":"pipe",
+  "version":"1.1.9","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -322,4 +322,4 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
 - `chat.inject` 先写 `user.message`（`source:"steer"`、`during_turn:true`），再打断当前生成；若会话空闲返回业务错误，请改用 `chat.send`。
 - 压缩写 `context.compacted` 事件（码 24），payload 含 `summary` / `covers_until_seq` / `compacted_events` / `before_chars` / `after_chars`；模型视图只保留 cutoff 之后的事件，旧原文仍在 append-only 日志。
-- `web.search` / `web.fetch` 在 `search_provider=none` 或 API key 环境变量为空时不会出现在 `available_tools`；网页返回一律 `untrusted:true`。DeepSeek Search API 不是免费，详见 `docs/v1.1.8-Windows修复说明.md` §5。
+- `web.search` / `web.fetch` / `web.news` / `web.suggest` / `web.status` 在 `search_provider=none` 时不出现；`local` 不需要 key，`deepseek` 仍需 key。网页返回一律 `untrusted:true`。本地搜索为零 Key，DeepSeek 计费详见 `docs/v1.1.9-Windows修复说明.md` §3。

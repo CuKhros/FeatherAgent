@@ -28,6 +28,9 @@ use featheragent::util::{base64, random_token, sha1, Args};
 const INDEX_HTML: &str = include_str!("../../web/index.html");
 const APP_JS: &str = include_str!("../../web/app.js");
 const STYLE_CSS: &str = include_str!("../../web/style.css");
+const FAVICON_ICO: &[u8] = include_bytes!("../../web/favicon.ico");
+const LOGO_PNG: &[u8] = include_bytes!("../../web/logo.png");
+const LOGO_TILE_PNG: &[u8] = include_bytes!("../../web/logo-tile.png");
 
 struct Ctx {
     port: u16,
@@ -291,6 +294,9 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
             "text/css; charset=utf-8",
             STYLE_CSS.as_bytes(),
         ),
+        ("GET", "/favicon.ico") => respond(&mut stream, 200, "image/x-icon", FAVICON_ICO),
+        ("GET", "/logo.png") => respond(&mut stream, 200, "image/png", LOGO_PNG),
+        ("GET", "/logo-tile.png") => respond(&mut stream, 200, "image/png", LOGO_TILE_PNG),
         ("GET", "/events") => {
             let Some(t) = query_get(&req.query, "token") else {
                 return respond(&mut stream, 401, "text/plain", b"missing token");
@@ -455,12 +461,17 @@ fn ws_bridge(mut stream: TcpStream, req: Req, ctx: Arc<Ctx>) -> std::io::Result<
     });
     let events = conn.events;
     let etx = tx.clone();
-    let ev_thread = thread::spawn(move || {
-        while let Ok(v) = events.recv_timeout(Duration::from_secs(15)) {
-            let line = serde_json::to_string(&v).unwrap_or_default();
-            if etx.send(line).is_err() {
-                break;
+    let ev_thread = thread::spawn(move || loop {
+        match events.recv_timeout(Duration::from_secs(15)) {
+            Ok(v) => {
+                let line = serde_json::to_string(&v).unwrap_or_default();
+                if etx.send(line).is_err() {
+                    break;
+                }
             }
+            // 空闲超时不能退出：页面可能长时间不操作，之后仍要接收新回合事件。
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     });
 

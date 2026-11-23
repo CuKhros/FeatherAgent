@@ -29,7 +29,8 @@ header {
   background: #0b0d11;
   border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 700; letter-spacing: .4px; }
+.brand { font-weight: 700; letter-spacing: .4px; display: flex; align-items: center; gap: 7px; }
+.brand-logo { width: 22px; height: 22px; object-fit: contain; image-rendering: auto; }
 .ver { color: var(--accent); font-weight: 400; font-size: 12px; }
 .meta { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -239,3 +240,22 @@ button.danger { background: #5a2027; border-color: #8d303a; }
   header { gap: 8px; }
   .meta#conn { display: none; }
 }
+
+/* Markdown 渲染（仅助手消息） */
+.msg.md { white-space: normal; max-width: 96%; }
+.msg.md p { margin: .35em 0; }
+.msg.md h1, .msg.md h2, .msg.md h3, .msg.md h4 { margin: .55em 0 .3em; color: #eaf2f8; line-height: 1.35; }
+.msg.md h1 { font-size: 1.25em; }
+.msg.md h2 { font-size: 1.15em; }
+.msg.md h3 { font-size: 1.05em; }
+.msg.md strong { color: #f0f6fc; }
+.msg.md em { color: #c8d3df; }
+.msg.md a { color: #7fd3df; text-decoration: none; border-bottom: 1px dotted #4b8e98; }
+.msg.md a:hover { color: #a9e7ef; }
+.msg.md ul, .msg.md ol { margin: .35em 0 .35em 1.25em; padding: 0; }
+.msg.md li { margin: .15em 0; }
+.msg.md blockquote { margin: .45em 0; padding: .2em .7em; border-left: 3px solid #3f7f89; color: #b9c6d3; background: #151b23; }
+.msg.md hr { border: 0; border-top: 1px solid var(--line); margin: .7em 0; }
+.msg.md pre.code { margin: .5em 0; padding: .65em .8em; overflow-x: auto; background: #0b0f14; border: 1px solid #2b3541; border-radius: 6px; }
+.msg.md pre.code code { font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; color: #d8e2ec; white-space: pre; }
+.msg.md code.inline { padding: .1em .35em; border-radius: 4px; background: #10161d; border: 1px solid #2a3542; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; color: #e5c07b; }

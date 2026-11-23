@@ -79,11 +79,85 @@
     $("#session-label").textContent = current ? "会话 " + current : "未选择会话";
   }
 
+  function mdInline(src) {
+    let t = esc(src);
+    t = t.replace(/`([^`]+)`/g, '<code class="inline">$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+      if (!/^https?:\/\//i.test(url)) return m;
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
+    return t;
+  }
+
+  function renderMarkdown(text) {
+    const lines = String(text || "").replace(/\r/g, "").split("\n");
+    const out = [];
+    let para = [];
+    let list = null;
+    let inCode = false;
+    const flushPara = () => {
+      if (para.length) {
+        out.push("<p>" + para.map(mdInline).join("<br>") + "</p>");
+        para = [];
+      }
+    };
+    const closeList = () => {
+      if (list) { out.push(`</${list}>`); list = null; }
+    };
+    const ensureList = (kind) => {
+      flushPara();
+      if (list !== kind) { closeList(); out.push(`<${kind}>`); list = kind; }
+    };
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/g, "");
+      if (/^```/.test(line.trim())) {
+        flushPara(); closeList();
+        if (!inCode) {
+          const lang = line.trim().slice(3).trim();
+          out.push(`<pre class="code">${lang ? `<code class="lang-${esc(lang)}">` : "<code>"}`);
+          inCode = true;
+        } else {
+          out.push("</code></pre>");
+          inCode = false;
+        }
+        continue;
+      }
+      if (inCode) { out.push(esc(raw) + "\n"); continue; }
+      if (!line.trim()) { flushPara(); closeList(); continue; }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        flushPara(); closeList();
+        out.push(`<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`);
+        continue;
+      }
+      if (/^\s*([-*_])\1\1+\s*$/.test(line)) {
+        flushPara(); closeList(); out.push("<hr>"); continue;
+      }
+      const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (ul) { ensureList("ul"); out.push(`<li>${mdInline(ul[1])}</li>`); continue; }
+      const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ol) { ensureList("ol"); out.push(`<li>${mdInline(ol[1])}</li>`); continue; }
+      const quote = line.match(/^\s*>\s?(.*)$/);
+      if (quote) {
+        flushPara(); closeList();
+        out.push(`<blockquote>${mdInline(quote[1])}</blockquote>`);
+        continue;
+      }
+      para.push(line);
+    }
+    flushPara(); closeList();
+    if (inCode) out.push("</code></pre>");
+    return out.length ? out.join("") : esc(text);
+  }
+
   function addMessage(role, text) {
     if (!text) return;
+    const markdown = role === "assistant";
     const div = document.createElement("div");
-    div.className = "msg " + role;
-    div.innerHTML = `<span class="role">${esc(role)}</span>${esc(text)}`;
+    div.className = "msg " + role + (markdown ? " md" : "");
+    div.innerHTML = `<span class="role">${esc(role)}</span>${markdown ? renderMarkdown(text) : esc(text)}`;
     $("#messages").appendChild(div);
     $("#messages").scrollTop = $("#messages").scrollHeight;
   }
@@ -612,15 +686,23 @@
       $("#cfg-max-turns").value = String(cfg.max_turns ?? 6);
       $("#cfg-auto-allow-safe").checked = cfg.auto_allow_safe !== false;
       $("#cfg-workspace-root").value = cfg.workspace_root || "";
-      $("#cfg-search-provider").value = cfg.search_provider || "deepseek";
+      $("#cfg-search-provider").value = cfg.search_provider || "local";
       $("#cfg-search-base-url").value = cfg.search_base_url || "https://api.deepseek.com";
       $("#cfg-search-key-env").value = cfg.search_api_key_env || "DEEPSEEK_API_KEY";
       $("#cfg-search-count").value = String(cfg.search_count ?? 5);
       try {
         const st = await rpc("search.status");
-        $("#search-status").textContent = st.configured
-          ? `已配置：${st.key_env} 已设置；Search/Fetch 按成功请求计费（5 元/1000 次）`
-          : `未配置：设置环境变量 ${st.key_env} 后重启 serve；Search/Fetch 按成功请求计费，不是免费额度`;
+        if (st.provider === "local") {
+          $("#search-status").textContent = st.configured
+            ? `本地搜索可用：必应 / DuckDuckGo / Wikipedia / Hacker News / GitHub，免费且无需 Key`
+            : "本地搜索插件未就绪，请检查插件管理页";
+        } else if (st.provider === "none") {
+          $("#search-status").textContent = "联网搜索已关闭；模型不会获得任何联网工具";
+        } else {
+          $("#search-status").textContent = st.configured
+            ? `已配置：${st.key_env} 已设置；Search/Fetch 按成功请求计费（5 元/1000 次）`
+            : `未配置：设置环境变量 ${st.key_env} 后重启 serve，或切换为本地搜索`;
+        }
       } catch (e) {
         $("#search-status").textContent = "读取联网状态失败：" + e.message;
       }

@@ -7,11 +7,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXE = os.path.join(ROOT, "featheragent.exe" if os.name == "nt" else "featheragent")
 DEFAULT_ALLOW = "tool.fs.write,tool.shell"
 ALLOW = os.environ.get("FEATHER_ALLOW", DEFAULT_ALLOW)
+# v1.1.8 起 workspace_root 是项目容器，默认项目是 workspace/default。
+# 如需测其他项目，设置 FEATHER_PROJECT_DIR 指向该项目目录。
+WORKSPACE = os.environ.get(
+    "FEATHER_PROJECT_DIR", os.path.join(ROOT, "workspace", "default")
+)
+os.makedirs(WORKSPACE, exist_ok=True)
+PROBE = os.path.join(WORKSPACE, "s3-probe.txt")
+if not os.path.exists(PROBE):
+    with open(PROBE, "w", encoding="utf-8") as f:
+        f.write("FEATHER_S3_OK_42")
+RUN_ID = str(int(time.time() * 1000))
 
 
 def run(session, text, timeout=180, allow=ALLOW):
-    """跑一次 chat，返回 (events, 全部输出行, 耗时)"""
+    """跑一次 chat，返回 (events, 全部输出行, 耗时)。每次用独立 session，避免历史累积污染。"""
     t0 = time.time()
+    session = f"{session}-{RUN_ID}"
     args = [EXE, "chat", "--root", ROOT, "--session", session, "--text", text]
     if allow:
         args += ["--allow", allow]
@@ -63,6 +75,7 @@ TASKS = [
     ("t6-missing", "请读取 workspace/no-such-file-xyz.txt 并告诉我内容。", "read", "不存在", True),
 ]
 
+print(f"项目工作区: {WORKSPACE}")
 print(f"{'任务':12s} {'触发工具':22s} {'参数':28s} {'工具执行':10s} {'答复正确':8s} {'耗时':>6s}")
 print("-" * 95)
 
@@ -146,5 +159,5 @@ print(f"  最终答复正确          : {stat['final_ok']}  ({stat['final_ok']}/
 print(f"不应调用工具的任务     : {stat['no_tool_cases']}，正确未调用 {stat['no_tool_ok']}")
 
 # 检查写入是否真的落盘
-w1 = os.path.join(ROOT, "workspace", "w1.txt")
+w1 = os.path.join(WORKSPACE, "w1.txt")
 print(f"\n写入校验 workspace/w1.txt : {'存在 -> ' + repr(open(w1, encoding='utf-8').read()) if os.path.exists(w1) else '❌ 不存在'}")

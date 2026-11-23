@@ -510,6 +510,13 @@ plugin.list / enable / disable / install
 - GUI 迭代节奏与内核解耦（改 UI 不必发内核）
 - 第三方可基于前端契约做自己的前端（VS Code 插件、Web 面板、移动端）
 
+### 7.3.1 联网搜索与表现层（v1.1.9）
+
+- 本地搜索：内置 `search` 插件（`feather-plugin search`），无需 API Key。搜索引擎适配必应 HTML、DuckDuckGo HTML、Wikipedia API、Hacker News Algolia、GitHub Repo Search；`news` 用 Google News RSS 并在不可达时回落中新网 RSS；`fetch` 把公开网页转纯文本；`suggest` 用 DDG/百度联想。默认 `search_provider=local`，DeepSeek 保留为可选后端。
+- 安全：`fetch` 仅 http(s)/80/443，拒绝 localhost、`.local/.internal`、私有/回环/链路本地/CGNAT/保留地址；DNS 解析到内网同样拒绝；内核在本地模式移除模型传入的 `allow_private`。所有结果标 `untrusted:true`。
+- Markdown：TUI 与 WebUI 的助手消息按 Markdown 渲染；WebUI 先转义再插入固定标签，链接只允许 `http(s)`；TUI 按显示宽度折行，代码块/列表/引用保留结构。
+- 图标：WebUI 用 `web/logo.png` / `favicon.ico`；Windows 资源用 `assets/featheragent.ico` + `build.rs`（winres），GNU 工具链把 `resource.o` 直接交给链接器以规避无符号静态库不被拉取的问题。
+
 ### 7.4 WebUI 功能（v1.1.8）
 
 三栏布局：

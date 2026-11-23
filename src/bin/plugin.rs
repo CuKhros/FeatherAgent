@@ -118,6 +118,12 @@ fn manifest(role: &str) -> PluginManifest {
             vec!["fs:read", "fs:write", "exec:shell"],
             "tool",
         ),
+        "search" => (
+            "search",
+            vec!["search", "search.fetch", "search.news", "search.suggest"],
+            vec!["net:public"],
+            "search",
+        ),
         _ => (role, vec![], vec![], "tool"),
     };
     PluginManifest {
@@ -145,6 +151,7 @@ fn handle(
         "mock" => provider_mock(method, params, io, id),
         "ollama" => provider_ollama(method, params, io, id),
         "tool" => tools(method, params),
+        "search" => search_plugin(method, params),
         _ => Err(format!("unknown role {role}")),
     };
     match res {
@@ -157,6 +164,18 @@ fn handle(
 }
 
 // ---------------- mock provider（确定性，供 e2e / 门禁） --------------
+
+fn search_plugin(method: &str, params: &Value) -> Result<Value, String> {
+    match method {
+        "probe" | "status" => Ok(featheragent::local_search::status()),
+        "search" => featheragent::local_search::search(params),
+        "news" => featheragent::local_search::news(params),
+        "fetch" => featheragent::local_search::fetch(params),
+        "suggest" => featheragent::local_search::suggest(params),
+        "embed" => Ok(json!({"vector": [], "dim": 0, "model": "local-search"})),
+        _ => Err(format!("search: 未知方法 {method}")),
+    }
+}
 
 fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<Value, String> {
     let req = params.get("req").and_then(|x| x.as_u64()).unwrap_or(id);
@@ -203,6 +222,13 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             }
             if let Some(rest) = last_user.split_once("TOOL:").map(|(_, r)| r) {
                 return Ok((rest.trim().to_string(), 0));
+            }
+            if let Some(rest) = last_user.split_once("SEARCH:").map(|(_, r)| r) {
+                return Ok((
+                    json!({"name":"web.search","arguments":{"query": rest.trim(),"count":3}})
+                        .to_string(),
+                    0,
+                ));
             }
             if let Some(rest) = last_user.split_once("READ:").map(|(_, r)| r) {
                 return Ok((
@@ -670,12 +696,22 @@ fn tool_base(workspace: &Path, user: &str) -> (PathBuf, String) {
         }
     }
     if norm == "workspace" {
-        (workspace.to_path_buf(), ".".to_string())
-    } else if let Some(rest) = norm.strip_prefix("workspace/") {
-        (workspace.to_path_buf(), rest.to_string())
-    } else {
-        (workspace.to_path_buf(), norm)
+        return (workspace.to_path_buf(), ".".to_string());
     }
+    if let Some(rest) = norm.strip_prefix("workspace/") {
+        norm = rest.to_string();
+    }
+    // 项目级工作区：模型有时会把当前项目名写进 path（proj-a/hello.txt）。
+    // 路径已经以项目根为基准，再叠一层会变成 proj-a/proj-a/hello.txt。
+    // 只去掉「当前项目名 + 路径分隔符」这一精确前缀；同名子目录不能被访问，
+    // 但这是可接受的歧义消解，文档与 schema 已明确“path 相对项目根”。
+    if let Some(project) = workspace.file_name().and_then(|x| x.to_str()) {
+        let prefix = format!("{project}/");
+        if norm.len() > prefix.len() && norm.starts_with(&prefix) {
+            norm = norm[prefix.len()..].to_string();
+        }
+    }
+    (workspace.to_path_buf(), norm)
 }
 
 fn safe_path(workspace: &Path, user: &str) -> Result<PathBuf, String> {
@@ -723,6 +759,18 @@ mod tests {
             assert_eq!(base, project, "base for {p}");
             assert_eq!(rel, "a.txt", "rel for {p}");
         }
+        for p in [
+            "proj/b.txt",
+            "workspace/proj/b.txt",
+            "/workspace/proj/b.txt",
+        ] {
+            let (base, rel) = tool_base(project, p);
+            assert_eq!(base, project, "base for {p}");
+            assert_eq!(rel, "b.txt", "project prefix should be removed for {p}");
+        }
+        // 非项目名前缀不应被误删
+        let (_, rel) = tool_base(project, "proj-data/c.txt");
+        assert_eq!(rel, "proj-data/c.txt");
         let (base, rel) = tool_base(project, "/etc/passwd");
         assert_eq!(base, project);
         assert_eq!(rel, "/etc/passwd");

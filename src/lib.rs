@@ -14,6 +14,7 @@ pub mod context;
 pub mod engine;
 pub mod governance;
 pub mod ipc;
+pub mod local_search;
 pub mod log;
 pub mod net;
 pub mod proto;

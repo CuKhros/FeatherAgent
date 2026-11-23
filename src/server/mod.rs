@@ -688,17 +688,36 @@ fn dispatch(
         }
         "search.status" => {
             let cfg = kernel.cfg.read().clone();
-            let configured = std::env::var(&cfg.search_api_key_env)
-                .ok()
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false);
+            let provider = cfg.search_provider.trim().to_string();
+            let configured = match provider.as_str() {
+                "local" => kernel.plugins.get("search").is_ok(),
+                "deepseek" => std::env::var(&cfg.search_api_key_env)
+                    .ok()
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false),
+                _ => false,
+            };
+            let (billing, engines) = if provider == "local" {
+                (
+                    "本地搜索免费：直接抓取公开网页，无 API Key；目标站点限速与 robots/ToS 由使用者遵守",
+                    json!(["bing", "duckduckgo", "wikipedia", "hackernews", "github"]),
+                )
+            } else {
+                (
+                    "DeepSeek Search/Fetch 每 1,000 次成功请求 5 元；服务端工具搜索不单独计费但消耗模型 token",
+                    json!([]),
+                )
+            };
             Ok(json!({
-                "provider": cfg.search_provider,
+                "provider": provider,
                 "base_url": cfg.search_base_url,
                 "key_env": cfg.search_api_key_env,
                 "count": cfg.search_count,
                 "configured": configured,
-                "billing": "DeepSeek Search/Fetch 每 1,000 次成功请求 5 元；服务端工具搜索不单独计费但消耗模型 token",
+                "billing": billing,
+                "engines": engines,
+                "methods": ["search", "news", "fetch", "suggest", "status"],
+                "api_key_required": provider == "deepseek",
             }))
         }
         "provider.models" => {

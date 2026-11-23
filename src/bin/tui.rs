@@ -452,16 +452,29 @@ impl App {
             status: "读取配置成功；←/↑↓ 侧栏，Tab 表单，Ctrl+S 保存".into(),
             models_hint: "正在读取模型列表…".into(),
             search_hint: match self.conn.client.call("search.status", json!({})) {
-                Ok(v) => format!(
-                    "联网：{} · {} · {}",
-                    v["provider"].as_str().unwrap_or("?"),
-                    v["key_env"].as_str().unwrap_or("?"),
-                    if v["configured"].as_bool().unwrap_or(false) {
-                        "已配置"
+                Ok(v) => {
+                    let p = v["provider"].as_str().unwrap_or("?");
+                    if p == "local" {
+                        if v["configured"].as_bool().unwrap_or(false) {
+                            "联网：local · 本地公开网页 · 免费无需 Key".to_string()
+                        } else {
+                            "联网：local · 插件未就绪".to_string()
+                        }
+                    } else if p == "none" {
+                        "联网：已关闭".to_string()
                     } else {
-                        "未配置"
+                        format!(
+                            "联网：{} · {} · {}",
+                            p,
+                            v["key_env"].as_str().unwrap_or("?"),
+                            if v["configured"].as_bool().unwrap_or(false) {
+                                "已配置"
+                            } else {
+                                "未配置"
+                            }
+                        )
                     }
-                ),
+                }
                 Err(e) => format!("联网状态读取失败: {e}"),
             },
             nav: Vec::new(),
@@ -1407,6 +1420,277 @@ fn event_message(kind: &str, p: &Value) -> Option<(String, String)> {
     Some(text)
 }
 
+fn md_inline(input: &str, color: Color) -> Vec<(String, Style)> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out: Vec<(String, Style)> = Vec::new();
+    let mut buf = String::new();
+    let base = Style::default().fg(color);
+    let mut i = 0usize;
+    let flush = |buf: &mut String, out: &mut Vec<(String, Style)>| {
+        if !buf.is_empty() {
+            out.push((std::mem::take(buf), base));
+        }
+    };
+    while i < chars.len() {
+        if chars[i] == '`' {
+            if let Some(end) = chars[i + 1..].iter().position(|c| *c == '`') {
+                flush(&mut buf, &mut out);
+                let text: String = chars[i + 1..i + 1 + end].iter().collect();
+                out.push((text, Style::default().fg(Color::Yellow)));
+                i += end + 2;
+                continue;
+            }
+        }
+        if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            if let Some(end) = chars[i + 2..]
+                .windows(2)
+                .position(|w| w[0] == '*' && w[1] == '*')
+            {
+                flush(&mut buf, &mut out);
+                let text: String = chars[i + 2..i + 2 + end].iter().collect();
+                out.push((
+                    text,
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ));
+                i += end + 4;
+                continue;
+            }
+        }
+        if (chars[i] == '*' || chars[i] == '_')
+            && (i == 0 || chars[i - 1] != chars[i])
+            && i + 1 < chars.len()
+            && chars[i + 1] != chars[i]
+        {
+            let marker = chars[i];
+            if let Some(end) = chars[i + 1..].iter().position(|c| *c == marker) {
+                if end > 0 {
+                    flush(&mut buf, &mut out);
+                    let text: String = chars[i + 1..i + 1 + end].iter().collect();
+                    out.push((
+                        text,
+                        Style::default().fg(color).add_modifier(Modifier::ITALIC),
+                    ));
+                    i += end + 2;
+                    continue;
+                }
+            }
+        }
+        if chars[i] == '[' {
+            if let Some(close) = chars[i + 1..].iter().position(|c| *c == ']') {
+                let label: String = chars[i + 1..i + 1 + close].iter().collect();
+                let after = i + close + 2;
+                if after < chars.len() && chars[after] == '(' {
+                    if let Some(paren) = chars[after + 1..].iter().position(|c| *c == ')') {
+                        let url: String = chars[after + 1..after + 1 + paren].iter().collect();
+                        flush(&mut buf, &mut out);
+                        if url.starts_with("http://") || url.starts_with("https://") {
+                            out.push((label, Style::default().fg(Color::Blue)));
+                            out.push((format!(" ({url})"), Style::default().fg(Color::DarkGray)));
+                            i = after + paren + 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        buf.push(chars[i]);
+        i += 1;
+    }
+    flush(&mut buf, &mut out);
+    out
+}
+
+fn md_line(
+    out: &mut Vec<Line<'static>>,
+    prefix: &str,
+    cont: &str,
+    segs: &[(String, Style)],
+    width: usize,
+    base: Style,
+) {
+    let width = width.max(1);
+    let mut chars: Vec<(char, Style)> = prefix.chars().map(|c| (c, base)).collect();
+    let mut w = prefix
+        .chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum::<usize>();
+    let mut span_start = 0usize;
+    let flush = |chars: &mut Vec<(char, Style)>, out: &mut Vec<Line<'static>>| {
+        if chars.is_empty() {
+            out.push(Line::from(""));
+            return;
+        }
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut cur = String::new();
+        let mut cur_style = chars[0].1;
+        for (ch, style) in chars.iter() {
+            if *style != cur_style && !cur.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut cur), cur_style));
+                cur_style = *style;
+            }
+            cur.push(*ch);
+        }
+        if !cur.is_empty() {
+            spans.push(Span::styled(cur, cur_style));
+        }
+        out.push(Line::from(spans));
+        chars.clear();
+    };
+    for (ch, style) in segs
+        .iter()
+        .flat_map(|(s, st)| s.chars().map(move |c| (c, *st)))
+    {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if !chars.is_empty() && w + cw > width {
+            flush(&mut chars, out);
+            chars = cont
+                .chars()
+                .map(|c| (c, Style::default().fg(Color::DarkGray)))
+                .collect();
+            w = cont
+                .chars()
+                .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+                .sum::<usize>();
+        }
+        chars.push((ch, style));
+        w += cw;
+        span_start += 1;
+    }
+    let _ = span_start;
+    flush(&mut chars, out);
+}
+
+fn markdown_lines(text: &str, width: usize, color: Color) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    let mut in_code = false;
+    for raw in text.replace("\t", "    ").lines() {
+        let line = raw.trim_end();
+        if line.trim_start().starts_with("```") {
+            if in_code {
+                in_code = false;
+                out.push(Line::from(Span::styled(
+                    "╰─",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                in_code = true;
+                let lang = line.trim().trim_start_matches("```").trim();
+                out.push(Line::from(Span::styled(
+                    if lang.is_empty() {
+                        "╭─ code".to_string()
+                    } else {
+                        format!("╭─ {lang}")
+                    },
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            continue;
+        }
+        if in_code {
+            md_line(
+                &mut out,
+                "│ ",
+                "│ ",
+                &[(line.to_string(), Style::default().fg(Color::Yellow))],
+                width,
+                Style::default().fg(Color::Yellow),
+            );
+            continue;
+        }
+        if line.is_empty() {
+            out.push(Line::from(""));
+            continue;
+        }
+        if line.chars().all(|c| c == '-' || c == '*' || c == '_') {
+            out.push(Line::from(Span::styled(
+                "─".repeat(width.min(120)),
+                Style::default().fg(Color::DarkGray),
+            )));
+            continue;
+        }
+        let heading = line.chars().take_while(|c| *c == '#').count();
+        if (1..=6).contains(&heading) && line.chars().nth(heading) == Some(' ') {
+            let content = line[heading + 1..].to_string();
+            md_line(
+                &mut out,
+                "▌ ",
+                "  ",
+                &md_inline(&content, Color::White),
+                width,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            );
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let ordered = {
+            let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let n = digits.len();
+            if n <= 2 && n < trimmed.len() && trimmed[n..].starts_with(". ") {
+                Some((digits, trimmed[n + 2..].to_string()))
+            } else {
+                None
+            }
+        };
+        if let Some((num, rest)) = ordered {
+            let prefix = format!("{num}. ");
+            let cont = " ".repeat(prefix.chars().count());
+            md_line(
+                &mut out,
+                &prefix,
+                &cont,
+                &md_inline(&rest, color),
+                width,
+                Style::default().fg(color),
+            );
+            continue;
+        }
+        if let Some(rest) = line
+            .trim_start()
+            .strip_prefix("- ")
+            .or_else(|| line.trim_start().strip_prefix("* "))
+            .or_else(|| line.trim_start().strip_prefix("+ "))
+        {
+            md_line(
+                &mut out,
+                "• ",
+                "  ",
+                &md_inline(rest, color),
+                width,
+                Style::default().fg(color),
+            );
+            continue;
+        }
+        if let Some(rest) = line.trim_start().strip_prefix("> ") {
+            md_line(
+                &mut out,
+                "│ ",
+                "│ ",
+                &md_inline(rest, Color::DarkGray),
+                width,
+                Style::default().fg(Color::DarkGray),
+            );
+            continue;
+        }
+        md_line(
+            &mut out,
+            "",
+            "",
+            &md_inline(line, color),
+            width,
+            Style::default().fg(color),
+        );
+    }
+    if in_code {
+        out.push(Line::from(Span::styled(
+            "╰─",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    out
+}
+
 fn wrap_display(prefix: &str, text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();
@@ -1452,7 +1736,8 @@ fn draw(f: &mut Frame, app: &App) {
         Focus::Chat => "对话",
     };
     let head = format!(
-        " FeatherAgent v1.1.8  {}  会话: {}  状态: {}  |  {}",
+        " FeatherAgent v{}  {}  会话: {}  状态: {}  |  {}",
+        env!("CARGO_PKG_VERSION"),
         mode,
         app.session.as_deref().unwrap_or("-"),
         app.state,
@@ -1518,12 +1803,20 @@ fn draw(f: &mut Frame, app: &App) {
             "系统" => Color::DarkGray,
             _ => Color::White,
         };
-        let prefix = format!("{role}: ");
-        for chunk in wrap_display(&prefix, text, width) {
+        if role == "助手" {
             lines.push(Line::from(Span::styled(
-                chunk,
+                "助手:".to_string(),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             )));
+            lines.extend(markdown_lines(text, width, color));
+        } else {
+            let prefix = format!("{role}: ");
+            for chunk in wrap_display(&prefix, text, width) {
+                lines.push(Line::from(Span::styled(
+                    chunk,
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )));
+            }
         }
     }
     let h = cols[1].height.saturating_sub(2) as usize;
@@ -1942,6 +2235,26 @@ mod tests {
         assert_eq!(display_width("你好"), 4);
         assert_eq!(display_width("a你b"), 4);
         assert_eq!(display_width("abc"), 3);
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn markdown_headings_lists_code_are_rendered_without_markers() {
+        let text = "# 标题\n\n- **粗体** 与 `code`\n1. 第一项\n\n```rust\nfn main() {}\n```\n\n[链接](https://example.com)";
+        let lines = markdown_lines(text, 30, Color::Cyan);
+        let joined: String = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("标题"));
+        assert!(!joined.contains("**"));
+        assert!(!joined.contains("`code`"));
+        assert!(joined.contains("code"));
+        assert!(joined.contains("fn main()"));
+        assert!(joined.contains("https://example.com"));
+        assert!(!joined.contains("](https://"));
+        assert!(joined.contains("1. 第一项"));
+        assert!(joined.contains("╰─"));
     }
 
     #[test]
