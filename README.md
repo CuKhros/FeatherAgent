@@ -98,7 +98,7 @@ scripts/build-linux.sh                                  # version gate + --locke
 
 Factory plugins live in `plugins/` (`provider-mock` / `provider-ollama` / `tool` / `storage` / `search`). `serve` scans `<install root>/plugins` and defaults to `provider-mock`. To use real Ollama: start `ollama serve`, then `serve --provider provider-ollama --model qwen2.5:7b`.
 
-The UI language defaults to English. Use `--lang zh-CN` on `featheragent-tui` or `featheragent-webui` for the Chinese interface; `--lang en` is the explicit English default. The kernel itself is language-neutral.
+The TUI and WebUI are **Chinese-only**; there is no `--lang` switch and no English UI asset set in the binaries. The kernel itself is language-neutral, while the documentation remains available in English and Chinese.
 
 The WebUI **Settings** page and TUI `/settings` switch provider, model, temperature, context parameters, and workspace. The WebUI **Plugins** page and TUI `/plugins` install/enable/disable plugins; each registered plugin gets a settings-sidebar page. The model dropdown lists everything returned by `provider.models`; saving applies it through `config.set`. `serve` prints a banner and writes `runtime/ipc/starting` / `ready`; if startup is slow, `chat` reports "kernel not ready (starting)".
 
@@ -158,6 +158,6 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
-`v1.2.0-rc.1` is the public-repository candidate: it fixes the Q1/Q2 minor items from the v1.1.9 real-hardware retest, aligns Linux/Windows version sources, `--locked` builds and PE version resources, and adds MIT LICENSE, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG, local CI and CODEOWNERS. Capabilities carry over from v1.1.9: project workspace path de-duplication, `/stop` state, TUI/WebUI Markdown, feather icons, and keyless local web search (`search_provider=local` by default; DeepSeek remains optional and billed). Linux automation passes **87/87** (including a new `json_u64` string-count tolerance test; one network-dependent integration test is run separately).
+`v1.2.0-rc.1` is the public-repository candidate: it fixes the Q1/Q2 minor items from the v1.1.9 real-hardware retest, aligns Linux/Windows version sources, `--locked` builds and PE version resources, and adds MIT LICENSE, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG, local CI and CODEOWNERS. Capabilities carry over from v1.1.9: project workspace path de-duplication, `/stop` state, TUI/WebUI Markdown, feather icons, and keyless local web search (`search_provider=local` by default; DeepSeek remains optional and billed). Linux automation passes **86/86** (including a new `json_u64` string-count tolerance test; one network-dependent integration test is run separately).
 
 Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9. The v1.2.0-rc.1 Windows package is cross-compiled and its automation runs only on Linux; Q1/Q2, Markdown, icons, local search, project paths, and high-DPI/Chinese rendering still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions. Untested items are listed in the table above.

@@ -36,12 +36,7 @@ In another terminal:
 .\featheragent.exe chat --root . --text "hello"
 ```
 
-Both frontends default to English. Add `--lang zh-CN` for the Chinese interface:
-
-```powershell
-.\featheragent-tui.exe --root . --lang zh-CN
-.\featheragent-webui.exe --root . --app --lang zh-CN
-```
+Both frontends are Chinese-only; there is no `--lang` switch.
 
 ## 2. S1 project-level workspace
 

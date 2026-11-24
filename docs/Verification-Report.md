@@ -16,18 +16,18 @@ The v1.1.9 real-hardware retest left only Q1 (a suspected `cacelled` spelling in
 | Public materials | MIT LICENSE, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG, `scripts/ci.sh`, CODEOWNERS | file check + `scripts/ci.sh` |
 | History scan | No keys, private keys, `.env`, or large binaries in git history; only `target/dist/__pycache__` ignored in the workspace | `git log` / content scan |
 
-Linux passes **87/87**: 58 lib + 2 plugin + 0 storage + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration. One network-dependent `local_web_search_tool_via_kernel` runs separately. `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings` pass. Linux's three artifacts and Windows' five exes were rebuilt; PE `.rsrc` is 0x1188 and `FileVersion/ProductVersion=1.2.0-rc.1`.
+Linux passes **86/86**: 57 lib + 2 plugin + 0 storage + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration. One network-dependent `local_web_search_tool_via_kernel` runs separately. `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings` pass. Linux's three artifacts and Windows' five exes were rebuilt; PE `.rsrc` is 0x1188 and `FileVersion/ProductVersion=1.2.0-rc.1`.
 
 Not verified: v1.2.0-rc.1 Windows real hardware, v1.2 TUI PTY regression, two-turn in-turn steer, two full `/compact` turns, real DeepSeek billing, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64.
 
-### Localization follow-up (2026-11-23, version unchanged)
+### UI-language follow-up (2026-11-24, version unchanged)
 
-- English is the primary documentation language; Chinese editions use the `.zh-CN.md` suffix. Historical Windows retest notes remain Chinese-only with the suffix.
-- TUI and WebUI default to English and accept `--lang zh-CN` for Chinese. Both languages share one binary per UI; no separate English/Chinese package is produced.
-- The WebUI embeds `index.html` + `app.js` (English) and `index.zh-CN.html` + `app.zh-CN.js` (Chinese); `GET /` selects the asset set from `--lang`.
-- Verified: TUI `--help` in both languages, TUI main/settings screens in both languages, WebUI `GET /` asset selection in both modes, browser render of the English main and settings pages, and `node --check` for both JS files.
-- Full suite is **87/87** (58 lib); `fmt` and `clippy -D warnings` pass. Windows cross-compile is rebuilt; real-hardware retest remains pending.
-- No version, tag, or GitHub Release is added in this follow-up.
+- English is still the primary documentation language; Chinese editions use the `.zh-CN.md` suffix. Historical Windows retest notes remain Chinese-only with the suffix.
+- TUI and WebUI are **Chinese-only**. The `--lang` switch and the English UI asset set were removed after usability feedback; the kernel stays language-neutral.
+- The WebUI ships the Chinese `index.html` + `app.js` only. There is no `index.zh-CN.html` or `app.zh-CN.js` route.
+- Verified: TUI help/main/settings screens remain Chinese; WebUI `GET /` serves the Chinese page and JS; `node --check web/app.js` passes.
+- Full suite is **86/86** (57 lib); `fmt` and `clippy -D warnings` pass. Windows cross-compile is rebuilt; real-hardware retest remains pending.
+- No version bump in this UI-language revert.
 
 ## v1.1.9 summary (historical)
 
@@ -108,7 +108,7 @@ NEW-K fixed; TUI session/chat modes, CJK cursor alignment, external workspace, p
 
 | Item | Result |
 |---|---|
-| Automation | **87/87 passed** (58 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration) |
+| Automation | **86/86 passed** (57 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration) |
 | Kernel gates | **6/6 passed** (size, startup, RSS, write, assembly, RPC) |
 | Crash recovery | **1000/1000** random truncations, `failed=0` |
 | End-to-end | kernel, TUI PTY, WebUI HTTP/WS/SSE fallback, three-artifact unzip run all pass |

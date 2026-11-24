@@ -7,16 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 ### Added
 
 - English is now the primary documentation language. Chinese editions use the `.zh-CN.md` suffix; root and core documents have both editions.
-- TUI and WebUI default to English and accept `--lang zh-CN` for the Chinese interface. The kernel stays language-neutral.
-- English and Chinese WebUI assets are embedded in the same `featheragent-webui` binary; no extra package is required.
-- English and Chinese TUI labels share one binary and are selected at startup.
+- TUI and WebUI are **Chinese-only**. The `--lang` switch and the English UI asset set were removed in a follow-up; the kernel stays language-neutral.
 - WebUI package documentation includes both the English test guide and the Chinese edition.
 
 ### Changed
 
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, architecture, verification report, Wire Format, Windows test guide, and v1.2.0-rc.1 change note are English by default.
 - Historical Windows retest notes remain Chinese-only and are renamed with `.zh-CN.md`.
-- No version bump: the localization work stays under `1.2.0-rc.1`; existing tag/version semantics are unchanged until the owner decides on a release.
+- No version bump: this UI-language revert stays under `1.2.0-rc.1`.
 
 ## [1.2.0-rc.1] - 2026-11-23
 
@@ -51,7 +49,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Verification
 
-- Linux: **87/87** automation tests pass (58 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration); one network-dependent case passes separately.
+- Linux: **86/86** automation tests pass (57 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration); one network-dependent case passes separately.
 - `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings` pass.
 - Windows x64 cross-compiles five exes; hashes are in the release assets and manifest.
 

@@ -7,15 +7,14 @@
 ### Added
 
 - 英文成为文档主语言；中文版统一使用 `.zh-CN.md` 后缀，根目录与核心文档均保留中英双版。
-- TUI 与 WebUI 默认英文，支持 `--lang zh-CN` 切回中文；内核保持语言无关。
-- 中英 WebUI 资源嵌入同一 `featheragent-webui` 二进制，不增加安装包。
-- 中英 TUI 文案共用同一二进制，启动时选择语言。
+- TUI 与 WebUI 只保留中文界面；已移除 `--lang` 切换与英文界面资源，内核保持语言无关。
 - Windows 包同时包含英文测试指南与中文版 `START-HERE.zh-CN.md`。
 
 ### Changed
 
 - `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、架构设计、验证报告、Wire Format、Windows 测试指南与 v1.2.0-rc.1 变更说明默认英文。
 - 历史 Windows 复测记录仅保留中文，文件名统一加 `.zh-CN.md`。
+- 本次界面回退不推进版本号，仍为 `1.2.0-rc.1`。
 
 ## [1.2.0-rc.1] - 2026-11-23
 
@@ -50,7 +49,7 @@
 
 ### Verification
 
-- Linux：**87/87** 自动化测试通过（58 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration），1 个需公网用例单独通过。
+- Linux：**86/86** 自动化测试通过（57 lib + 2 plugin + 2 kernel + 3 TUI + 3 WebUI + 2 golden + 17 integration），1 个需公网用例单独通过。
 - `cargo fmt --check`、`cargo clippy --all-targets --locked -- -D warnings` 通过。
 - Windows x64 交叉编译 5 个 exe；具体哈希见 Release 资产与 manifest。
 

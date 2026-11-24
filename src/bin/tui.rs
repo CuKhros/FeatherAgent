@@ -20,7 +20,6 @@ use serde_json::{json, Value};
 use unicode_width::UnicodeWidthChar;
 
 use featheragent::governance::paths::{Overrides, Paths};
-use featheragent::i18n;
 use featheragent::server::client::{Client, Connect};
 use featheragent::util::Args;
 
@@ -83,16 +82,9 @@ struct App {
 
 fn main() {
     let args = Args::parse(std::env::args().skip(1));
-    let zh = i18n::set_lang(args.flag("lang"));
     if args.has("--help") || args.positional.iter().any(|p| p == "-h") {
         println!("FeatherAgent TUI {}", env!("CARGO_PKG_VERSION"));
-        if zh {
-            println!("用法: featheragent-tui [--root DIR] [--socket PATH] [--lang en|zh-CN]");
-            println!("默认英文界面；--lang zh-CN 切回中文。");
-        } else {
-            println!("Usage: featheragent-tui [--root DIR] [--socket PATH] [--lang en|zh-CN]");
-            println!("English UI is the default; pass --lang zh-CN for Chinese.");
-        }
+        println!("用法: featheragent-tui [--root DIR] [--socket PATH]");
         return;
     }
     if args.has("version") {
@@ -113,14 +105,7 @@ fn main() {
     let conn = match Client::connect(&socket) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "{} {socket:?}: {e}\n{}",
-                i18n::t("Cannot connect to kernel", "无法连接内核"),
-                i18n::t(
-                    "start `featheragent serve` first",
-                    "先运行 `featheragent serve`"
-                )
-            );
+            eprintln!("无法连接内核 {socket:?}: {e}\n先运行 `featheragent serve`");
             std::process::exit(1);
         }
     };
@@ -128,13 +113,7 @@ fn main() {
         .client
         .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
     {
-        eprintln!(
-            "{}: {e}",
-            i18n::t(
-                "Initialization failed (3s timeout / kernel not ready)",
-                "初始化失败（3s 超时/内核未就绪）"
-            )
-        );
+        eprintln!("初始化失败（3s 超时/内核未就绪）: {e}");
         std::process::exit(1);
     }
 
@@ -150,12 +129,7 @@ fn main() {
         input_cursor: 0,
         focus: Focus::Sessions,
         chat_scroll: 0,
-        status: format!(
-            "{} {}; {}",
-            i18n::t("Connected to", "已连接"),
-            socket.display(),
-            i18n::t("↑↓ select session, Enter open", "↑↓ 选会话，Enter 进入")
-        ),
+        status: format!("已连接 {}；↑↓ 选会话，Enter 进入", socket.display()),
         confirm: None,
         settings: None,
         plugins: None,
@@ -170,14 +144,14 @@ fn main() {
         Ok(t) => t,
         Err(e) => {
             restore();
-            eprintln!("{}: {e}", i18n::t("TUI setup failed", "TUI 初始化失败"));
+            eprintln!("TUI 初始化失败: {e}");
             std::process::exit(1);
         }
     };
     let res = run(&mut terminal, &mut app);
     restore();
     if let Err(e) = res {
-        eprintln!("{}: {e}", i18n::t("TUI exited", "TUI 退出"));
+        eprintln!("TUI 退出: {e}");
     }
 }
 
@@ -364,10 +338,7 @@ impl App {
                     p.status = format!(
                         "{} → {}（已同步运行进程）",
                         name,
-                        i18n::t(
-                            if enabled { "disable" } else { "enable" },
-                            if enabled { "停用" } else { "启用" }
-                        )
+                        if enabled { "停用" } else { "启用" }
                     );
                 }
             }
@@ -600,10 +571,7 @@ impl App {
                 if let Some(s) = &mut self.settings {
                     s.status = format!(
                         "{name} → {}（运行进程已同步）",
-                        i18n::t(
-                            if enabled { "disable" } else { "enable" },
-                            if enabled { "停用" } else { "启用" }
-                        )
+                        if enabled { "停用" } else { "启用" }
                     );
                 }
             }
@@ -1754,31 +1722,6 @@ fn wrap_display(prefix: &str, text: &str, width: usize) -> Vec<String> {
     out
 }
 
-fn live_label(state: &str) -> String {
-    match state {
-        "idle" => i18n::t("idle", "空闲").to_string(),
-        "running" => i18n::t("running", "运行中").to_string(),
-        "stopped" => i18n::t("stopped", "已停止").to_string(),
-        "error" => i18n::t("error", "错误").to_string(),
-        _ => state.to_string(),
-    }
-}
-
-fn role_label(role: &str) -> &'static str {
-    match role {
-        "你" => i18n::t("You", "你"),
-        "你（引导）" => i18n::t("You (steer)", "你（引导）"),
-        "助手" => i18n::t("Assistant", "助手"),
-        "工具" => i18n::t("Tool", "工具"),
-        "系统" => i18n::t("System", "系统"),
-        _ => "User",
-    }
-}
-
-fn loc(text: impl Into<String>) -> String {
-    i18n::tr(&text.into())
-}
-
 fn draw(f: &mut Frame, app: &App) {
     if app.plugins.is_some() {
         draw_plugins(f, app);
@@ -1798,18 +1741,16 @@ fn draw(f: &mut Frame, app: &App) {
         .split(f.size());
 
     let mode = match app.focus {
-        Focus::Sessions => i18n::t("Sessions", "会话列表"),
-        Focus::Chat => i18n::t("Conversation", "对话"),
+        Focus::Sessions => "会话列表",
+        Focus::Chat => "对话",
     };
     let head = format!(
-        " FeatherAgent v{}  {}  {}: {}  {}: {}  |  {}",
+        " FeatherAgent v{}  {}  会话: {}  状态: {}  |  {}",
         env!("CARGO_PKG_VERSION"),
         mode,
-        i18n::t("Session", "会话"),
         app.session.as_deref().unwrap_or("-"),
-        i18n::t("State", "状态"),
-        live_label(&app.state),
-        loc(&app.status)
+        app.state,
+        app.status
     );
     f.render_widget(
         Paragraph::new(head).style(Style::default().fg(Color::Black).bg(Color::Cyan)),
@@ -1835,11 +1776,7 @@ fn draw(f: &mut Frame, app: &App) {
             let n = s["records"].as_u64().unwrap_or(0);
             let live = s["live"]["state"].as_str().unwrap_or("");
             let ws = s["workspace"].as_str().unwrap_or("default");
-            let text = if i18n::is_zh() {
-                format!("{id}\n{ws} · {n} 条 {}", live_label(live))
-            } else {
-                format!("{id}\n{ws} · {n} records {}", live_label(live))
-            };
+            let text = format!("{id}\n{ws} · {n} 条 {live}");
             let style = if i == app.selected && app.focus == Focus::Sessions {
                 Style::default().bg(Color::DarkGray)
             } else if i == app.selected {
@@ -1854,9 +1791,9 @@ fn draw(f: &mut Frame, app: &App) {
     f.render_stateful_widget(
         List::new(items).block(Block::default().borders(Borders::ALL).title(
             if app.focus == Focus::Sessions {
-                i18n::t("Sessions ↑↓ / Enter", "会话 ↑↓ / Enter")
+                "会话 ↑↓ / Enter"
             } else {
-                i18n::t("Sessions (Esc back)", "会话（Esc 返回）")
+                "会话（Esc 返回）"
             },
         )),
         cols[0],
@@ -1869,7 +1806,7 @@ fn draw(f: &mut Frame, app: &App) {
     let mut lines: Vec<Line> = Vec::new();
     for (role, text) in &app.messages {
         let color = match role.as_str() {
-            "你" | "你（引导）" => Color::Green,
+            "你" => Color::Green,
             "助手" => Color::Cyan,
             "工具" => Color::Yellow,
             "系统" => Color::DarkGray,
@@ -1877,19 +1814,13 @@ fn draw(f: &mut Frame, app: &App) {
         };
         if role == "助手" {
             lines.push(Line::from(Span::styled(
-                i18n::t("Assistant:", "助手:").to_string(),
+                "助手:".to_string(),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             )));
             lines.extend(markdown_lines(text, width, color));
         } else {
-            let show_role = role_label(role);
-            let show_text = if role == "系统" || role == "工具" {
-                loc(text)
-            } else {
-                text.clone()
-            };
-            let prefix = format!("{show_role}: ");
-            for chunk in wrap_display(&prefix, &show_text, width) {
+            let prefix = format!("{role}: ");
+            for chunk in wrap_display(&prefix, text, width) {
                 lines.push(Line::from(Span::styled(
                     chunk,
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -1904,12 +1835,9 @@ fn draw(f: &mut Frame, app: &App) {
     f.render_widget(
         Paragraph::new(visible).block(Block::default().borders(Borders::ALL).title(
             if app.focus == Focus::Chat {
-                i18n::t(
-                    "Conversation ↑↓ scroll · Esc back",
-                    "对话 ↑↓ 翻阅 · Esc 返回列表",
-                )
+                "对话 ↑↓ 翻阅 · Esc 返回列表"
             } else {
-                i18n::t("Conversation (Enter to open)", "对话（Enter 进入会话）")
+                "对话（Enter 进入会话）"
             },
         )),
         cols[1],
@@ -1918,7 +1846,7 @@ fn draw(f: &mut Frame, app: &App) {
     // 右：上下文面板
     let mut ctx_lines = Vec::new();
     if app.ctx.is_null() {
-        ctx_lines.push(Line::from(loc("（尚无快照，发送一条消息后出现）")));
+        ctx_lines.push(Line::from("（尚无快照，发送一条消息后出现）"));
     } else {
         let st = &app.ctx["stats"];
         let window = st["window_tokens"].as_u64().unwrap_or(8192) as usize;
@@ -1927,51 +1855,45 @@ fn draw(f: &mut Frame, app: &App) {
             .saturating_mul(100)
             .checked_div(window)
             .unwrap_or(0);
-        ctx_lines.push(Line::from(loc(format!(
-            "预算 {total_tokens}/{window} ({pct}%)"
-        ))));
-        ctx_lines.push(Line::from(loc(format!(
+        ctx_lines.push(Line::from(format!("预算 {total_tokens}/{window} ({pct}%)")));
+        ctx_lines.push(Line::from(format!(
             "分层 L1 {} 条 / L2 {} 卡 / L3 {} tok / L4 {} 项",
             st["layers"]["l1_window_messages"].as_u64().unwrap_or(0),
             st["layers"]["l2_summary_cards"].as_u64().unwrap_or(0),
             st["layers"]["l3_task_state_tokens"].as_u64().unwrap_or(0),
             st["layers"]["l4_recalled_items"].as_u64().unwrap_or(0),
-        ))));
-        ctx_lines.push(Line::from(loc(format!(
+        )));
+        ctx_lines.push(Line::from(format!(
             "system {} · tools {} · skills {} · history {} · recall {}",
             st["system_tokens"].as_u64().unwrap_or(0),
             st["tools_tokens"].as_u64().unwrap_or(0),
             st["skills_tokens"].as_u64().unwrap_or(0),
             st["history_tokens"].as_u64().unwrap_or(0),
             st["recall_tokens"].as_u64().unwrap_or(0),
-        ))));
-        ctx_lines.push(Line::from(loc(format!(
+        )));
+        ctx_lines.push(Line::from(format!(
             "模型 {} · 事件 {}",
             app.ctx["model"].as_str().unwrap_or("-"),
             app.ctx["turns"].as_u64().unwrap_or(0),
-        ))));
+        )));
         let goal = app.ctx["task_state"]["goal"].as_str().unwrap_or("");
         if !goal.is_empty() {
-            ctx_lines.push(Line::from(loc(format!("目标: {goal}"))));
+            ctx_lines.push(Line::from(format!("目标: {goal}")));
         }
         let cards = app.ctx["cards"].as_u64().unwrap_or(0);
-        ctx_lines.push(Line::from(loc(format!("摘要卡 {cards} 张"))));
+        ctx_lines.push(Line::from(format!("摘要卡 {cards} 张")));
     }
     if let Some((_, tool, risk)) = &app.confirm {
         ctx_lines.push(Line::from(""));
         ctx_lines.push(Line::from(Span::styled(
-            loc(format!("⚠ 待确认 [{risk}] {tool}")),
+            format!("⚠ 待确认 [{risk}] {tool}"),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )));
-        ctx_lines.push(Line::from(loc("y 允许 / n 拒绝")));
+        ctx_lines.push(Line::from("y 允许 / n 拒绝"));
     }
     f.render_widget(
         Paragraph::new(ctx_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(i18n::t("Context", "上下文")),
-            )
+            .block(Block::default().borders(Borders::ALL).title("上下文"))
             .wrap(Wrap { trim: true }),
         cols[2],
     );
@@ -1988,19 +1910,13 @@ fn draw(f: &mut Frame, app: &App) {
     }
     let tail: String = chars[start..].iter().collect();
     let title = if app.focus == Focus::Chat {
-        i18n::t(
-            "Input (Enter sends, ←/→ moves cursor, /help commands)",
-            "输入（Enter 发送，←/→ 移动光标，/help 命令）",
-        )
+        "输入（Enter 发送，←/→ 移动光标，/help 命令）"
     } else {
-        i18n::t(
-            "Input (sessions: Enter open, ↑↓ select, Esc quit)",
-            "输入（会话列表：Enter 进入，↑↓ 选择，Esc 退出）",
-        )
+        "输入（会话列表：Enter 进入，↑↓ 选择，Esc 退出）"
     };
     f.render_widget(
         Paragraph::new(format!("› {tail}"))
-            .block(Block::default().borders(Borders::ALL).title(loc(title))),
+            .block(Block::default().borders(Borders::ALL).title(title)),
         area,
     );
     if app.focus == Focus::Chat {
@@ -2024,31 +1940,18 @@ fn draw_settings(f: &mut Frame, app: &App) {
 
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!(
-                " FeatherAgent {} {} ",
-                featheragent::VERSION,
-                i18n::t("Settings", "设置")
-            ),
+            format!(" FeatherAgent {} 设置 ", featheragent::VERSION),
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(if s.nav_focus {
-            i18n::t(
-                "  ↑↓ sidebar · Enter open · Tab form · Esc close",
-                "  ↑↓ 侧栏 · Enter 打开 · Tab 到表单 · Esc 关闭",
-            )
+            "  ↑↓ 侧栏 · Enter 打开 · Tab 到表单 · Esc 关闭"
         } else if s.detail {
-            i18n::t(
-                "  Space/Enter toggle · r refresh · Esc back",
-                "  Space/Enter 启停 · r 刷新 · Esc 返回侧栏",
-            )
+            "  Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
         } else {
-            i18n::t(
-                "  Tab/↑↓ fields · ←/→ provider/model/value · Esc back",
-                "  Tab/↑↓ 切字段 · ←/→ 选 provider/model/调数值 · Esc 回侧栏",
-            )
+            "  Tab/↑↓ 切字段 · ←/→ 选 provider/model/调数值 · Esc 回侧栏"
         }),
     ]));
     f.render_widget(head, chunks[0]);
@@ -2062,13 +1965,12 @@ fn draw_settings(f: &mut Frame, app: &App) {
     let mut nav_lines: Vec<Line> = Vec::new();
     let general_selected = s.nav_idx == 0;
     let mut g = Line::from(format!(
-        "{} ⚙ {}",
+        "{} ⚙ 常规设置",
         if general_selected && s.nav_focus {
             "▶"
         } else {
             " "
-        },
-        i18n::t("General settings", "常规设置")
+        }
     ));
     if general_selected && s.nav_focus {
         g = g.style(
@@ -2080,7 +1982,7 @@ fn draw_settings(f: &mut Frame, app: &App) {
     }
     nav_lines.push(g);
     nav_lines.push(Line::from(Span::styled(
-        i18n::t("Plugin pages", "插件页面"),
+        "插件页面",
         Style::default().fg(Color::DarkGray),
     )));
     for (i, item) in s.nav.iter().enumerate() {
@@ -2119,19 +2021,12 @@ fn draw_settings(f: &mut Frame, app: &App) {
     }
     nav_lines.push(Line::from(""));
     nav_lines.push(Line::from(Span::styled(
-        i18n::t(
-            "Plugins are generated from the kernel registry",
-            "插件由内核登记表生成",
-        ),
+        "插件由内核登记表生成",
         Style::default().fg(Color::DarkGray),
     )));
     f.render_widget(
         Paragraph::new(nav_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(i18n::t("Sidebar", "侧栏")),
-            )
+            .block(Block::default().borders(Borders::ALL).title("侧栏"))
             .wrap(Wrap { trim: false }),
         body[0],
     );
@@ -2163,36 +2058,25 @@ fn draw_settings(f: &mut Frame, app: &App) {
             ]),
             Line::from(""),
             Line::from(format!(
-                "{}      {}",
-                i18n::t("Status", "状态"),
-                i18n::t(
-                    if enabled { "Enabled" } else { "Disabled" },
-                    if enabled { "已启用" } else { "已停用" }
-                )
+                "状态      {}",
+                if enabled { "已启用" } else { "已停用" }
             )),
             Line::from(format!("live      {live}")),
-            Line::from(format!("{}      {version}", i18n::t("Version", "版本"))),
+            Line::from(format!("版本      {version}")),
             Line::from(format!("capabilities  {}", caps)),
             Line::from(format!("permissions   {}", perms)),
             Line::from(format!("program   {program}")),
             Line::from(format!("blake3    {hash}")),
             Line::from(""),
             Line::from(if s.detail {
-                i18n::t(
-                    "Space/Enter toggle · r refresh · Esc back",
-                    "Space/Enter 启停 · r 刷新 · Esc 返回侧栏",
-                )
+                "Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
             } else {
-                i18n::t("Enter to open details", "Enter 打开详情")
+                "Enter 打开详情"
             }),
         ];
         f.render_widget(
             Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(i18n::t("Plugin details", "插件详情")),
-                )
+                .block(Block::default().borders(Borders::ALL).title("插件详情"))
                 .wrap(Wrap { trim: false }),
             body[1],
         );
@@ -2201,24 +2085,13 @@ fn draw_settings(f: &mut Frame, app: &App) {
             ("Provider", s.provider.clone()),
             ("Base URL", s.base_url.clone()),
             ("Model", s.model.clone()),
-            (
-                i18n::t("Temperature", "温度"),
-                if i18n::is_zh() {
-                    format!("{}（0.00–2.00）", s.temperature)
-                } else {
-                    format!("{} (0.00–2.00)", s.temperature)
-                },
-            ),
+            ("Temperature", format!("{}（0.00–2.00）", s.temperature)),
             ("Context window", format!("{} tokens", s.context_window)),
             ("Max turns", s.max_turns.clone()),
             (
                 "Workspace root",
                 if s.workspace_root.is_empty() {
-                    i18n::t(
-                        "(install root/workspace: project container)",
-                        "(安装根/workspace：项目容器)",
-                    )
-                    .into()
+                    "(安装根/workspace：项目容器)".into()
                 } else {
                     s.workspace_root.clone()
                 },
@@ -2226,19 +2099,13 @@ fn draw_settings(f: &mut Frame, app: &App) {
             (
                 "Auto allow safe",
                 if s.auto_allow_safe {
-                    i18n::t("[x] on", "[x] 开").into()
+                    "[x] 开".into()
                 } else {
-                    i18n::t("[ ] off", "[ ] 关").into()
+                    "[ ] 关".into()
                 },
             ),
-            (
-                i18n::t("Save & apply", "保存并应用"),
-                i18n::t("Enter / Ctrl+S", "按 Enter / Ctrl+S").into(),
-            ),
-            (
-                i18n::t("Cancel / back", "取消/返回"),
-                i18n::t("Esc back to sidebar", "Esc 回侧栏").into(),
-            ),
+            ("保存并应用", "按 Enter / Ctrl+S".into()),
+            ("取消/返回", "Esc 回侧栏".into()),
         ];
         let mut lines = Vec::new();
         for (i, (label, val)) in values.iter().enumerate() {
@@ -2261,11 +2128,11 @@ fn draw_settings(f: &mut Frame, app: &App) {
         }
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            loc(&s.models_hint),
+            &s.models_hint,
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(Span::styled(
-            loc(&s.search_hint),
+            &s.search_hint,
             Style::default().fg(Color::DarkGray),
         )));
         for m in s.models.iter().take(12) {
@@ -2273,28 +2140,25 @@ fn draw_settings(f: &mut Frame, app: &App) {
         }
         f.render_widget(
             Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title(i18n::t(
-                    "General (saved via config.set)",
-                    "常规（保存后提交 config.set）",
-                )))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("常规（保存后提交 config.set）"),
+                )
                 .wrap(Wrap { trim: false }),
             body[1],
         );
     }
 
     let status = if s.status.is_empty() {
-        i18n::t("Settings opened", "设置页已打开")
+        "设置页已打开"
     } else {
         s.status.as_str()
     };
     f.render_widget(
-        Paragraph::new(loc(status))
+        Paragraph::new(status)
             .style(Style::default().fg(Color::Yellow))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(i18n::t("Status", "状态")),
-            ),
+            .block(Block::default().borders(Borders::ALL).title("状态")),
         chunks[2],
     );
 }
@@ -2311,29 +2175,21 @@ fn draw_plugins(f: &mut Frame, app: &App) {
         .split(f.size());
     let head = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!(
-                " FeatherAgent v{} {} ",
-                env!("CARGO_PKG_VERSION"),
-                i18n::t("Plugin management", "插件管理")
-            ),
+            format!(" FeatherAgent v{} 插件管理 ", env!("CARGO_PKG_VERSION")),
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(i18n::t(
-            "  ↑↓ select · Space/Enter toggle · r refresh · Esc back",
-            "  ↑↓ 选择 · Space/Enter 启停 · r 刷新 · Esc 返回",
-        )),
+        Span::raw("  ↑↓ 选择 · Space/Enter 启停 · r 刷新 · Esc 返回"),
     ]));
     f.render_widget(head, chunks[0]);
 
     let mut lines = Vec::new();
     if p.items.is_empty() {
-        lines.push(Line::from(i18n::t(
-            "(No registered plugins; install by path from the WebUI Plugins page)",
+        lines.push(Line::from(
             "（没有已登记插件；可通过 WebUI 插件页按路径安装）",
-        )));
+        ));
     }
     for (i, item) in p.items.iter().enumerate() {
         let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
@@ -2362,21 +2218,18 @@ fn draw_plugins(f: &mut Frame, app: &App) {
     }
     f.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(i18n::t(
-                "Plugins (toggles sync to the running process)",
-                "插件（启停会同步到运行进程）",
-            )))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("插件（启停会同步到运行进程）"),
+            )
             .wrap(Wrap { trim: false }),
         chunks[1],
     );
     f.render_widget(
-        Paragraph::new(loc(&p.status))
+        Paragraph::new(p.status.as_str())
             .style(Style::default().fg(Color::Yellow))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(i18n::t("Status", "状态")),
-            ),
+            .block(Block::default().borders(Borders::ALL).title("状态")),
         chunks[2],
     );
 }

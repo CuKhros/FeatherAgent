@@ -97,7 +97,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage / search）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度、上下文参数与工作区；WebUI 顶栏“插件”和 TUI `/plugins` 提供插件安装/启停，设置左侧栏会为每个已登记插件生成页面。模型下拉显示 `provider.models` 返回的全部模型，保存后经 `config.set` 即时应用。`serve` 启动会立即打印 banner 并写 `runtime/ipc/starting` / `ready`，首次启动较慢时 `chat` 会明确提示“内核未就绪（启动中）”。
 
-TUI 与 WebUI 默认英文界面；加 `--lang zh-CN` 切回中文（同一二进制，无需另装中文包）。`--lang en` 为显式英文默认值。内核本身不依赖语言。
+TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在二进制内附带英文界面资源。内核本身不依赖语言；文档仍保留中英双版。
 
 三产物打包：`scripts/package.sh`，输出 `dist/*.tar.gz` + `sha256` + manifest；体积门禁（内核 ≤ 8 MiB）在脚本内断言。
 
@@ -159,7 +159,7 @@ TUI 与 WebUI 默认英文界面；加 `--lang zh-CN` 切回中文（同一二�
 
 ## 状态
 
-`v1.2.0-rc.1` 是公开仓库候选版：修复 v1.1.9 真机复测的 Q1/Q2 小项，统一 Linux/Windows 的版本源、`--locked` 构建与 PE 版本资源，补齐 MIT LICENSE、SECURITY、CONTRIBUTING、CODE_OF_CONDUCT、CHANGELOG、本地 CI 脚本与 CODEOWNERS。核心能力沿用 v1.1.9：项目级工作区路径去重、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索（默认 `search_provider=local`，DeepSeek 保留为可选计费后端）。Linux 自动化测试 **87/87** 通过（新增 `json_u64` 字符串计数容错用例；另有 1 个需公网的集成用例单独跑通）。
+`v1.2.0-rc.1` 是公开仓库候选版：修复 v1.1.9 真机复测的 Q1/Q2 小项，统一 Linux/Windows 的版本源、`--locked` 构建与 PE 版本资源，补齐 MIT LICENSE、SECURITY、CONTRIBUTING、CODE_OF_CONDUCT、CHANGELOG、本地 CI 脚本与 CODEOWNERS。核心能力沿用 v1.1.9：项目级工作区路径去重、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索（默认 `search_provider=local`，DeepSeek 保留为可选计费后端）。Linux 自动化测试 **86/86** 通过（新增 `json_u64` 字符串计数容错用例；另有 1 个需公网的集成用例单独跑通）。
 
 Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.0-rc.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；Q1/Q2、Markdown、图标、本地搜索、项目路径与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。本轮未实测项见上表。
 

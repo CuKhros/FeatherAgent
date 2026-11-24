@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,37 +13,37 @@
   <header>
     <div class="brand"><img class="brand-logo" src="/logo.png" alt="FeatherAgent">FeatherAgent <span class="ver">v{{VERSION}}</span></div>
     <div class="meta">
-      <span id="session-label">No session selected</span>
+      <span id="session-label">未选择会话</span>
       <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
     </div>
-    <div class="meta" id="conn">Connecting to kernel…</div>
-    <button id="btn-settings" class="settings-btn" title="Server, model and sampling settings">⚙ Settings</button>
-    <button id="btn-plugins" class="ghost top-plugins" title="Plugin management and plugin pages">🧩 Plugins</button>
+    <div class="meta" id="conn">正在连接内核…</div>
+    <button id="btn-settings" class="settings-btn" title="服务端、模型与采样设置">⚙ 设置</button>
+    <button id="btn-plugins" class="ghost top-plugins" title="插件管理与插件页面">🧩 插件</button>
   </header>
 
   <main>
     <aside class="sessions">
-      <div class="panel-title">Sessions</div>
+      <div class="panel-title">会话</div>
       <div class="new-row">
-        <input id="new-id" placeholder="New session id (optional)">
-        <button id="btn-new">New</button>
+        <input id="new-id" placeholder="新会话 id（可空）">
+        <button id="btn-new">新建</button>
       </div>
       <div class="new-row">
-        <select id="new-workspace" title="Project workspace for the session"></select>
-        <button id="btn-new-workspace" class="ghost" title="Create a project under workspace_root">＋ Project</button>
+        <select id="new-workspace" title="会话所属项目工作区"></select>
+        <button id="btn-new-workspace" class="ghost" title="在 workspace_root 下新建项目">＋项目</button>
       </div>
       <div id="session-list" class="list"></div>
     </aside>
 
     <section class="chat">
-      <div class="panel-title">Conversation</div>
+      <div class="panel-title">对话</div>
       <div id="messages" class="messages"></div>
       <div class="composer">
-        <textarea id="input" rows="3" placeholder="Type a message; Enter sends, Shift+Enter adds a newline"></textarea>
+        <textarea id="input" rows="3" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
         <div class="actions">
-          <button id="btn-send" class="primary">Send</button>
-          <button id="btn-stop" class="danger">Stop &amp; save</button>
-          <button id="btn-compact">Compact context</button>
+          <button id="btn-send" class="primary">发送</button>
+          <button id="btn-stop" class="danger">停止并保存</button>
+          <button id="btn-compact">压缩上下文</button>
           <button id="btn-fork">Fork</button>
           <span id="hint" class="hint"></span>
         </div>
@@ -51,36 +51,36 @@
     </section>
 
     <aside class="context">
-      <div class="panel-title">Context</div>
-      <div id="ctx" class="ctx">No snapshot yet</div>
+      <div class="panel-title">上下文</div>
+      <div id="ctx" class="ctx">尚无快照</div>
     </aside>
   </main>
 
   <div id="settings-page" class="settings-page hidden">
     <div class="settings-shell">
       <aside class="settings-nav">
-        <div class="nav-title">Settings</div>
-        <button class="nav-item active" data-view="general">General</button>
-        <button class="nav-item" data-view="plugins">Plugin management</button>
-        <div class="nav-subtitle">Plugin pages</div>
+        <div class="nav-title">设置</div>
+        <button class="nav-item active" data-view="general">常规</button>
+        <button class="nav-item" data-view="plugins">插件管理</button>
+        <div class="nav-subtitle">插件页面</div>
         <div id="plugin-nav" class="plugin-nav"></div>
-        <div class="nav-foot">The sidebar follows the kernel registry after plugins are installed or toggled; page content is driven by plugin manifests.</div>
+        <div class="nav-foot">安装或启停插件后，侧栏会随内核登记表更新；页面内容由插件清单驱动。</div>
       </aside>
 
       <div class="settings-card">
         <div class="settings-head">
           <div>
-            <h2 id="settings-title">Settings</h2>
-            <p id="settings-subtitle" class="warn">Saved through <code>config.set</code> to the kernel; workspace changes apply on the next <code>serve</code> start.</p>
+            <h2 id="settings-title">设置</h2>
+            <p id="settings-subtitle" class="warn">保存后通过 <code>config.set</code> 提交给内核；工作区改动在下次启动 serve 时生效。</p>
           </div>
-          <button id="btn-settings-close" class="ghost">Close</button>
+          <button id="btn-settings-close" class="ghost">关闭</button>
         </div>
 
         <div id="view-general" class="settings-view">
           <div class="settings-section">
-            <div class="section-title">Server</div>
+            <div class="section-title">服务端</div>
             <div class="settings-grid">
-              <label>Provider plugin
+              <label>Provider 插件
                 <select id="cfg-provider"></select>
               </label>
               <label>Base URL
@@ -90,78 +90,78 @@
           </div>
 
           <div class="settings-section">
-            <div class="section-title">Model and sampling</div>
+            <div class="section-title">模型与采样</div>
             <div class="settings-grid">
-              <label>Model
+              <label>模型
                 <div class="model-row">
                   <input id="cfg-model" placeholder="qwen2.5:7b" autocomplete="off">
-                  <select id="cfg-model-select" title="Discovered models"></select>
+                  <select id="cfg-model-select" title="已发现的模型"></select>
                 </div>
                 <span id="cfg-models-hint" class="form-hint"></span>
               </label>
-              <label>Temperature <span id="cfg-temperature-val" class="value">0.70</span>
+              <label>温度 <span id="cfg-temperature-val" class="value">0.70</span>
                 <input id="cfg-temperature" type="range" min="0" max="2" step="0.05" value="0.7">
               </label>
             </div>
           </div>
 
           <div class="settings-section">
-            <div class="section-title">Context and workspace</div>
+            <div class="section-title">上下文与工作区</div>
             <div class="settings-grid">
-              <label>Context window (tokens)
+              <label>上下文窗口（tokens）
                 <input id="cfg-context-window" type="number" min="512" max="131072" step="256" value="8192">
               </label>
-              <label>Max tool turns per user turn
+              <label>单轮最大工具回合
                 <input id="cfg-max-turns" type="number" min="1" max="32" step="1" value="6">
               </label>
             </div>
-            <label class="stack-row">Project workspace container (empty = install root/workspace)
-              <input id="cfg-workspace-root" placeholder="D:\Projects\featheragent-workspaces or /home/me/work" autocomplete="off">
-              <span class="form-hint">This is a project container, not a single workspace: each direct child is an independent project with its own <code>.featheagent/</code> (worklog.md / memory.md). It may point outside the install directory; restart serve after saving.</span>
+            <label class="stack-row">项目工作区容器（留空 = 安装根/workspace）
+              <input id="cfg-workspace-root" placeholder="D:\Projects\featheragent-workspaces 或 /home/me/work" autocomplete="off">
+              <span class="form-hint">这里不是单个工作区，而是项目容器：每个直接子目录是一个独立项目，各自拥有 <code>.featheagent/</code>（worklog.md / memory.md）。可指向安装目录外；保存后需重启 serve。</span>
             </label>
             <label class="check-row">
-              <input id="cfg-auto-allow-safe" type="checkbox"> Automatically allow safe tools (e.g. file reads)
+              <input id="cfg-auto-allow-safe" type="checkbox"> 自动放行安全工具（如读文件）
             </label>
           </div>
 
           <div class="settings-section">
-            <div class="section-title">Web search</div>
+            <div class="section-title">联网搜索</div>
             <div class="settings-grid">
-              <label>Provider
+              <label>提供方
                 <select id="cfg-search-provider">
-                  <option value="local">Local search (free, no key)</option>
-                  <option value="deepseek">DeepSeek Search API (optional)</option>
-                  <option value="none">Off</option>
+                  <option value="local">本地搜索（免费，无需 Key）</option>
+                  <option value="deepseek">DeepSeek Search API（可选）</option>
+                  <option value="none">关闭</option>
                 </select>
               </label>
-              <label>API Base URL (DeepSeek only)
+              <label>API Base URL（仅 DeepSeek）
                 <input id="cfg-search-base-url" placeholder="https://api.deepseek.com" autocomplete="off">
               </label>
-              <label>API key environment variable (DeepSeek only)
+              <label>API Key 环境变量（仅 DeepSeek）
                 <input id="cfg-search-key-env" placeholder="DEEPSEEK_API_KEY" autocomplete="off">
               </label>
-              <label>Results per request
+              <label>单次结果数
                 <input id="cfg-search-count" type="number" min="1" max="20" step="1" value="5">
               </label>
             </div>
-            <span id="search-status" class="form-hint">Local mode needs no key; DeepSeek keys are read only from the environment, never persisted or logged.</span>
+            <span id="search-status" class="form-hint">本地模式无需密钥；DeepSeek 密钥只从环境变量读取，不落盘、不进日志。</span>
           </div>
 
           <div class="settings-actions">
             <span id="settings-status" class="hint"></span>
-            <button id="btn-settings-refresh">Refresh models</button>
-            <button id="btn-settings-cancel" class="ghost">Cancel</button>
-            <button id="btn-settings-save" class="primary">Save &amp; apply</button>
+            <button id="btn-settings-refresh">刷新模型列表</button>
+            <button id="btn-settings-cancel" class="ghost">取消</button>
+            <button id="btn-settings-save" class="primary">保存并应用</button>
           </div>
         </div>
 
         <div id="view-plugins" class="settings-view hidden">
           <div class="settings-section">
-            <div class="section-title">Installed plugins</div>
+            <div class="section-title">已安装插件</div>
             <div class="plugin-tools">
-              <input id="plugin-install-path" placeholder="Absolute plugin directory (contains plugin.json)" autocomplete="off">
-              <button id="btn-plugin-install">Install</button>
-              <button id="btn-plugin-refresh">Refresh</button>
+              <input id="plugin-install-path" placeholder="插件目录绝对路径（含 plugin.json）" autocomplete="off">
+              <button id="btn-plugin-install">安装</button>
+              <button id="btn-plugin-refresh">刷新</button>
             </div>
             <div id="plugin-list" class="plugin-list"></div>
             <div id="plugin-status" class="form-hint"></div>
@@ -177,12 +177,12 @@
 
   <div id="modal" class="modal hidden">
     <div class="modal-box">
-      <h3>Dangerous tool needs confirmation</h3>
+      <h3>危险工具需要确认</h3>
       <p id="modal-tool"></p>
-      <p class="warn">This is a cooperative permission gate, not a sandbox: after confirmation the tool runs with the current user's privileges.</p>
+      <p class="warn">这是协作式权限门，不是沙箱：确认后工具将以当前用户权限执行。</p>
       <div class="actions">
-        <button id="btn-allow" class="danger">Allow</button>
-        <button id="btn-deny">Deny</button>
+        <button id="btn-allow" class="danger">允许</button>
+        <button id="btn-deny">拒绝</button>
       </div>
     </div>
   </div>
