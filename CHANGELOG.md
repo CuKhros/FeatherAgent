@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - English is now the primary documentation language. Chinese editions use the `.zh-CN.md` suffix; root and core documents have both editions.
 - TUI and WebUI are **Chinese-only**. The `--lang` switch and the English UI asset set were removed in a follow-up; the kernel stays language-neutral.
 - WebUI package documentation includes both the English test guide and the Chinese edition.
+- The Windows executable icon and the WebUI favicon now use the transparent-background feather icon. `logo-tile.png` remains the opaque tile for Apple touch icons.
 
 ### Changed
 

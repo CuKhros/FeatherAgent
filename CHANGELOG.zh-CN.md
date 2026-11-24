@@ -9,6 +9,7 @@
 - 英文成为文档主语言；中文版统一使用 `.zh-CN.md` 后缀，根目录与核心文档均保留中英双版。
 - TUI 与 WebUI 只保留中文界面；已移除 `--lang` 切换与英文界面资源，内核保持语言无关。
 - Windows 包同时包含英文测试指南与中文版 `START-HERE.zh-CN.md`。
+- Windows 可执行文件图标与 WebUI favicon 改用透明底羽毛图标；`logo-tile.png` 仍作为 Apple touch icon 的不透明底图。
 
 ### Changed
 

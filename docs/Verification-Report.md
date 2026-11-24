@@ -27,6 +27,7 @@ Not verified: v1.2.0-rc.1 Windows real hardware, v1.2 TUI PTY regression, two-tu
 - The WebUI ships the Chinese `index.html` + `app.js` only. There is no `index.zh-CN.html` or `app.zh-CN.js` route.
 - Verified: TUI help/main/settings screens remain Chinese; WebUI `GET /` serves the Chinese page and JS; `node --check web/app.js` passes.
 - Full suite is **86/86** (57 lib); `fmt` and `clippy -D warnings` pass. Windows cross-compile is rebuilt; real-hardware retest remains pending.
+- The Windows executable icon and WebUI favicon were replaced with the transparent-background 7-frame ICO; PE resource compilation and the WebUI favicon route were checked.
 - No version bump in this UI-language revert.
 
 ## v1.1.9 summary (historical)
