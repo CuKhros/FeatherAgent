@@ -375,6 +375,12 @@
   function showConfirm(params) {
     pendingConfirm = params.token;
     $("#modal-tool").textContent = `${params.tool}（风险：${params.risk}）`;
+    // 光有工具名没法判断：把内核送来的完整命令/参数摊开（rc.3 复测 I5）。
+    let preview = params.preview;
+    if (!preview && params.arguments !== undefined) {
+      try { preview = JSON.stringify(params.arguments, null, 2); } catch { preview = String(params.arguments); }
+    }
+    $("#modal-preview").textContent = preview || "（内核未提供参数）";
     $("#modal").classList.remove("hidden");
   }
 
@@ -664,7 +670,7 @@
   }
 
   // 渲染一个声明字段；TUI/WebUI 都只认 bool/int/number/string/enum 五种类型。
-  function pluginFieldHtml(f, value) {
+  function pluginFieldHtml(f, value, models) {
     const id = fieldInputId(f);
     const label = esc(f.label || f.key || "?");
     const desc = f.description ? `<span class="form-hint">${esc(f.description)}</span>` : "";
@@ -685,8 +691,36 @@
     if (type === "int" || type === "number") {
       return `<label>${label}<input id="${id}" type="number" ${attrs} value="${esc(value ?? f.default ?? "")}"></label>${desc}`;
     }
+    // options_source == "models"：下拉来自本地模型服务，同时保留手动输入（模型名可能是服务没报的）。
+    if (f.options_source === "models") {
+      const list = Array.isArray(models) ? models : [];
+      const current = value === null || value === undefined ? "" : String(value);
+      let opts = `<option value=""${current === "" ? " selected" : ""}>（跟随当前模型）</option>`;
+      for (const m of list) {
+        opts += `<option value="${esc(m)}"${m === current ? " selected" : ""}>${esc(m)}</option>`;
+      }
+      if (current && !list.includes(current)) {
+        opts += `<option value="${esc(current)}" selected>${esc(current)}（自定义）</option>`;
+      }
+      const hint = list.length
+        ? `<span class="form-hint">本地模型服务返回 ${list.length} 个模型；选下拉即填入下方输入框，也可直接键入</span>`
+        : `<span class="form-hint">模型列表不可用，请直接键入模型名</span>`;
+      return `<label>${label}<select id="${id}-pick">${opts}</select>` +
+        `<input id="${id}" type="text" placeholder="${esc(f.placeholder || "")}" value="${esc(current)}"></label>${desc}${hint}`;
+    }
     const kind = f.secret ? "password" : "text";
     return `<label>${label}<input id="${id}" type="${kind}" placeholder="${esc(f.placeholder || "")}" value="${esc(value ?? "")}"></label>${desc}`;
+  }
+
+  /// 下拉选中后写进同名输入框：保存逻辑只读输入框，避免两处取值打架。
+  function wirePluginPickers(fields) {
+    for (const f of fields) {
+      if (f.options_source !== "models") continue;
+      const pick = document.getElementById(`${fieldInputId(f)}-pick`);
+      const input = document.getElementById(fieldInputId(f));
+      if (!pick || !input) continue;
+      pick.onchange = () => { input.value = pick.value; };
+    }
   }
 
   function readFieldInput(f) {
@@ -766,9 +800,19 @@
     pluginSettings = settings;
     let form = "";
     if (settings && Array.isArray(settings.fields) && settings.fields.length) {
+      // 模型类字段的候选来自本地模型服务；前端统一取一次，所有字段共用。
+      let models = [];
+      if (settings.fields.some((f) => f.options_source === "models")) {
+        try {
+          const mv = await rpc("provider.models", {}, 45000);
+          models = Array.isArray(mv.models) ? mv.models : [];
+        } catch (e) {
+          models = [];
+        }
+      }
       const rows = settings.fields.map((f) => {
         const v = (settings.values || {})[f.key];
-        return pluginFieldHtml(f, v === null || v === undefined ? f.default : v);
+        return pluginFieldHtml(f, v === null || v === undefined ? f.default : v, models);
       }).join("");
       form = `
       <div class="settings-section">
@@ -782,6 +826,7 @@
       </div>`;
     }
     $("#plugin-detail").innerHTML = head + form;
+    if (settings && Array.isArray(settings.fields)) wirePluginPickers(settings.fields);
     $("#btn-plugin-detail-toggle").onclick = () => togglePlugin(name, enabled);
     const save = document.getElementById("btn-plugin-settings-save");
     if (save) save.onclick = () => savePluginSettings(name);

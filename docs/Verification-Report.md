@@ -1,10 +1,28 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.1)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3 summary (current candidate)
+## v1.2.1-rc.3.1 summary (current candidate)
+
+The rc.3 real-hardware retest confirmed the mechanics (include / not_include / answer-verbatim evidence / two-round approval under mock, bench 7/7) but found that a real 7B guide made 4/4 runs `degraded`: the rubric only carried `criterion`/`check`, and both retries resent the identical prompt (I2). It also asked for four UX changes: model fields should be picked from the local model service, TUI Enter should save from any field, permission prompts should show the complete command on both front ends, and the product should display as **FeatherAgent**.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| I1 degraded on 7B | `GUIDE_SYSTEM` gives a literal JSON schema + few-shot and states that only `must_include`/`must_not_include`/`min_points`/`pattern` are criteria; `review.parse_rubric` accepts 1–5 items, keeps description-only items as `judge_only`, requires ≥1 hard criterion overall | Unit tests `review_rubric_accepts_description_only_items_with_warning`, `review_rubric_requires_literal_must_include` (single item now accepted with a warning) |
+| I2 identical retries | `review.guide` takes `feedback`; `review_prepare` builds the prompt inside the retry loop and reinjects the previous parse error (3 attempts) | Integration `review_gate_reinjects_schema_error_and_falls_back_to_judge_only`: attempt 2 succeeds after reinjection; an always-soft guide ends judge-only with `review.warn`, never `degraded` |
+| Tolerant degrade | Zero hard criteria is retried, then accepted for judge-only evaluation; `review.warn` (29) carries “没有硬判据” / “判据全是字面短语” / “第 N 次判据不合格” | Round-trip test for `EventKind::ReviewWarn`; integration asserts the warn text |
+| Model dropdown | `SettingField.options_source`/`allow_custom`; review-gate declares `models`; TUI and WebUI call `provider.models` and render a picker while keeping manual entry | TUI PTY shows “本地模型 1 个；←/→ 选择”; WebUI WS `plugin.settings` returns three fields with `options_source:"models"` and `allow_custom:true`; static assets contain the `<select>` + input pair |
+| TUI Enter save | Enter on any value row submits the form (enable row toggles then saves) | TUI PTY: Enter on `max_rounds` persisted 2→3 into `data/config.json` |
+| Permission prompt | `tool.confirm_request` adds `arguments` + `preview`; TUI popup and WebUI modal render it | Integration asserts `arguments.cmd == "echo hi"` and `preview` contains the command; WebUI WS run received a 9-character `$ echo hi` preview and denied successfully |
+| Naming | `version`, `serve` banner, help header, TUI/WebUI titles show **FeatherAgent**; binaries/paths unchanged | CLI output `FeatherAgent 1.2.1-rc.3.1 starting …`; TUI header `FeatherAgent v1.2.1-rc.3.1` |
+
+Linux has **111 tests: 110 passed, 1 ignored by default** (61 lib, 14 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 26 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Release bench (3 consecutive runs): kernel **2,473,328 B (2.359 MiB)**; warm **1.256 / 1.241 / 1.208 ms**; cold **4.523 / 4.342 / 4.378 ms**; RSS max **3,456 KiB**; write P95 **3.726 / 2.714 / 2.835 µs**; assemble P95 **0.156 / 0.154 / 0.151 ms**; RPC P95 **0.054 / 0.046 / 0.065 ms**; all gates true.
+
+Not verified: v1.2.1-rc.3.1 Windows real hardware (real 7B guide producing a hard criterion or warned judge-only, the model dropdowns against a live Ollama, Enter-to-save on ConPTY, the permission popup in Windows Terminal, S3 t6 single call), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run.
+
+## v1.2.1-rc.3 summary (historical, released)
 
 The rc.2.1 real-hardware retest closed G1 (review can approve) and G3 (`chat.finished.status` tri-state) but showed that the gate can still be satisfied by copying the guide's own sentences (H1), that the judge echoes the prompt instead of the answer (H2), that malformed tool names surface as opaque RPC errors (H3), and that S3 t5/t6 depend on prompt luck (H4). It also asked for an architectural change: plugin settings must be declared by the plugin, relayed by the kernel, and rendered generically, instead of being hard-coded into each front end.
 

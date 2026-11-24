@@ -1,6 +1,22 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.1` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.1] - 2026-11-24
+
+### Fixed
+- Review-gate on a real 7B guide: the guide prompt now ships a literal JSON schema and few-shot; `review.guide` accepts `feedback` and `review_prepare` reinjects the previous `review.parse_rubric` error instead of resending the same prompt (3 attempts).
+- `review.parse_rubric` accepts 1–5 items, keeps description-only items as `judge_only`, and only requires one hard criterion across the rubric; an always-soft rubric ends in judge-only evaluation with `review.warn` instead of `degraded`.
+- `tools/s3_batch.py` t6 now allows exactly one tool call and forbids `tool.shell` / `tool.ping`.
+
+### Added
+- `EventKind::ReviewWarn` (`review.warn`, code 29) for rubric quality warnings and rejected attempts.
+- `SettingField.options_source` / `allow_custom`; `plugins/review-gate/plugin.json` declares model fields as `models`, so TUI and WebUI show a real dropdown fed by `provider.models` (manual entry still allowed).
+- `tool.confirm_request` carries `arguments` and a human-readable `preview`; TUI gets a permission popup and WebUI shows the command in its modal.
+
+### Changed
+- TUI plugin page: Enter on any value field saves the form (enable row toggles then saves).
+- User-visible product name is **FeatherAgent** (binaries, subcommands, package names and paths unchanged).
 
 ## [1.2.1-rc.3] - 2026-11-24
 

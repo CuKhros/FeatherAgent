@@ -332,6 +332,11 @@ struct ModelReply {
     tool_calls: Vec<crate::context::parse::ToolCall>,
 }
 
+/// 权限弹窗预览上限：够看完整命令，又不至于把弹窗撑爆。
+/// guide 最多重出几次判据：第一次 + 两次带错误回注的重试。
+const REVIEW_GUIDE_ATTEMPTS: u32 = 3;
+/// 权限弹窗预览上限：够看完整命令，又不至于把弹窗撑爆。
+const CONFIRM_PREVIEW_MAX_CHARS: usize = 4_000;
 const MAX_TOOL_FAILURES: u32 = 3;
 
 enum ToolExecError {
@@ -1227,7 +1232,7 @@ impl Kernel {
                     EventKind::ToolCall,
                     json!({"name": call.name, "arguments": call.arguments}),
                 );
-                match self.authorize(session, &call.name) {
+                match self.authorize(session, &call.name, &call.arguments) {
                     Ok(true) => {}
                     Ok(false) => {
                         self.emit(
@@ -1762,32 +1767,51 @@ impl Kernel {
         input: &str,
     ) -> Result<Value, String> {
         let gate = self.plugins.get(plugin).map_err(|e| e.to_string())?;
-        let prompt = gate
-            .call(
-                "review.guide",
-                json!({"input": input, "environment": self.review_environment(session)}),
-            )
-            .map_err(|e| e.to_string())?;
-        let messages = prompt
-            .get("messages")
-            .cloned()
-            .ok_or("review.guide 未返回 messages")?;
         let model = rg.guide.effective_model(&cfg.model);
+        let environment = self.review_environment(session);
         let mut last = String::new();
-        for attempt in 1..=2u32 {
+        for attempt in 1..=REVIEW_GUIDE_ATTEMPTS {
+            // rc.3 复测 I2：两次重试原来发的是同一个 prompt，7B 于是稳定地错两次。
+            // 现在把上一次的校验错误作为 feedback 回注，让 guide 知道要改什么。
+            let mut params = json!({"input": input, "environment": environment});
+            if !last.is_empty() {
+                params["feedback"] = json!(last);
+            }
+            let prompt = gate
+                .call("review.guide", params)
+                .map_err(|e| e.to_string())?;
+            let messages = prompt
+                .get("messages")
+                .cloned()
+                .ok_or("review.guide 未返回 messages")?;
             // 空响应在 review_model_call 内已重试一次；这里只负责 rubric 不合格时重出清单。
             let raw = self.review_model_call(
                 session,
                 cfg,
                 &model,
                 rg.guide.temperature,
-                messages.clone(),
+                messages,
                 Duration::from_secs(180),
             )?;
             match gate.call("review.parse_rubric", json!({"text": raw})) {
                 Ok(parsed) => {
                     let rubric = parsed.get("rubric").cloned().unwrap_or(json!([]));
                     let count = rubric.as_array().map(|x| x.len()).unwrap_or(0);
+                    let hard_items = parsed
+                        .get("hard_items")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(0);
+                    // 一条硬判据都没有时先带错误回注重试；重试用尽后仍然接受，
+                    // 由 judge 逐条评估并打 review.warn，而不是整轮 degraded。
+                    if hard_items == 0 && attempt < REVIEW_GUIDE_ATTEMPTS {
+                        last = "整份清单没有硬判据：criterion/check 只是说明，判据必须写在 must_include / must_not_include / min_points / pattern 上".into();
+                        self.emit(
+                            &session.id,
+                            EventKind::ReviewWarn,
+                            json!({"text": format!("第 {attempt} 次判据不合格：{last}"), "model": model, "attempts": attempt, "retry": true}),
+                        );
+                        continue;
+                    }
                     if count > 0 {
                         self.emit(
                             &session.id,
@@ -1800,14 +1824,49 @@ impl Kernel {
                                 "attempts": attempt,
                             }),
                         );
+                        // 宽容降级：只有描述、没有硬判据的条目交给 judge，但要明说，
+                        // 免得用户以为门禁真的做了确定性检查。
+                        let warnings: Vec<String> = parsed
+                            .get("warn")
+                            .and_then(|x| x.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x.as_str())
+                                    .map(|x| x.to_string())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        for text in warnings {
+                            self.emit(
+                                &session.id,
+                                EventKind::ReviewWarn,
+                                json!({"text": text, "model": model, "attempts": attempt}),
+                            );
+                        }
                         return Ok(rubric);
                     }
                     last = "验收清单为空".into();
                 }
-                Err(e) => last = e.to_string(),
+                Err(e) => {
+                    last = e.to_string();
+                    if attempt < REVIEW_GUIDE_ATTEMPTS {
+                        self.emit(
+                            &session.id,
+                            EventKind::ReviewWarn,
+                            json!({
+                                "text": format!("第 {attempt} 次判据不合格：{last}"),
+                                "model": model,
+                                "attempts": attempt,
+                                "retry": true,
+                            }),
+                        );
+                    }
+                }
             }
         }
-        Err(format!("guide 连续 2 次未产出合规 rubric：{last}"))
+        Err(format!(
+            "guide 连续 {REVIEW_GUIDE_ATTEMPTS} 次未产出合规 rubric：{last}"
+        ))
     }
 
     fn review_judge(
@@ -2028,12 +2087,19 @@ impl Kernel {
         })
     }
 
-    fn authorize(&self, session: &Arc<Session>, tool: &str) -> Result<bool, String> {
+    fn authorize(
+        &self,
+        session: &Arc<Session>,
+        tool: &str,
+        arguments: &Value,
+    ) -> Result<bool, String> {
         match self.gate.check(tool, &session.id) {
             Decision::Allowed => Ok(true),
             Decision::ConfirmNeeded { token } => {
                 let (tx, rx) = mpsc::channel();
                 self.confirms.lock().insert(token.clone(), tx);
+                // rc.3 复测 I5：确认请求只有工具名，用户没法判断“到底要跑什么命令”。
+                // 这里把原始 arguments 和一份人读的 preview 一起广播，前端只负责展示。
                 self.broadcast(json!({
                     "jsonrpc": "2.0",
                     "method": "tool.confirm_request",
@@ -2042,6 +2108,8 @@ impl Kernel {
                         "token": token,
                         "tool": tool,
                         "risk": "dangerous",
+                        "arguments": arguments,
+                        "preview": confirm_preview(tool, arguments),
                     }
                 }));
                 match rx.recv_timeout(Duration::from_secs(120)) {
@@ -2519,6 +2587,45 @@ struct ReviewJudgeInput<'a> {
     input: &'a str,
     answer: &'a str,
     rubric: &'a Value,
+}
+
+/// 把一次工具调用整理成权限弹窗里能直接读到的一段话。
+/// shell 给命令行原文，写文件给路径，其余给缩进 JSON；超过 4KB 截断并标注原始长度。
+fn confirm_preview(_tool: &str, arguments: &Value) -> String {
+    let mut out = String::new();
+    let command = arguments
+        .get("command")
+        .or_else(|| arguments.get("cmd"))
+        .and_then(|x| x.as_str())
+        .filter(|x| !x.trim().is_empty());
+    if let Some(cmd) = command {
+        out.push_str(&format!("$ {cmd}\n"));
+        let rest: serde_json::Map<String, Value> = arguments
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .filter(|(k, _)| k.as_str() != "command" && k.as_str() != "cmd")
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !rest.is_empty() {
+            out.push_str(&serde_json::to_string_pretty(&Value::Object(rest)).unwrap_or_default());
+            out.push('\n');
+        }
+    } else if arguments.is_null() {
+        out.push_str("（无参数）\n");
+    } else {
+        out.push_str(&serde_json::to_string_pretty(arguments).unwrap_or_default());
+        out.push('\n');
+    }
+    let total = out.chars().count();
+    if total > CONFIRM_PREVIEW_MAX_CHARS {
+        let cut: String = out.chars().take(CONFIRM_PREVIEW_MAX_CHARS).collect();
+        format!("{cut}…（已截断，共 {total} 字符，完整参数见 arguments 字段）")
+    } else {
+        out.trim_end().to_string()
+    }
 }
 
 fn review_feedback_text(verdict: &Value) -> String {

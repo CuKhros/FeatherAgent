@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.1 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.1-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3 把插件设置改成声明式——插件在 `plugin.json` 里写清 schema，内核通过 `plugin.settings` 原样转述，TUI 与 WebUI 通用渲染，装新插件不用改前端。同时修掉 rc.2.1 复测的 H1–H4：判据为 2–5 条短语（`must_include` ≤20 字、至少一条非子串判据）、judge 前硬校验覆盖字面/禁词/要点数/glob、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”、S3 t5/t6 强制只调用一次工具。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.1 先修 rc.3 真机暴露的“真实 7B guide 全量 degraded”：guide 现在拿到明确的 JSON schema，校验错误会回注进重试，只有描述项的判据改为 judge-only 评估并打 `review.warn`，不再整轮降级。插件设置新增由 `provider.models` 填充的模型下拉（仍可手动输入），TUI 插件页任意字段 Enter 保存，两端权限申请显示完整命令，产品显示名统一为 **FeatherAgent**（二进制与路径不变）。rc.3 把插件设置改成声明式——插件在 `plugin.json` 里写清 schema，内核通过 `plugin.settings` 原样转述，TUI 与 WebUI 通用渲染，装新插件不用改前端。同时修掉 rc.2.1 复测的 H1–H4：判据为 2–5 条短语（`must_include` ≤20 字、至少一条非子串判据）、judge 前硬校验覆盖字面/禁词/要点数/glob、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”、S3 t5/t6 强制只调用一次工具。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3\
+D:\FeatherAgent-1.2.1-rc.3.1\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.1` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3
+cd D:\FeatherAgent-1.2.1-rc.3.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -164,6 +164,16 @@ v1.2.1-rc.3 回归核对：
 6. 工具名纠错：让模型用一个不存在的工具（或喂 `TOOL:{"name":"tool.fs"}`），`tool.error` 必须返回 `未知工具 tool.fs。可用工具：…`，且回合并未让插件熔断，而是继续对话。
 7. S3 复现性：跑 `tools/s3_batch.py`（或手工同题）。t5 必须先调一次读工具再回答，t6 必须恰好调一次后报告失败。
 
+v1.2.1-rc.3.1 回归核对：
+
+1. **真实 7B guide 跑通门禁。** 打开 review-gate 发一条普通任务：`review.guide` 的判据必须至少一条带 `must_include` / `must_not_include` / `min_points` / `pattern`；只有 `criterion`/`check` 不算判据。若 guide 仍只给描述，回合必须出现 `review.warn`（“没有硬判据”）并继续交给 judge，而不是直接 `degraded`。
+2. **重试带上错误。** 第一次判据被拒时，必须看到 `review.warn` 写明“第 1 次判据不合格：…”，且第二次 guide 的回答与第一次不同（内核回注了错误，不再原样重发）。
+3. **模型下拉。** 在 WebUI 与 TUI 打开 review-gate 页：`guide.model`、`exec.model`、`judge.model` 必须是由本地模型服务（`provider.models` / Ollama `/api/tags`）填充的下拉，并带“（跟随当前模型）”选项；选中后保存，读 `config.json` 核对。再手动键入一个服务未返回的模型名，确认也能保存（自定义入口必须保留）。
+4. **任意字段 Enter 保存（TUI）。** 打开插件页，把光标移到某个值字段（不是保存行），按 Enter，退出再进：值必须已经落盘。启停行按 Enter 要翻转并保存。
+5. **权限申请带完整命令。** 触发 `tool.shell`（让它执行 `echo hi`）。TUI 弹窗与 WebUI 弹窗都必须显示完整命令 `echo hi`，不能只有工具名和风险等级；按 `n` / Esc 拒绝时不得执行。
+6. **S3 t6 只调一次。** 跑 `tools/s3_batch.py`：t6 必须只调一次读工具，随后解释失败，不得再补 `tool.shell` / `tool.ping`。
+7. **H3 可构造入口。** 不需要模型配合：用 `provider-mock` 执行 `featheragent chat --text 'TOOL:{"name":"tool.fs","arguments":{"path":"a.txt"}}'`，应得到含 `未知工具 tool.fs` 与可用清单的 `tool.error`。
+
 v1.2.1 追加核对：
 
 1. 设置页应出现 `provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、`provider-openai`；切换 provider 时，如果 Base URL 为空或仍是某个默认值，应自动填对应默认端口。
@@ -177,13 +187,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.1-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

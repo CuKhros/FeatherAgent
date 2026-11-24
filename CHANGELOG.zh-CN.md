@@ -1,6 +1,22 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.1` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.1] - 2026-11-24
+
+### 修复
+- 真实 7B guide 下的 review-gate：guide prompt 给出明确的 JSON schema 与 few-shot；`review.guide` 支持 `feedback`，`review_prepare` 把上一轮 `review.parse_rubric` 的错误回注进重试，而不是原样重发（最多 3 次）。
+- `review.parse_rubric` 接受 1–5 条，只带描述的条目标为 `judge_only` 保留，整份清单只需一条硬判据；始终是软判据时以 judge-only 评估并打 `review.warn`，不再整轮 `degraded`。
+- `tools/s3_batch.py` t6 现在只允许一次工具调用，并禁止 `tool.shell` / `tool.ping`。
+
+### 新增
+- `EventKind::ReviewWarn`（`review.warn`，编号 29），用于判据质量告警与被拒重试。
+- `SettingField.options_source` / `allow_custom`；`plugins/review-gate/plugin.json` 把模型字段声明为 `models`，TUI 与 WebUI 通过 `provider.models` 渲染真下拉（仍可手动输入）。
+- `tool.confirm_request` 带 `arguments` 与人读 `preview`；TUI 新增权限弹窗，WebUI 弹窗展示完整命令。
+
+### 变更
+- TUI 插件页：任意值字段 Enter 即保存整张表单（启停行先翻转再保存）。
+- 用户可见产品名统一为 **FeatherAgent**（二进制、子命令、包名与路径不变）。
 
 ## [1.2.1-rc.3] - 2026-11-24
 

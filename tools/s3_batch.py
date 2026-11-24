@@ -74,7 +74,9 @@ TASKS = [
     # t5/t6 显式写出“必须调用工具/只调用一次”：不写死这条约束时，4B 模型会直接凭上下文猜答案，
     # 或失败后换路径反复重试，S3 口径无法稳定复现（rc.2.1 真机报告 H4）。
     ("t5-multi", "必须先调用 tool.fs.read 工具读取 workspace/s3-probe.txt，再用一句话总结它的内容。禁止不调用工具直接回答。", "read", "FEATHER"),
-    ("t6-missing", "请调用 tool.fs.read 读取 workspace/no-such-file-xyz.txt 并把结果告诉我。只调用一次读取工具；如果读取失败，直接说明失败原因，不要重试、不要换路径、不要改用其他工具。", "read", "不存在", True),
+    # rc.3 复测 I3：只写“不要重试”时模型仍会补调一个别的工具（如 tool.shell/ping）；
+    # 这里把“本轮只允许一次工具调用”讲死，并点名禁止常见的替代工具。
+    ("t6-missing", "请调用 tool.fs.read 读取 workspace/no-such-file-xyz.txt，然后说明结果。本轮只允许一次工具调用：不要调用第二个工具，不要调用 tool.shell、tool.ping 或任何其他工具；如果读取失败，直接说明失败原因，不要重试、不要换路径。", "read", "不存在", True),
 ]
 
 print(f"项目工作区: {WORKSPACE}")

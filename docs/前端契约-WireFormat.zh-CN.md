@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.3**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.3.1**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -177,7 +177,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 
 ### 5.1 工具确认与拒绝（v1.1.4）
 
-- dangerous 工具需要确认时，内核广播 **notification** `tool.confirm_request`，参数为 `session` / `token` / `tool` / `risk`；它不是 `event`，不写入事件日志。
+- dangerous 工具需要确认时，内核广播 **notification** `tool.confirm_request`，参数为 `session` / `token` / `tool` / `risk`，并在 v1.2.1-rc.3.1 增加 `arguments`（模型产出的原始 JSON）与 `preview`（人读文本：`tool.shell` 给 `$ <命令>` 加其余参数，其他工具给缩进 JSON，超 4 KB 截断）。前端应展示 `preview`，且必须容忍它缺失（老内核）。
 - 前端用 `tool.confirm`（`{"token":"...","allow":true}`）或 `tool.deny`（`{"token":"..."}`）响应。
 - 拒绝时除 `permission.denied` 外，还会写入一条结构化 `tool.result`：`{"denied":true,"result":{"error":"permission_denied","reason":"user_denied|确认超时","tool":"..."}}`，模型下一轮可据此解释。
 - `chat` 命令支持 `--allow <tool,...>` / `--yes` 自动确认；未放行时默认立即 deny（`--confirm-timeout` 可保留人工窗口）。
@@ -257,7 +257,8 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 - `manifest.settings`（可选，v1.2.1-rc.3）是插件设置界面的唯一来源：
   - `root`——这批字段落在哪个配置路径（缺省 `plugin_settings.<插件名>`）；
   - `title` / `description`——表单上方显示什么；
-  - `fields[]`——`key`、可选绝对 `path`（用于指向既有顶层键）、`label`、`type`（只允许 `bool|int|number|string|enum`）、`default`、`description`、`placeholder`、`min`、`max`、`step`、`options`、`secret`。
+  - `fields[]`——`key`、可选绝对 `path`（用于指向既有顶层键）、`label`、`type`（只允许 `bool|int|number|string|enum`）、`default`、`description`、`placeholder`、`min`、`max`、`step`、`options`、`options_source`（`""` 或 `"models"`）、`allow_custom`、`secret`。
+  - `options_source:"models"` 不代表内核解析列表：内核只转述声明，前端自己调既有 `provider.models` RPC 并渲染选择器；`allow_custom:true` 表示列表外的值仍必须能保存（服务没报的模型名要能手动填）。
 - 未声明设置项的插件仍会出现在 `plugin.list`；`plugin.settings` 对它返回业务错误（“插件 X 未声明设置项”），前端应回退到清单摘要 + 启用开关。
 - 写入走 `config.set`，路径为展开后的 `<root>.<key>`；内核校验类型/区间/枚举，并拒绝 `plugin_settings.<name>` 下未声明的键；首次写声明路径会自动补父级。前端不得硬编码任何插件的字段名，一律按 `plugin.settings` 渲染。
 - `registry[]` 条目自带 `settings`（同一份 schema），因此侧边栏可以在插件进程启动前就建好。
@@ -336,6 +337,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 ```
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.3.1：`review.guide`（25）、`review.verdict`（26）、`review.finished`（27）、`review.feedback`（28）之后新增 `review.warn`（29，payload `{text, model, attempts, retry?}`）。warn 只表示“用较弱判据评估”或“这次判据被拒并重试”，不表示门禁失败；只有描述项判据会走 judge-only 并告警，完全产不出判据仍以 `degraded` 收尾。`review.guide` payload 的 `attempts` 标明是第几次产出的判据；`review.guide` 插件调用新增可选 `feedback` 参数，用于回注上一轮校验错误。
 - 1.2.1-rc.2.1：review-gate 启用且回合正常结束时，`chat.finished.status` 为 `ok`（approved）、`unapproved`（达到轮次上限仍未通过）或 `degraded`（guide/judge 连续两次失败）。payload 的 `review.status` 同步为 `approved|unapproved|degraded`；`review.verdict.items[]` 除 `evidence` 外新增 `criterion` 与 `check`。客户端不得再假设 `ok` 一定代表“已评审通过”。
 
 - `chat.inject` 先写 `user.message`（`source:"steer"`、`during_turn:true`），再打断当前生成；若会话空闲返回业务错误，请改用 `chat.send`。

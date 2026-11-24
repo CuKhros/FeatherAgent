@@ -1,8 +1,8 @@
 [package]
 name = "featheragent"
-version = "1.2.1-rc.3"
+version = "1.2.1-rc.3.1"
 edition = "2021"
-description = "FeatherAgent（轻羽）：面向 1B~14B 本地小模型的上下文引擎 + 极轻量可移植 Agent 内核"
+description = "FeatherAgent（轻羽）：让其他 Agent 把重复繁琐的工作外包给 1B~14B 本地小模型的上下文引擎 + 极轻量可移植 Agent 内核"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/CuKhros/FeatherAgent"

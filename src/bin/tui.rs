@@ -14,7 +14,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 use serde_json::{json, Value};
 use unicode_width::UnicodeWidthChar;
@@ -64,9 +64,20 @@ struct PluginFormState {
     text: Vec<String>,
     enabled: bool,
     enabled0: bool,
+    /// `options_source == "models"` 的字段共用这一份本地模型列表（来自 provider.models）。
+    models: Vec<String>,
     field: usize,
     status: String,
     dirty: bool,
+}
+
+/// 危险工具的确认请求：带完整参数，用户才能判断“这条命令该不该放”。
+#[derive(Clone)]
+struct ConfirmRequest {
+    token: String,
+    tool: String,
+    risk: String,
+    preview: String,
 }
 
 /// 把值转成可编辑文本；空值用空串，避免把 null 显示给用户。
@@ -159,7 +170,7 @@ struct App {
     focus: Focus,
     chat_scroll: usize,
     status: String,
-    confirm: Option<(String, String, String)>, // token, tool, risk
+    confirm: Option<ConfirmRequest>,
     settings: Option<SettingsState>,
     plugins: Option<PluginsState>,
     quit: bool,
@@ -1031,6 +1042,31 @@ impl App {
                     })
                     .collect();
                 let text: Vec<String> = values.iter().map(value_text).collect();
+                // 模型类字段：按声明向本地模型服务要一份列表，前端只负责展示。
+                let wants_models = fields
+                    .iter()
+                    .any(|f| f.get("options_source").and_then(|x| x.as_str()) == Some("models"));
+                let (models, model_hint) = if wants_models {
+                    match self.conn.client.call("provider.models", json!({})) {
+                        Ok(mv) => {
+                            let list: Vec<String> = mv
+                                .get("models")
+                                .and_then(|x| x.as_array())
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect();
+                            let hint = match mv.get("error").and_then(|x| x.as_str()) {
+                                Some(e) => format!("模型列表不可用（可手动输入）: {e}"),
+                                None => format!("本地模型 {} 个；←/→ 选择", list.len()),
+                            };
+                            (list, hint)
+                        }
+                        Err(e) => (Vec::new(), format!("模型列表读取失败（可手动输入）: {e}")),
+                    }
+                } else {
+                    (Vec::new(), String::new())
+                };
                 let title = v
                     .get("title")
                     .and_then(|x| x.as_str())
@@ -1058,8 +1094,16 @@ impl App {
                         text,
                         enabled,
                         enabled0: enabled,
+                        models,
                         field: 0,
-                        status: format!("已读取 {name} 的声明；←/→ 调整，Enter 保存"),
+                        status: format!(
+                            "已读取 {name} 的声明；Enter 保存{}",
+                            if model_hint.is_empty() {
+                                String::new()
+                            } else {
+                                format!("；{model_hint}")
+                            }
+                        ),
                         dirty: false,
                     });
                 }
@@ -1077,7 +1121,7 @@ impl App {
 
     /// 插件页按键：字段 0 是启用开关，其余字段按内核声明的类型调整。
     fn on_plugin_key(&mut self, code: KeyCode) {
-        let (n, save_idx, cancel_idx, field) = match &self.settings {
+        let (n, _save_idx, cancel_idx, field) = match &self.settings {
             Some(s) => match &s.plugin {
                 Some(p) => (p.len(), p.save_idx(), p.cancel_idx(), p.field),
                 None => return,
@@ -1094,21 +1138,25 @@ impl App {
             return;
         }
         if code == KeyCode::Enter {
-            if field == save_idx {
-                self.save_plugin_settings();
-            } else if field == cancel_idx {
+            if field == cancel_idx {
                 if let Some(s) = &mut self.settings {
                     s.plugin = None;
                     s.detail = false;
                     s.nav_focus = true;
                 }
             } else if field == 0 {
+                // 启停行：Enter 先翻转再落盘，语义与“改完就保存”一致。
                 if let Some(s) = &mut self.settings {
                     if let Some(p) = &mut s.plugin {
                         p.enabled = !p.enabled;
                         p.dirty = true;
                     }
                 }
+                self.save_plugin_settings();
+            } else {
+                // rc.3 复测 I4：以前只有光标停在“保存”上才有动作，回车等于没反应。
+                // 现在任意字段 Enter 都提交整个表单（含保存行本身）。
+                self.save_plugin_settings();
             }
             return;
         }
@@ -1244,6 +1292,25 @@ impl App {
                             v = v.min(m);
                         }
                         p.text[idx] = format!("{v:.2}");
+                    }
+                    "string" => {
+                        // options_source == "models" 的字段循环「跟随当前模型 + 本地模型列表」。
+                        let source = f
+                            .get("options_source")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        if source == "models" {
+                            let mut opts: Vec<String> = vec![String::new()];
+                            opts.extend(p.models.iter().cloned());
+                            if opts.len() > 1 {
+                                let cur = p.text[idx].clone();
+                                let pos = opts.iter().position(|o| *o == cur).unwrap_or(0) as i32;
+                                let next = ((pos + dir).rem_euclid(opts.len() as i32)) as usize;
+                                let chosen = opts[next].clone();
+                                p.text[idx] = chosen.clone();
+                                p.values[idx] = json!(chosen);
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -1435,26 +1502,29 @@ impl App {
 
     fn on_key(&mut self, code: KeyCode, mods: KeyModifiers) {
         // 危险工具确认优先
-        if let Some((token, tool, risk)) = self.confirm.clone() {
+        if let Some(c) = self.confirm.clone() {
             match code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     let _ = self
                         .conn
                         .client
-                        .call("tool.confirm", json!({"token": token, "allow": true}));
-                    self.status = format!("已允许 {tool}");
+                        .call("tool.confirm", json!({"token": c.token, "allow": true}));
+                    self.status = format!("已允许 {}", c.tool);
                     self.confirm = None;
                     return;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    let _ = self.conn.client.call("tool.deny", json!({"token": token}));
-                    self.status = format!("已拒绝 {tool}");
+                    let _ = self
+                        .conn
+                        .client
+                        .call("tool.deny", json!({"token": c.token}));
+                    self.status = format!("已拒绝 {}", c.tool);
                     self.confirm = None;
                     return;
                 }
                 _ => {}
             }
-            self.status = format!("待确认（{risk}）: {tool} — y 允许 / n 拒绝");
+            self.status = format!("待确认（{}）: {} — y 允许 / n 拒绝", c.risk, c.tool);
             return;
         }
         if self.settings.is_some() {
@@ -1743,7 +1813,27 @@ impl App {
                         .and_then(|x| x.as_str())
                         .unwrap_or("dangerous")
                         .to_string();
-                    self.confirm = Some((token, tool, risk));
+                    // 内核把 arguments 和 preview 一起送来；缺 preview 时退化成紧凑 JSON，
+                    // 保证任何老内核下弹窗也至少能看到参数。
+                    let preview = v
+                        .pointer("/params/preview")
+                        .and_then(|x| x.as_str())
+                        .filter(|x| !x.trim().is_empty())
+                        .map(|x| x.to_string())
+                        .unwrap_or_else(|| {
+                            v.pointer("/params/arguments")
+                                .map(|a| {
+                                    serde_json::to_string_pretty(a)
+                                        .unwrap_or_else(|_| a.to_string())
+                                })
+                                .unwrap_or_else(|| "（内核未提供参数）".to_string())
+                        });
+                    self.confirm = Some(ConfirmRequest {
+                        token,
+                        tool,
+                        risk,
+                        preview,
+                    });
                 }
                 continue;
             }
@@ -2234,10 +2324,16 @@ fn wrap_display(prefix: &str, text: &str, width: usize) -> Vec<String> {
 fn draw(f: &mut Frame, app: &App) {
     if app.plugins.is_some() {
         draw_plugins(f, app);
+        if let Some(c) = &app.confirm {
+            draw_confirm(f, c, f.size());
+        }
         return;
     }
     if app.settings.is_some() {
         draw_settings(f, app);
+        if let Some(c) = &app.confirm {
+            draw_confirm(f, c, f.size());
+        }
         return;
     }
     let chunks = Layout::default()
@@ -2392,13 +2488,13 @@ fn draw(f: &mut Frame, app: &App) {
         let cards = app.ctx["cards"].as_u64().unwrap_or(0);
         ctx_lines.push(Line::from(format!("摘要卡 {cards} 张")));
     }
-    if let Some((_, tool, risk)) = &app.confirm {
+    if let Some(c) = &app.confirm {
         ctx_lines.push(Line::from(""));
         ctx_lines.push(Line::from(Span::styled(
-            format!("⚠ 待确认 [{risk}] {tool}"),
+            format!("⚠ 待确认 [{}] {}", c.risk, c.tool),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )));
-        ctx_lines.push(Line::from("y 允许 / n 拒绝"));
+        ctx_lines.push(Line::from("y 允许 / n 拒绝（完整命令见弹窗）"));
     }
     f.render_widget(
         Paragraph::new(ctx_lines)
@@ -2434,6 +2530,51 @@ fn draw(f: &mut Frame, app: &App) {
         let y = area.y + 1;
         f.set_cursor(x.min(area.right().saturating_sub(1)), y);
     }
+    if let Some(c) = &app.confirm {
+        draw_confirm(f, c, f.size());
+    }
+}
+
+/// 权限申请弹窗：把工具名、风险等级和完整命令摊开，用户不必猜“这条 y 到底放行什么”。
+fn draw_confirm(f: &mut Frame, c: &ConfirmRequest, area: Rect) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            "⚠ 危险工具需要确认",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("工具：{}    风险：{}", c.tool, c.risk)),
+        Line::from(""),
+        Line::from(Span::styled(
+            "将要执行：",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    for l in c.preview.lines().take(400) {
+        lines.push(Line::from(l.to_string()));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "y 允许 / n 或 Esc 拒绝",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )));
+    let want_h = lines.len() as u16 + 2;
+    let w = area.width.saturating_sub(8).clamp(40, 110);
+    let h = want_h.min(area.height.saturating_sub(4)).max(6);
+    let rect = Rect::new(
+        area.x + area.width.saturating_sub(w) / 2,
+        area.y + area.height.saturating_sub(h) / 2,
+        w,
+        h,
+    );
+    f.render_widget(Clear, rect);
+    f.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL).title("权限申请")),
+        rect,
+    );
 }
 
 fn draw_settings(f: &mut Frame, app: &App) {
@@ -2788,6 +2929,26 @@ fn draw_plugin_form(f: &mut Frame, p: &PluginFormState, enabled: bool, category:
                     }
                 }
                 _ => String::new(),
+            };
+            let hint = if f
+                .get("options_source")
+                .and_then(|x| x.as_str())
+                .map(|x| x == "models")
+                .unwrap_or(false)
+                && matches!(kind, "string")
+                && !p.models.is_empty()
+            {
+                format!("{hint}（←/→ 选择）")
+            } else if f
+                .get("options_source")
+                .and_then(|x| x.as_str())
+                .map(|x| x == "models")
+                .unwrap_or(false)
+                && matches!(kind, "string")
+            {
+                format!("{hint}（列表不可用，手动输入）")
+            } else {
+                hint
             };
             format!("{marker}{label:<16} {shown}{hint}")
         };

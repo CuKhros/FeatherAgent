@@ -40,6 +40,7 @@ pub enum EventKind {
     ReviewVerdict,
     ReviewFinished,
     ReviewFeedback,
+    ReviewWarn,
 }
 
 impl EventKind {
@@ -74,6 +75,7 @@ impl EventKind {
             ReviewVerdict => 26,
             ReviewFinished => 27,
             ReviewFeedback => 28,
+            ReviewWarn => 29,
         }
     }
 
@@ -108,6 +110,7 @@ impl EventKind {
             26 => ReviewVerdict,
             27 => ReviewFinished,
             28 => ReviewFeedback,
+            29 => ReviewWarn,
             _ => return None,
         })
     }
@@ -143,6 +146,7 @@ impl EventKind {
             ReviewVerdict => "review.verdict",
             ReviewFinished => "review.finished",
             ReviewFeedback => "review.feedback",
+            ReviewWarn => "review.warn",
         }
     }
 
@@ -178,6 +182,7 @@ impl EventKind {
             "review.verdict" => ReviewVerdict,
             "review.finished" => ReviewFinished,
             "review.feedback" => ReviewFeedback,
+            "review.warn" => ReviewWarn,
             _ => return None,
         })
     }
@@ -298,6 +303,13 @@ pub struct SettingField {
     pub step: Option<f64>,
     #[serde(default)]
     pub options: Vec<String>,
+    /// 选项来源：非空时由前端向内核询问后填充（目前只有 `models`）。
+    /// 内核只转述声明，不替前端解析列表，这样 GUI 插件也能复用同一份数据源。
+    #[serde(default)]
+    pub options_source: String,
+    /// 是否允许填写列表外的值（模型名通常为 true：本地服务可能返回不了列表）。
+    #[serde(default)]
+    pub allow_custom: bool,
     #[serde(default)]
     pub secret: bool,
 }
@@ -446,6 +458,11 @@ mod tests {
         assert_eq!(EventKind::ToolError.code(), 22);
         assert_eq!(EventKind::ToolDegraded.code(), 23);
         assert_eq!(EventKind::ContextCompacted.code(), 24);
+        // rc.3.1：review.warn 是新增的软告警事件，编号必须紧接 review.feedback。
+        assert_eq!(EventKind::ReviewWarn.code(), 29);
+        assert_eq!(EventKind::from_code(29), Some(EventKind::ReviewWarn));
+        assert_eq!(EventKind::ReviewWarn.as_str(), "review.warn");
+        assert_eq!(EventKind::parse("review.warn"), Some(EventKind::ReviewWarn));
     }
 
     fn field(kind: &str, key: &str) -> SettingField {
@@ -461,6 +478,8 @@ mod tests {
             max: Some(5.0),
             step: Some(1.0),
             options: vec!["a".into(), "b".into()],
+            options_source: String::new(),
+            allow_custom: false,
             secret: false,
         }
     }

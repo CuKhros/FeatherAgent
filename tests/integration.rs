@@ -448,6 +448,60 @@ fn review_gate_unapproved_is_reflected_in_chat_status() {
 }
 
 #[test]
+fn review_gate_reinjects_schema_error_and_falls_back_to_judge_only() {
+    let (_h, conn) = start("review-soft", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "ssoft"}))
+        .unwrap();
+    // 第一次只给描述项 → 内核必须带错误回注重要一次；第二次给合规判据。
+    let seen = send_and_wait(&conn, "ssoft", "REVIEW_SOFT_FIRST", Duration::from_secs(20));
+    let guide = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.guide"))
+        .expect("应有 review.guide");
+    assert_eq!(
+        guide
+            .pointer("/params/payload/attempts")
+            .and_then(|x| x.as_u64()),
+        Some(2),
+        "软判据应触发一次带错误回注的重试: {guide:?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")),
+        "重试应留下 review.warn"
+    );
+    assert_eq!(last_model_text(&seen), "REVIEW-FINAL");
+
+    // 始终只给描述项：重试用尽后降级为 judge-only，而不是整轮 degraded。
+    let seen = send_and_wait(&conn, "ssoft", "REVIEW_SOFT_ONLY", Duration::from_secs(20));
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.finished"))
+        .expect("应有 review.finished");
+    assert_ne!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("degraded"),
+        "全描述项不应整轮 degraded: {finished:?}"
+    );
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("没有硬判据"))
+                    .unwrap_or(false)
+        }),
+        "应显式告警“没有硬判据”"
+    );
+}
+
+#[test]
 fn review_gate_three_roles_retry_and_approve() {
     let (_h, conn) = start("review", |cfg| {
         cfg.review_gate.enabled = true;
@@ -602,6 +656,20 @@ fn tool_execution_and_permission_gate() {
             }
         }
         let c = confirm.expect("未收到 tool.confirm_request");
+        // H5：确认请求必须带完整命令，用户才能判断要不要放行。
+        assert_eq!(
+            c.pointer("/params/arguments/cmd").and_then(|x| x.as_str()),
+            Some("echo hi"),
+            "confirm_request 缺少原始 arguments: {c:?}"
+        );
+        let preview = c
+            .pointer("/params/preview")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        assert!(
+            preview.contains("echo hi"),
+            "preview 应包含完整命令: {preview:?}"
+        );
         let token = c
             .pointer("/params/token")
             .and_then(|t| t.as_str())

@@ -5,6 +5,8 @@
 
 A context engine for **1B–14B local models**, plus a **tiny, zero-runtime-dependency** portable agent kernel.
 
+**Why it exists:** so that other agents can outsource repetitive, tedious work to a local small model. A larger orchestrator hands the boring, high-volume, low-risk steps to a 1B–14B model running on the same machine — no cloud round trip, no per-token bill, no context the big model has to carry.
+
 > English is the primary documentation language. Chinese editions use the `.zh-CN.md` suffix, e.g. [README.zh-CN.md](README.zh-CN.md).
 
 ## Why FeatherAgent
@@ -62,7 +64,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.3 pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.3.1 pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -110,7 +112,7 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.3-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.3.1-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
 .\featheragent.exe help                       # command table
@@ -122,7 +124,7 @@ Unzip `FeatherAgent-1.2.1-rc.3-windows-x64.zip` into a writable directory (not `
 
 The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.3)
+## Platform gate differences (v1.2.1-rc.3.1)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
@@ -151,6 +153,7 @@ The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runt
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.3.1 Changes](docs/v1.2.1-rc.3.1-Changes.md)** — guide schema + error reinjection + tolerant judge-only rubric with `review.warn`, model-name dropdowns from `provider.models`, Enter-saves-anywhere on the TUI plugin page, full command in permission prompts, display name **FeatherAgent** ([中文](docs/v1.2.1-rc.3.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3 Changes](docs/v1.2.1-rc.3-Changes.md)** — plugin-declared settings (`manifest.settings` + `plugin.settings`), generic TUI/WebUI forms, phrase-only rubrics with four criterion kinds, answer-verbatim judge evidence, unknown-tool correction ([中文](docs/v1.2.1-rc.3-变更说明.zh-CN.md))
 - **[v1.2.1-rc.2.1 Changes](docs/v1.2.1-rc.2.1-Changes.md)** — Ollama `/api/tags` model list, TUI review-gate settings, literal rubric/hardcheck, judge retry, `chat.finished` status ([中文](docs/v1.2.1-rc.2.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.2 Changes](docs/v1.2.1-rc.2-Changes.md)** — provider empty-body fix, review temperature validation, effective-config banner ([中文](docs/v1.2.1-rc.2-变更说明.zh-CN.md))
@@ -165,8 +168,10 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
-`v1.2.1-rc.3` turns plugin settings into a declaration. A plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the new `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. The review-gate and S3 findings H1–H4 from the rc.2.1 retest are also fixed: rubrics are 2–5 phrase-only items with at least one non-substring criterion, the pre-judge hardcheck covers literal/banned/point-count/glob checks, judge evidence must be a verbatim ≥10-character window of the answer, malformed tool names get an explicit “unknown tool + available tools” correction, and the S3 t5/t6 prompts require exactly one tool call.
+`v1.2.1-rc.3.1` keeps the rc.3 architecture and fixes what the real-hardware retest found: the guide now gets a literal JSON schema plus a few-shot, its validation error is reinjected into retries instead of resending the same prompt, and a rubric with only descriptions is retried once and then evaluated judge-only with a `review.warn` event rather than degrading the whole round. Plugin settings gained `options_source`, so model fields show a real dropdown fed by the local model service while still accepting a typed name; the TUI plugin page saves on Enter from any field; permission prompts now show the full command/arguments on both front ends; and the product display is **FeatherAgent** (binaries and paths unchanged).
 
-Linux automation has **109 tests: 108 passed, 1 ignored by default** (61 lib, 12 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 26 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (edit `max_rounds` 2→3, `Ctrl+S`, config.json shows 3) and WebUI in a real browser (nine declared fields incl. enum rendered, save persisted), plus a WebSocket re-check of the bridge after saving (`model.message` + `chat.finished(ok)`).
+`v1.2.1-rc.3` made plugin settings a declaration: a plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. It also closed the review-gate and S3 findings H1–H4 from the rc.2.1 retest: phrase-only rubrics with four criterion kinds and a pre-judge hardcheck, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that ask for a single tool call.
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus the rc.2 retest that verified the provider body, temperature rejection, banner, R1 gates, and review-gate mechanism. The v1.2.1-rc.3 Windows package is cross-compiled and its automation runs only on Linux; plugin-declared settings on both front ends, 7B review quality, and S3 reproducibility still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.
+Linux automation has **111 tests: 110 passed, 1 ignored by default** (61 lib, 14 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 26 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (the review-gate page opens with the model hint “本地模型 1 个；←/→ 选择”, and Enter on a value row persisted `max_rounds` 2→3 into `config.json`), and the WebUI bridge over WebSocket (`plugin.settings` returns the three model fields with `options_source:"models"`, and a `tool.shell` confirm request arrived with `arguments` + a `$ echo hi` preview that could be denied).
+
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus the rc.2 retest that verified the provider body, temperature rejection, banner, R1 gates, and review-gate mechanism. The v1.2.1-rc.3.1 Windows package is cross-compiled and its automation runs only on Linux; the rc.3 retest confirmed the mock-level review mechanics and the 7/7 bench gates, and 7B review quality, the model dropdowns, Enter-to-save and the permission popup still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.

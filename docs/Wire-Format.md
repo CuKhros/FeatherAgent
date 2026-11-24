@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.3** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.3.1** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -175,7 +175,7 @@ Full parameter details live in `src/server/mod.rs::dispatch`; this document lock
 
 ### 5.1 Tool confirmation and denial (v1.1.4)
 
-- When a dangerous tool needs confirmation, the kernel broadcasts a **notification** `tool.confirm_request` with `session` / `token` / `tool` / `risk`; it is not an `event` and is not written to the log.
+- When a dangerous tool needs confirmation, the kernel broadcasts a **notification** `tool.confirm_request` with `session` / `token` / `tool` / `risk`, plus (v1.2.1-rc.3.1) `arguments` (the exact JSON the model produced) and `preview` (a human-readable rendering: `$ <command>` then remaining params for `tool.shell`, pretty JSON otherwise, truncated at 4 KB). Frontends should show `preview` and must tolerate its absence (older kernels).
 - The frontend replies with `tool.confirm` (`{"token":"...","allow":true}`) or `tool.deny` (`{"token":"..."}`).
 - A denial emits `permission.denied` plus a structured `tool.result`: `{"denied":true,"result":{"error":"permission_denied","reason":"user_denied|confirm_timeout","tool":"..."}}`, so the model can explain it next round.
 - The `chat` command supports `--allow <tool,...>` / `--yes`; otherwise it denies immediately by default (`--confirm-timeout` keeps a human window).
@@ -252,10 +252,11 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 - A successful `plugin.install` with an enabled plugin registers the spec immediately; `plugin.enable` re-registers and starts on demand; `plugin.disable` terminates the running process.
 - `plugin.list.registry` can drive dynamic sidebars; `live.state=ready` means running, `stopped` means on-demand.
 - Plugin manifest `api` must satisfy `>=1.0 <2.0`; otherwise installation fails.
-- `manifest.settings` (optional, v1.2.1-rc.3) is the only source of plugin settings UI:
+- `manifest.settings` (optional, v1.2.1-rc.3; extended in v1.2.1-rc.3.1) is the only source of plugin settings UI:
   - `root` — config path holding these fields (default `plugin_settings.<name>`);
   - `title` / `description` — shown above the form;
-  - `fields[]` — `key`, optional absolute `path` (to point at an existing top-level key), `label`, `type` (`bool|int|number|string|enum` only), `default`, `description`, `placeholder`, `min`, `max`, `step`, `options`, `secret`.
+  - `fields[]` — `key`, optional absolute `path` (to point at an existing top-level key), `label`, `type` (`bool|int|number|string|enum` only), `default`, `description`, `placeholder`, `min`, `max`, `step`, `options`, `options_source` (`""` or `"models"`), `allow_custom`, `secret`.
+  - `options_source:"models"` does not mean the kernel resolves the list: the kernel relays the declaration only. Frontends call the existing `provider.models` RPC and render a picker; `allow_custom:true` means a value outside the list must still be accepted (a model name the service does not report).
 - A plugin that declares no settings still appears in `plugin.list`; `plugin.settings` returns a business error (“plugin X declares no settings”). Frontends should fall back to the manifest summary plus the enable toggle.
 - Writes go through `config.set` with the expanded paths (`<root>.<key>`). The kernel validates type/range/enum and rejects undeclared keys under `plugin_settings.<name>`; first write to a declared path creates missing parents. Frontends must not hard-code plugin field names — render from `plugin.settings`.
 - `registry[]` entries carry `settings` (the same schema) so a sidebar can be built before any plugin process starts.
@@ -335,6 +336,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 ```
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.3.1: `review.guide` (25), `review.verdict` (26), `review.finished` (27), `review.feedback` (28) are joined by `review.warn` (29, payload `{text, model, attempts, retry?}`). A warn means “evaluated with a weaker rubric” or “this attempt was rejected and retried”, never “the gate failed”; a rubric with description-only items is evaluated judge-only and warned, while a guide that cannot produce any criterion still ends in `degraded`. `review.guide` payload `attempts` tells which attempt produced the rubric; `review.guide` plugin call accepts an optional `feedback` argument carrying the previous validation error.
 - 1.2.1-rc.2.1: when review-gate is enabled and the turn completes, `chat.finished.status` is `ok` (approved), `unapproved` (round limit reached without approval), or `degraded` (guide/judge failed twice). The payload `review.status` mirrors `approved|unapproved|degraded`; `review.verdict.items[]` carries `criterion` and `check` in addition to `evidence`. Clients must not assume `ok` means reviewed-and-approved.
 
 - `chat.inject` writes `user.message` (`source:"steer"`, `during_turn:true`) then interrupts generation; an idle session returns a business error, so use `chat.send`.

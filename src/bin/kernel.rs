@@ -28,7 +28,7 @@ fn main() {
     }
     if args.has("version") {
         println!(
-            "featheragent {} (contract {})",
+            "FeatherAgent {} (contract {})",
             featheragent::VERSION,
             featheragent::proto::CONTRACT_API
         );
@@ -46,7 +46,7 @@ fn main() {
         }
         "version" | "-v" | "--version" => {
             println!(
-                "featheragent {} (contract {})",
+                "FeatherAgent {} (contract {})",
                 featheragent::VERSION,
                 featheragent::proto::CONTRACT_API
             );
@@ -470,7 +470,7 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
 
     // 先输出再初始化：Windows 首次启动登记内置插件可能很慢，不能等内核构造完才打 banner。
     println!(
-        "featheragent {} starting  socket={}  data={}  workspace={}  provider={}  codec={}",
+        "FeatherAgent {} starting  socket={}  data={}  workspace={}  provider={}  codec={}",
         featheragent::VERSION,
         socket.display(),
         normalized_path(&paths.data),
