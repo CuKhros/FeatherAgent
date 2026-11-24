@@ -779,7 +779,7 @@ impl Kernel {
         if let Ok(p) = self.plugins.get(provider) {
             if let Ok(res) = p.call(
                 "embed",
-                json!({"text": text, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
+                json!({"text": text, "model": cfg.model, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
             ) {
                 if let Some(v) = res.get("vector").and_then(|v| v.as_array()) {
                     let vector: Vec<f32> = v
@@ -1507,7 +1507,7 @@ impl Kernel {
         };
         let Ok(res) = p.call(
             "embed",
-            json!({"text": text, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
+            json!({"text": text, "model": cfg.model, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
         ) else {
             return;
         };
@@ -2286,29 +2286,42 @@ fn validate_config(cfg: &Config, plugins: &PluginHost) -> Result<(), String> {
             cfg.review_gate_plugin
         ));
     }
+    // review-gate 的约束是 schema 级约束：即使 enabled=false 也必须拒绝越界值，
+    // 否则任何 RPC 客户端都能把 judge 温度写到 1.9，打开开关后直接失去可复现性。
     let rg = &cfg.review_gate;
-    if rg.enabled {
-        if !(1..=5).contains(&rg.max_rounds) {
-            return Err("review_gate.max_rounds 必须在 1–5 之间".into());
-        }
-        if !(0.2..=2.0).contains(&rg.guide.temperature) {
-            return Err("review_gate.guide.temperature 必须在 0.2–2.0 之间".into());
-        }
-        if !(0.6..=2.0).contains(&rg.exec.temperature) {
-            return Err("review_gate.exec.temperature 必须在 0.6–2.0 之间".into());
-        }
-        if !(0.0..=0.2).contains(&rg.judge.temperature) {
-            return Err("review_gate.judge.temperature 必须在 0.0–0.2 之间".into());
-        }
-        if rg.guide.temperature > 0.5 {
-            return Err("review_gate.guide.temperature 超出允许区间 [0.2, 0.5]".into());
-        }
-        if rg.exec.temperature > 1.5 {
-            return Err("review_gate.exec.temperature 超出允许区间 [0.6, 1.5]".into());
-        }
-        if rg.on_exhausted != "return_last_with_flag" {
-            return Err("review_gate.on_exhausted 只支持 return_last_with_flag".into());
-        }
+    if !(1..=5).contains(&rg.max_rounds) {
+        return Err(format!(
+            "review_gate.max_rounds={} 超出允许区间 [1, 5]",
+            rg.max_rounds
+        ));
+    }
+    check_unit_range(
+        "review_gate.guide.temperature",
+        rg.guide.temperature,
+        0.2,
+        0.5,
+    )?;
+    check_unit_range(
+        "review_gate.exec.temperature",
+        rg.exec.temperature,
+        0.6,
+        1.5,
+    )?;
+    check_unit_range(
+        "review_gate.judge.temperature",
+        rg.judge.temperature,
+        0.0,
+        0.2,
+    )?;
+    if rg.on_exhausted != "return_last_with_flag" {
+        return Err("review_gate.on_exhausted 只支持 return_last_with_flag".into());
+    }
+    Ok(())
+}
+
+fn check_unit_range(path: &str, value: f64, lo: f64, hi: f64) -> Result<(), String> {
+    if !value.is_finite() || !(lo..=hi).contains(&value) {
+        return Err(format!("{path}={value} 超出允许区间 [{lo:.1}, {hi:.1}]"));
     }
     Ok(())
 }

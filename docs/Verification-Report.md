@@ -1,10 +1,25 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.1)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.2)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.1 summary (current candidate)
+## v1.2.1-rc.2 summary (current candidate)
+
+The rc.1 real-hardware retest closed R1 and confirmed the review-gate flow, but exposed a P0 provider regression and two configuration issues. This patch fixes them without changing R1 thresholds or the review-gate protocol.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| P0 empty body | Optional Authorization no longer creates a blank line before `Content-Length`; headers are appended line by line | Raw-request unit test; empty-key Ollama `/api/chat` + `/api/embed` integration; live echo `Content-Length: 6842` |
+| P1 temperature ranges | review-gate guide/exec/judge bounds are enforced even when disabled; rejected before save | `config.set` integration rejects 0.9 / 1.9 / 0.8 with ranges; disk unchanged |
+| P2 effective config | `serve` prints model/provider/base URL and source; CLI-vs-config conflicts warn | Live startup: `model_source=cli`, `config.get` returns the CLI values, and `review.guide` emitted the CLI model |
+| Embedding model | `recall` / `index_user_text` pass `cfg.model` to `provider.embed` | Empty-key Ollama test asserts `/api/embed` carries `model` and `input` |
+
+Linux passes **97/97** (59 lib, 7 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 21 integration); the network-dependent case passes separately. `fmt` and `clippy -D warnings` pass.
+
+Not verified: v1.2.1-rc.2 Windows real hardware (P0 provider path, config rejection, banner/source line, review-gate UI/events), TUI PTY regression for the API-key field, two-turn in-turn steer, full two-turn `/compact`, real DeepSeek billing, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64.
+
+## v1.2.1-rc.1 summary (historical, released)
 
 This round closes R1 from the v1.2.0-rc.1 real-hardware retest and adds two requested capabilities: the `review-gate` three-role loop plugin and OpenAI-compatible local providers with an Ollama API key.
 
@@ -144,11 +159,11 @@ NEW-K fixed; TUI session/chat modes, CJK cursor alignment, external workspace, p
 
 ## 3. Test matrix
 
-### 3.1 Unit tests (58 in v1.2.1)
+### 3.1 Unit tests (59 in v1.2.1-rc.2)
 
-`cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net (Bearer headers), util, provider HTTP/Ollama JSON and review-gate parsers.
+`cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net (Bearer headers and optional-header/body layout), util, provider HTTP/Ollama JSON and review-gate parsers.
 
-### 3.2 Integration tests (20, `tests/integration.rs`)
+### 3.2 Integration tests (21, `tests/integration.rs`)
 
 Real kernel + plugin subprocesses over UDS:
 
@@ -170,6 +185,7 @@ Real kernel + plugin subprocesses over UDS:
 | `llama_cpp_and_ninfer_openai_chat_use_api_key` | both providers probe `/v1/models`, stream chat, send Bearer |
 | `ollama_native_chat_uses_api_key` | native `/api/chat` with `Authorization: Bearer` over chunked NDJSON |
 | `ninfer_probe_uses_v1_and_bearer_key` | base URL without `/v1` is normalized; probe carries the key |
+| `ollama_native_chat_without_key_still_sends_body` | empty key still sends `Content-Length` + `/api/chat` body; `/api/embed` carries model/input |
 
 ### 3.3 Golden trace
 
@@ -181,24 +197,24 @@ Real kernel + plugin subprocesses over UDS:
 
 Command: `./target/release/featheragent bench --json`
 
-| Metric | Gate (Linux) | v1.2.1-rc.1 measured (3 runs) | Result |
+| Metric | Gate (Linux) | v1.2.1-rc.2 measured (3 runs) | Result |
 |---|---|---|---|
-| Kernel binary | ≤ 8 MiB | **2,406,664 B (2.295 MiB)** | ✅ |
-| Warm boot P50 (`boot_ms_p50`) | < 20 ms | **1.228 / 1.246 / 1.259 ms** | ✅ |
-| Cold spawn P50 (`cold_spawn_ms_p50`) | < 100 ms | **5.575 / 4.437 / 4.234 ms** | ✅ |
-| Idle RSS | ≤ 15 MiB | **3,456 KiB (3.375 MiB)** | ✅ |
-| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.604 / 2.985 µs** (run 3) | ✅ |
-| Context assembly P95 (no summary model) | < 30 ms | **0.134 ms** (run 3) | ✅ |
-| RPC round-trip P95 | < 1 ms | **0.046 ms** (run 3) | ✅ |
+| Kernel binary | ≤ 8 MiB | **2,408,072 B (2.297 MiB)** | ✅ |
+| Warm boot P50 (`boot_ms_p50`) | < 20 ms | **1.127 / 1.147 / 1.150 ms** | ✅ |
+| Cold spawn P50 (`cold_spawn_ms_p50`) | < 100 ms | **1.850 / 2.310 / 1.915 ms** | ✅ |
+| Idle RSS | ≤ 15 MiB | **3,328 / 3,584 / 3,328 KiB (max 3.5 MiB)** | ✅ |
+| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.533 / 2.664 µs** (run 3) | ✅ |
+| Context assembly P95 (no summary model) | < 30 ms | **0.135 ms** (run 3) | ✅ |
+| RPC round-trip P95 | < 1 ms | **0.029 ms** (run 3) | ✅ |
 
 > Warm boot uses the same install root, one discarded warm-up, then five samples; cold spawn is a real `serve` child process measured to socket readiness. Event dispatch P95 < 200 µs has no standalone number; the bus and write share the in-process path, so no independent benchmark exists.
 
-### 4.1 Windows x64 cross-compile and Wine smoke
+### 4.1 Windows x64 cross-compile
 
 - Toolchain: `x86_64-w64-mingw32-gcc` + `x86_64-pc-windows-gnu`, static CRT.
 - Five PE32+ x64 exes; only system DLLs (`kernel32/ntdll/msvcrt/ws2_32/user32/...`), no `libgcc/libwinpthread/libstdc++`.
-- Wine 6.0.3: `version` / `help` / `doctor` / `bench` pass; `serve` starts but `chat initialize` times out under Wine's overlapping named pipes. Wine numbers are **not** Windows conclusions.
-- v1.2.0-rc.1 PE resources: `.rsrc` 0x1188, `FileVersion/ProductVersion=1.2.0-rc.1`, MIT copyright visible via `strings -el`.
+- Wine smoke was not repeated for rc.2 (Wine 6 cannot exercise Windows named-pipe concurrency or ConPTY); earlier Wine results remain non-Windows evidence.
+- v1.2.1-rc.2 PE resources: `.rsrc` 0x1200, `FileVersion/ProductVersion=1.2.1-rc.2`, MIT copyright visible via `strings -el`; kernel exe 2,177,536 B.
 
 ## 5. Crash recovery (S2)
 
@@ -240,12 +256,12 @@ Security checks:
 
 | Artifact | Content |
 |---|---|
-| `featheragent-core-1.2.1-rc.1-linux-x64.tar.gz` | kernel, TUI, WebUI launcher, `feather-plugin`, `feather-storage`, 11 plugin manifests, docs, README |
-| `featheragent-webui-1.2.1-rc.1-linux-x64.tar.gz` | WebUI launcher, `web/`, favicon, docs |
-| `featheragent-plugins-1.2.1-rc.1-linux-x64.tar.gz` | 11 plugin manifests |
-| `FeatherAgent-1.2.1-rc.1-windows-x64.zip` | five PE exes, 11 plugin manifests, docs, icon; kernel exe 2,173,440 B |
+| `featheragent-core-1.2.1-rc.2-linux-x64.tar.gz` | kernel, TUI, WebUI launcher, `feather-plugin`, `feather-storage`, 11 plugin manifests, docs, README |
+| `featheragent-webui-1.2.1-rc.2-linux-x64.tar.gz` | WebUI launcher, `web/`, favicon, docs |
+| `featheragent-plugins-1.2.1-rc.2-linux-x64.tar.gz` | 11 plugin manifests |
+| `FeatherAgent-1.2.1-rc.2-windows-x64.zip` | five PE exes, 11 plugin manifests, docs, icon; kernel exe 2,177,536 B |
 
-The adjacent `.sha256` files and GitHub Release assets carry the final hashes; they are generated after the documentation freeze, so they are not duplicated here. The release kernel is 2,406,664 B (2.295 MiB); `sha256sum -c` and `unzip -t` pass before upload.
+Exact package bytes and SHA-256 values are recorded in the adjacent `.sha256` files and the GitHub Release notes. The release kernel is 2,408,072 B (2.297 MiB); `sha256sum -c`, `tar -tzf`, and `unzip -t` all pass.
 
 ## 7. Real defects found and fixed
 
@@ -257,6 +273,10 @@ The adjacent `.sha256` files and GitHub Release assets carry the final hashes; t
 | 4 | mock provider split a 16-byte stream by **bytes** | Chinese/emoji split into `�` | split by characters |
 | 5 | HTTP chunked decode used `from_utf8_lossy` per chunk | multibyte UTF-8 cut at chunk boundaries → mojibake (Ollama path) | accumulate bytes, decode complete lines at `\n` |
 | 6 | `tool.shell` timeout killed only `/bin/sh` | `sleep` descendants held stdout; `wait_with_output` hung to 30 s | `setsid` process group + `kill(-pid, SIGKILL)` |
+| 7 | Empty provider key inserted an empty Authorization line before `Content-Length` | HTTP headers terminated early; Ollama/OpenAI requests carried no visible body (`400 missing request body`) | append headers line by line; emit `Content-Length` before optional Authorization, final blank line once |
+| 8 | review-gate temperature bounds were checked only when `enabled=true` | out-of-range values (0.9/1.9/0.8) were accepted and persisted while disabled | schema-level validation with path, submitted value, and `[lo, hi]`; reject before save |
+| 9 | CLI overrides were invisible in the startup banner | `review.guide` model looked like the persisted value; users could not tell which model was live | print `effective model/provider/base_url` plus `*_source`, and warn on CLI/config conflict |
+| 10 | `/api/embed` used the provider default model, not the active model | recall/index could target a model the user did not select | pass `cfg.model` to `provider.embed` |
 
 ## 8. Untested items and deviations (honest statement)
 

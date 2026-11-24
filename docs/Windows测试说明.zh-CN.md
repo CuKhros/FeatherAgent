@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.1 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.2 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.1-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.2-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.1 关闭 R1：热启动与冷启动 spawn 分开计量；新增 `review-gate` 三角色插件、5 个 OpenAI 兼容本地 provider，以及 Ollama 等 provider 的可选 Bearer API Key。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.2 是 rc.1 真机复测补丁：修复 API Key 为空时 provider 请求体为空、review-gate 温度在关闭状态下也严格校验、启动打印最终生效的 model/provider/base URL，并让 embedding 使用当前模型。R1 与 review-gate 行为不变。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.1\
+D:\FeatherAgent-1.2.1-rc.2\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.1\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.1` 后再操作。
+看到 `serve ready: 1.2.1-rc.2` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.1
+cd D:\FeatherAgent-1.2.1-rc.2
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -139,6 +139,13 @@ Q1/Q2 小项：
 - 模型把 `count` 写成字符串 `"5"` 时，`web.search` 仍返回 5 条；`tool.result.count` 与请求一致。
 - `web.search` 的 schema 声明是 `integer`，字符串容错只发生在内核转发层，不改变对外契约。
 
+v1.2.1-rc.2 回归核对：
+
+1. 真实 Ollama + `provider-ollama`，API Key 留空，发送普通消息。不得再出现 `400 missing request body`。查看服务/代理日志：`POST /api/chat` 的 `Content-Length` 非 0，JSON body 含 `"model"` 与 `"messages"`；`/api/embed` 也必须有 body。
+2. 在 review-gate **关闭**时，用 `config.set` 设 `review_gate.judge.temperature=0.8`，必须被拒并提示 `超出允许区间 [0.0, 0.2]`，`config.json` 保留旧值；guide 0.9、exec 1.9 同样应被拒。
+3. 用与 `config.json` 不同的 `--model` 启动 `serve`，banner 必须打印 `effective model=<CLI 值> ... (model_source=cli ...)`，并出现 `warn: --model 覆盖 config.json ...`；`config.get` 与 `review.guide` 事件 payload 都必须返回 CLI 值。
+4. 再启用 review-gate 跑一次 `REVIEW_START`，guide/verdict/feedback/finished 事件序列应保持不变。
+
 v1.2.1 追加核对：
 
 1. 设置页应出现 `provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、`provider-openai`；切换 provider 时，如果 Base URL 为空或仍是某个默认值，应自动填对应默认端口。
@@ -152,13 +159,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.2 未跑 Wine；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.2-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

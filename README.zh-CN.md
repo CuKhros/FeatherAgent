@@ -61,7 +61,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.1 待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.2 待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -107,7 +107,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.2-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -119,7 +119,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.1）
+## 平台门禁差异（v1.2.1-rc.2）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -148,6 +148,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.2 变更说明](docs/v1.2.1-rc.2-变更说明.zh-CN.md)** —— provider 空 body 修复、review 温度校验、生效配置 banner
 - **[v1.2.1-rc.1 变更说明](docs/v1.2.1-rc.1-变更说明.zh-CN.md)** —— R1 热/冷启动拆分、review-gate、本地 provider、API Key 与测试
 - **[v1.2.0-rc.1 变更说明](docs/v1.2.0-rc.1-变更说明.zh-CN.md)** —— Q1/Q2、双平台版本/构建对齐、MIT 与公开仓库材料、平台矩阵
 - **[v1.1.9 Windows 修复对照](docs/v1.1.9-Windows修复说明.zh-CN.md)** —— P1 路径双重嵌套、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索
@@ -163,7 +164,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 状态
 
-`v1.2.1-rc.1` 关闭 v1.2.0-rc.1 真机复测的 R1，加入 `review-gate` 三角色插件，并扩展本地模型兼容。Linux 自动化 **95/95** 通过，另有 1 个需公网用例单独运行（58 lib、7 plugin、2 kernel、3 TUI、3 WebUI、2 golden、20 integration）。Linux Release 二进制 2.295 MiB；连续 3 次 bench 热启动 1.23–1.26 ms、冷启动 spawn 4.2–5.6 ms，全门禁通过。`fmt` 与 `clippy -D warnings` 通过。
+`v1.2.1-rc.2` 是针对 rc.1 Windows 真机报告的补丁版：修复 provider 空请求体（API Key 为空时 `Content-Length` 被空行截断）、review-gate 温度在关闭状态下也严格校验、启动 banner 打印最终生效的 model/provider/base URL 及来源，并让 embedding 使用当前模型。Linux 自动化 **97/97** 通过，另有 1 个需公网用例单独跑通（59 lib、7 plugin、2 kernel、3 TUI、3 WebUI、2 golden、21 integration）。`fmt` 与 `clippy -D warnings` 通过。R1 与 review-gate 行为保持 rc.1 已确认状态。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.1-rc.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；新的 R1 热/冷口径、review-gate UI/事件、provider API Key 字段、本地 provider 与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。本轮未实测项见上表。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.1-rc.2 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；P0 provider 路径、配置拒绝、生效配置 banner、review-gate UI/事件、API Key 字段、本地 provider 与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
 

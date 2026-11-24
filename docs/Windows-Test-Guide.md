@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.1 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.2 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.1-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.2-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.1 closes R1 by splitting warm boot from cold spawn, adds the `review-gate` three-role plugin, five OpenAI-compatible local providers, and an optional Bearer API key for Ollama and other providers. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.2 is the rc.1 retest patch: it fixes the empty provider request body when the API key is blank, enforces review-gate temperature ranges even while disabled, prints the effective model/provider/base URL at startup, and makes embeddings use the active model. R1 and review-gate behavior are unchanged. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.1\
+D:\FeatherAgent-1.2.1-rc.2\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.1`, then continue.
+Wait for `serve ready: 1.2.1-rc.2`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.1
+cd D:\FeatherAgent-1.2.1-rc.2
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -141,6 +141,13 @@ Q1/Q2 checks:
 - When the model sends `count` as `"5"`, `web.search` still returns 5 results; `tool.result.count` matches the request.
 - `web.search` schema remains `integer`; string tolerance happens only in the kernel forwarding layer and does not change the external contract.
 
+v1.2.1-rc.2 regression checks:
+
+1. Start real Ollama with `provider-ollama`, empty API key; send a normal message. It must not return `400 missing request body`. Inspect the server/proxy log: `POST /api/chat` has a non-zero `Content-Length` and a JSON body with `"model"` and `"messages"`; `/api/embed` also has a body.
+2. While review-gate is **disabled**, call `config.set` with `review_gate.judge.temperature=0.8`. It must be rejected with `超出允许区间 [0.0, 0.2]`, and `config.json` must keep the old value. Repeat guide 0.9 and exec 1.9.
+3. Start `serve` with a `--model` different from `config.json`. The banner must print `effective model=<cli value> ... (model_source=cli ...)` and a `warn: --model 覆盖 config.json ...` line. `config.get` and the `review.guide` event payload must return the CLI model.
+4. Enable review-gate and repeat the `REVIEW_START` flow; the guide/verdict/feedback/finished sequence must be unchanged.
+
 v1.2.1 additional checks:
 
 1. Settings shows `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, and `provider-openai`; changing provider fills the corresponding default base URL unless a custom URL is already present.
@@ -154,13 +161,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.1 did not run Wine; passing Wine does not equal passing Windows.
+- v1.2.1-rc.2 did not run Wine; passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.2-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

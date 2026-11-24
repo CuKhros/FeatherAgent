@@ -1,6 +1,19 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.1` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.2` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.2] - 2026-11-24
+
+### Fixed
+
+- P0: an empty provider API key inserted a blank line before `Content-Length`, terminating HTTP headers early. Ollama and OpenAI-compatible requests went out with no visible body (`400 missing request body`). Headers are now appended line by line; body and `Content-Length` are always present.
+- P1: review-gate guide/exec/judge temperature ranges are enforced regardless of `enabled`, and invalid values are rejected before `config.json` is written.
+- P2: `serve` prints the effective model/provider/base URL and their source; a CLI/config conflict emits an explicit warning.
+- Embedding requests now carry the active model instead of the provider default.
+
+### Added
+
+- Regression tests for empty-key request bodies (`/api/chat` and `/api/embed`), raw header/body layout, and review-gate range rejection.
 
 ## [1.2.1-rc.1] - 2026-11-24
 

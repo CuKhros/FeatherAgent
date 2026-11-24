@@ -356,6 +356,49 @@ fn ollama_native_chat_uses_api_key() {
 }
 
 #[test]
+fn ollama_native_chat_without_key_still_sends_body() {
+    let mock = MockOpenAi::new();
+    let base = mock.base.clone();
+    let (_h, conn) = start("ollamanokey", move |cfg| {
+        cfg.provider_plugin = "provider-ollama".into();
+        cfg.base_url = base;
+        cfg.provider_api_key = String::new();
+        cfg.max_turns = 2;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sollamanokey"}))
+        .unwrap();
+    let seen = send_and_wait(
+        &conn,
+        "sollamanokey",
+        "hello ollama",
+        Duration::from_secs(20),
+    );
+    assert_eq!(last_model_text(&seen), "OLLAMA-OK");
+    let reqs = mock.requests.lock().unwrap();
+    let chat = reqs
+        .iter()
+        .find(|r| r.starts_with("POST /api/chat "))
+        .expect("没有 /api/chat 请求");
+    assert!(
+        chat.contains("Content-Length: "),
+        "缺少 Content-Length: {chat}"
+    );
+    assert!(chat.contains("\"messages\""), "请求体丢失: {chat}");
+    assert!(chat.contains("\"stream\":true"), "请求体不完整: {chat}");
+    let embed = reqs
+        .iter()
+        .find(|r| r.starts_with("POST /api/embed "))
+        .expect("没有 /api/embed 请求");
+    assert!(
+        embed.contains("Content-Length: "),
+        "embed 缺少 Content-Length: {embed}"
+    );
+    assert!(embed.contains("\"input\""), "embed 请求体丢失: {embed}");
+    assert!(embed.contains("\"model\""), "embed 未带模型名: {embed}");
+}
+
+#[test]
 fn review_gate_three_roles_retry_and_approve() {
     let (_h, conn) = start("review", |cfg| {
         cfg.review_gate.enabled = true;
@@ -882,6 +925,45 @@ fn config_api_applies_and_lists_models() {
         .call("config.set", json!({"path": "no_such_field", "value": 1}))
         .unwrap_err();
     assert!(missing.contains("不存在"), "未知字段应被拒绝: {missing}");
+
+    // review-gate 温度是 schema 约束：即使 enabled=false 也必须拒绝越界值。
+    for (path, value, range) in [
+        ("review_gate.guide.temperature", 0.9, "[0.2, 0.5]"),
+        ("review_gate.exec.temperature", 1.9, "[0.6, 1.5]"),
+        ("review_gate.judge.temperature", 0.8, "[0.0, 0.2]"),
+    ] {
+        let err = conn
+            .client
+            .call("config.set", json!({"path": path, "value": value}))
+            .unwrap_err();
+        assert!(
+            err.contains(path) && err.contains(range),
+            "越界温度应被拒绝且带区间: path={path} err={err}"
+        );
+    }
+    let on_disk: Value =
+        serde_json::from_slice(&std::fs::read(&h.kernel.cfg_path).unwrap()).unwrap();
+    assert_eq!(
+        on_disk["review_gate"]["judge"]["temperature"].as_f64(),
+        Some(0.1)
+    );
+    let valid = conn
+        .client
+        .call(
+            "config.set",
+            json!({"patch": {
+                "review_gate": {
+                    "guide": {"temperature": 0.3},
+                    "exec": {"temperature": 0.7},
+                    "judge": {"temperature": 0.1}
+                }
+            }}),
+        )
+        .unwrap();
+    assert_eq!(
+        valid["config"]["review_gate"]["judge"]["temperature"].as_f64(),
+        Some(0.1)
+    );
 
     // 两个并发保存不应互相覆盖：锁保证最终值是其中一个完整结果。
     let k1 = h.kernel.clone();

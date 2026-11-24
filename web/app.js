@@ -779,15 +779,17 @@
     const guideTemp = Number($("#cfg-review-guide-temp").value || 0.3);
     const execTemp = Number($("#cfg-review-exec-temp").value || 0.7);
     const judgeTemp = Number($("#cfg-review-judge-temp").value || 0.1);
-    if (reviewEnabled) {
-      if (!Number.isInteger(reviewRounds) || reviewRounds < 1 || reviewRounds > 5) {
-        setSettingsStatus("三段校验轮次必须在 1–5 之间", "err");
-        return;
-      }
-      if (guideTemp < 0.2 || guideTemp > 0.5 || execTemp < 0.6 || execTemp > 1.5 || judgeTemp < 0 || judgeTemp > 0.2) {
-        setSettingsStatus("三段校验温度越界：guide 0.2–0.5 / exec 0.6–1.5 / judge 0.0–0.2", "err");
-        return;
-      }
+    // 即使当前未启用，也先校验，避免把越界值写进 config.json 后再打开。
+    if (!Number.isInteger(reviewRounds) || reviewRounds < 1 || reviewRounds > 5) {
+      setSettingsStatus("三段校验轮次必须在 1–5 之间", "err");
+      return;
+    }
+    if (![guideTemp, execTemp, judgeTemp].every(Number.isFinite)
+        || guideTemp < 0.2 || guideTemp > 0.5
+        || execTemp < 0.6 || execTemp > 1.5
+        || judgeTemp < 0 || judgeTemp > 0.2) {
+      setSettingsStatus("三段校验温度越界：guide 0.2–0.5 / exec 0.6–1.5 / judge 0.0–0.2", "err");
+      return;
     }
     setSettingsStatus("正在提交给内核…", "warn");
     try {

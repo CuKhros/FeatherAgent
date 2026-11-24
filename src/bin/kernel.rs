@@ -391,19 +391,44 @@ fn apply_workspace(paths: &mut Paths, cfg: &Config, cli_override: bool) {
 fn serve(args: &featheragent::util::Args) -> Result<(), String> {
     let t0 = Instant::now();
     let mut paths = paths_from(args)?;
-    let mut cfg = load_cfg(&paths);
+    let loaded = load_cfg(&paths);
+    let mut cfg = loaded.clone();
     apply_workspace(&mut paths, &cfg, args.flag("workspace").is_some());
     if let Some(s) = args.flag("sync") {
         cfg.sync = s.to_string();
     }
+    let mut provider_source = "config";
+    let mut model_source = "config";
+    let mut base_source = "config";
     if let Some(p) = args.flag("provider") {
+        if p != loaded.provider_plugin {
+            eprintln!(
+                "warn: --provider 覆盖 config.json 的 {}（实际使用 {}）",
+                loaded.provider_plugin, p
+            );
+        }
         cfg.provider_plugin = p.to_string();
+        provider_source = "cli";
     }
     if let Some(m) = args.flag("model") {
+        if m != loaded.model {
+            eprintln!(
+                "warn: --model 覆盖 config.json 的 {}（实际使用 {}）",
+                loaded.model, m
+            );
+        }
         cfg.model = m.to_string();
+        model_source = "cli";
     }
     if let Some(b) = args.flag("base-url") {
+        if b != loaded.base_url {
+            eprintln!(
+                "warn: --base-url 覆盖 config.json 的 {}（实际使用 {}）",
+                loaded.base_url, b
+            );
+        }
         cfg.base_url = b.to_string();
+        base_source = "cli";
     }
     if args.has("--strict-temp") {
         cfg.strict_temp = true;
@@ -455,6 +480,10 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
             Codec::Json => "json",
             Codec::MsgPack => "msgpack",
         }
+    );
+    println!(
+        "effective model={} provider={} base_url={} (model_source={}, provider_source={}, base_source={})",
+        cfg.model, cfg.provider_plugin, cfg.base_url, model_source, provider_source, base_source
     );
     println!(
         "serve: 初始化内核（首次启动需登记内置插件，Windows 首次可能 60–120s，会打印 [init] 进度）"

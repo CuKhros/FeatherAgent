@@ -49,18 +49,19 @@ fn connect(u: &Url) -> Result<TcpStream, String> {
 }
 
 fn build(host: &str, path: &str, body: &[u8], stream: bool, bearer: Option<&str>) -> Vec<u8> {
-    let auth = bearer
-        .filter(|k| !k.trim().is_empty())
-        .map(|k| format!("Authorization: Bearer {}\r\n", k.trim()))
-        .unwrap_or_default();
+    // 逐行追加可选的头，绝不能让空 Authorization 在 Content-Length 之前留下空行。
+    // 空行一旦出现在 Content-Length 之前，服务端会把 body 当作下一段请求或直接忽略。
     let mut req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n{}\r\nContent-Length: {}\r\nAccept: {}\r\nConnection: {}\r\n\r\n",
-        auth,
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccept: {}\r\nConnection: {}\r\n",
         body.len(),
         if stream { "text/event-stream" } else { "application/json" },
         if stream { "keep-alive" } else { "close" }
     )
     .into_bytes();
+    if let Some(key) = bearer.filter(|k| !k.trim().is_empty()) {
+        req.extend_from_slice(format!("Authorization: Bearer {}\r\n", key.trim()).as_bytes());
+    }
+    req.extend_from_slice(b"\r\n");
     req.extend_from_slice(body);
     req
 }
@@ -378,6 +379,51 @@ mod tests {
         let r = post_json(&url, &serde_json::json!({})).unwrap();
         assert_eq!(r.status, 200);
         assert_eq!(r.json().unwrap()["a"], 1);
+    }
+
+    fn capture_once() -> (String, std::sync::mpsc::Receiver<String>) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut r = std::io::BufReader::new(s.try_clone().unwrap());
+                let mut head = String::new();
+                loop {
+                    let mut line = String::new();
+                    if r.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    head.push_str(&line);
+                }
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("Content-Length: "))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                let mut body = vec![0u8; len];
+                r.read_exact(&mut body).ok();
+                let _ = tx.send(format!("{head}{}", String::from_utf8_lossy(&body)));
+                let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+            }
+        });
+        (format!("http://{addr}/v1/chat/completions"), rx)
+    }
+
+    #[test]
+    fn empty_bearer_preserves_headers_and_body() {
+        for key in [None, Some("")] {
+            let (url, rx) = capture_once();
+            let r = post_json_auth(&url, &serde_json::json!({}), key).unwrap();
+            assert_eq!(r.status, 200);
+            let req = rx.recv().unwrap();
+            assert!(req.contains("Content-Length: 2\r\n"), "{req}");
+            assert!(req.ends_with("{}"), "body missing: {req}");
+            assert!(
+                !req.contains("\r\n\r\nContent-Length"),
+                "header blank line: {req}"
+            );
+        }
     }
 
     #[test]

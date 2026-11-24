@@ -1,6 +1,19 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.1` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.2` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.2] - 2026-11-24
+
+### 修复
+
+- P0：provider API Key 为空时，空的 Authorization 在 `Content-Length` 之前留下空行，HTTP 头被提前终止，Ollama/OpenAI 兼容请求表现为空 body（`400 missing request body`）。现改为逐行追加头，`Content-Length` 与 body 始终存在。
+- P1：review-gate 三角色温度区间与 `enabled` 无关，越界值在写入 `config.json` 前拒绝。
+- P2：`serve` 打印最终生效的 model/provider/base URL 及来源；CLI 与 config 冲突时显式 warning。
+- embedding 请求使用当前模型，不再回落到 provider 默认模型。
+
+### 新增
+
+- 空 Key 请求体回归测试（`/api/chat`、`/api/embed`）、原始头/body 布局测试、review-gate 区间拒绝测试。
 
 ## [1.2.1-rc.1] - 2026-11-24
 
