@@ -170,6 +170,9 @@ fn manifest(role: &str) -> PluginManifest {
         capabilities: caps.into_iter().map(|s| s.to_string()).collect(),
         permissions: perms.into_iter().map(|s| s.to_string()).collect(),
         category: cat.into(),
+        // 设置项的唯一声明处是 plugins/<name>/plugin.json：内核在安装时读取并转述给前端，
+        // 握手不重复声明，避免两处漂移。
+        settings: None,
     }
 }
 
@@ -250,7 +253,8 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             if last_user.contains("[REVIEW-GUIDE]") {
                 return Ok((
                     json!({"rubric":[
-                        {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL","weight":1.0}
+                        {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL","weight":1.0},
+                        {"id":"c2","criterion":"答案不含被禁止的占位词","check":"不得出现『绝不应出现的占位词』","must_not_include":["绝不应出现的占位词"],"weight":1.0}
                     ]})
                     .to_string(),
                     0,
@@ -262,16 +266,16 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                     .map(|(_, a)| a)
                     .unwrap_or("");
                 let pass = answer.contains("REVIEW-FINAL");
-                let evidence = if pass {
-                    "答案包含 REVIEW-FINAL"
-                } else {
-                    "答案未包含 REVIEW-FINAL"
-                };
+                // evidence 必须是答案里的连续原文（内核会做子串校验），不能回显提示词。
+                let quote: String = answer.chars().take(24).collect();
                 return Ok((
                     json!({
                         "pass": pass,
-                        "items": [{"id":"c1","pass":pass,"evidence":evidence}],
-                        "evidence": evidence
+                        "items": [
+                            {"id":"c1","pass":pass,"evidence":quote},
+                            {"id":"c2","pass":true,"evidence":quote}
+                        ],
+                        "evidence": quote
                     })
                     .to_string(),
                     0,
@@ -736,7 +740,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                 .take(2_000)
                 .collect::<String>();
             Ok(json!({"messages": json!([
-                {"role": "system", "content": "你是 Review-Gate 的指导者（guide）。只写验收清单，不回答任务本身。输出一个 JSON 对象：{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"可核对的要求\",\"check\":\"逐字核对 must_include 是否出现\",\"must_include\":\"必须逐字出现在最终答案中的短语\",\"weight\":1}]}。写 3–6 条；每条必须具体，禁止“准确、完整、逻辑清晰”这类空话。must_include 必须是 1–40 字的字面短语（优先结论句、文件名、命令、专有名词），judge 与 exec 都按它逐字核对；check 必须复述该字面短语，不得只写抽象要求。至少一条 must_include 命中任务的核心结论。不要输出 JSON 以外的文字。"},
+                {"role": "system", "content": "你是 Review-Gate 的指导者（guide）。只写可核对的验收判据，绝对不要写答案、结论或完整句子。输出一个 JSON 对象：{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"这项检查什么\",\"check\":\"怎么核对\",\"must_include\":\"关键词或短语\",\"weight\":1}]}。写 2–5 条；must_include 只能是关键词、文件名、命令、术语等 ≤20 字的短语，禁止以句号结尾的整句，禁止把答案原句当判据；至少一条改用 must_not_include（禁词）、min_points（至少几个要点）或 pattern（通配，* 任意、? 单字符、| 或）。判据要能区分“答对”和“照抄判据”。不要输出 JSON 以外的文字。"},
                 {"role": "user", "content": format!("[REVIEW-GUIDE]\n任务输入：\n{input}\n\n环境摘要：\n{environment}")}
             ]), "model_visible": true}))
         }
@@ -757,7 +761,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                 .collect::<String>();
             let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
             Ok(json!({"messages": json!([
-                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。默认不通过；只按给定验收清单逐条核对最终答案。先逐条抄录 check 与 must_include，再在答案中查找 must_include 原文；找不到就直接 pass=false。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"引用答案中的原文至少 10 字\"}],\"evidence\":\"逐条核对结论，至少 10 字\"}。每条 evidence 必须引用答案原文并至少 10 字；禁止“总结”“通过”“ok”“是”等占位词。顶层 evidence 也至少 10 字。evidence 过短视为 judge 失败，会被重试。不要给总分，不要放水。"},
+                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。默认不通过；只按给定判据核对最终答案。逐条检查 must_include / must_not_include / min_points / pattern，找不到依据就 pass=false。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案中的连续原文\"}],\"evidence\":\"答案中的连续原文\"}。每条 evidence 必须逐字复制答案里连续的至少 10 个字，禁止改写、禁止抄提示词、禁止用“总结/通过/ok”占位；顶层 evidence 同样要求。evidence 不在答案里出现视为 judge 失败并重试。不要给总分，不要放水。"},
                 {"role": "user", "content": format!("[REVIEW-JUDGE]\n用户输入：\n{input}\n\n验收清单：\n{}\n\n待审答案：\n{answer}", serde_json::to_string(&rubric).unwrap_or_default())}
             ]), "model_visible": true}))
         }
@@ -768,7 +772,8 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
         "review.parse_verdict" => {
             let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
             let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
-            parse_verdict(text, &rubric)
+            let answer = params.get("answer").and_then(|x| x.as_str()).unwrap_or("");
+            parse_verdict(text, &rubric, answer)
         }
         "review.hardcheck" => {
             let answer = params.get("answer").and_then(|x| x.as_str()).unwrap_or("");
@@ -781,38 +786,63 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                     let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("hard");
                     let criterion = item.get("criterion").cloned().unwrap_or(json!(""));
                     let check = item.get("check").cloned().unwrap_or(json!(""));
+                    let mut fail = |why: String| {
+                        failures.push(json!({
+                            "id": id,
+                            "criterion": criterion,
+                            "check": check,
+                            "evidence": why,
+                        }));
+                    };
                     if let Some(lit) = item
                         .get("must_include")
                         .and_then(|x| x.as_str())
                         .filter(|x| !x.is_empty())
                     {
                         if !answer.contains(lit) {
-                            failures.push(json!({
-                                "id": id,
-                                "criterion": criterion,
-                                "check": check,
-                                "evidence": format!("答案未逐字出现必须短语『{lit}』"),
-                            }));
+                            fail(format!("答案未逐字出现必须短语『{lit}』"));
                             continue;
                         }
                     }
-                    let Some(hard) = item.get("hard") else {
+                    let banned: Vec<String> = match item.get("must_not_include") {
+                        Some(Value::String(s)) => vec![s.clone()],
+                        Some(Value::Array(a)) => a
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    if let Some(hit) = banned
+                        .iter()
+                        .find(|b| !b.is_empty() && answer.contains(b.as_str()))
+                    {
+                        fail(format!("答案出现了被禁止的内容『{hit}』"));
                         continue;
-                    };
-                    let kind = hard.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-                    let value = hard.get("value").and_then(|x| x.as_str()).unwrap_or("");
-                    let ok = match kind {
-                        "json" => serde_json::from_str::<Value>(answer).is_ok(),
-                        "contains" => answer.contains(value),
-                        _ => true,
-                    };
-                    if !ok {
-                        failures.push(json!({
-                            "id": id,
-                            "criterion": criterion,
-                            "check": check,
-                            "evidence": format!("hardcheck {kind} 未通过"),
-                        }));
+                    }
+                    if let Some(n) = item.get("min_points").and_then(|x| x.as_u64()) {
+                        let got = count_points(answer) as u64;
+                        if got < n {
+                            fail(format!("答案只有 {got} 个要点，至少需要 {n} 个"));
+                            continue;
+                        }
+                    }
+                    if let Some(pat) = item.get("pattern").and_then(|x| x.as_str()) {
+                        if !pat.trim().is_empty() && !glob_match(pat, answer) {
+                            fail(format!("答案未匹配 pattern『{pat}』"));
+                            continue;
+                        }
+                    }
+                    if let Some(hard) = item.get("hard") {
+                        let kind = hard.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                        let value = hard.get("value").and_then(|x| x.as_str()).unwrap_or("");
+                        let ok = match kind {
+                            "json" => serde_json::from_str::<Value>(answer).is_ok(),
+                            "contains" => answer.contains(value),
+                            _ => true,
+                        };
+                        if !ok {
+                            fail(format!("hardcheck {kind} 未通过"));
+                        }
                     }
                 }
             }
@@ -833,6 +863,120 @@ fn json_slice(text: &str) -> &str {
         }
     }
     t
+}
+
+/// 通配匹配：`*` 任意字符序列、`?` 单个字符、`|` 分隔多个模式；大小写不敏感。
+/// 刻意不引入 regex 依赖：内核体积门禁要求零新增依赖，通配已足够覆盖判据。
+fn glob_match(pattern: &str, text: &str) -> bool {
+    pattern.split('|').any(|p| {
+        let p = p.trim();
+        glob_one(p, text) || {
+            // pattern 是“答案里出现一段匹配文本”，不是整段答案匹配：
+            // 对答案每个子串起点试一次，覆盖 `workspace/*.txt` 这类路径模式。
+            let chars: Vec<char> = text.chars().collect();
+            (0..chars.len()).rev().any(|start| {
+                let tail: String = chars[start..].iter().collect();
+                glob_one_prefix(p, &tail)
+            })
+        }
+    })
+}
+
+/// 只要求 pattern 匹配 text 的某个前缀，用于子串搜索。
+fn glob_one_prefix(pat: &str, text: &str) -> bool {
+    glob_one(&format!("{pat}*"), text)
+}
+
+fn glob_one(pat: &str, text: &str) -> bool {
+    let p: Vec<char> = pat.to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star, mut mark) = (usize::MAX, 0usize);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = pi;
+            pi += 1;
+            mark = ti;
+        } else if star != usize::MAX {
+            pi = star + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// 统计答案里的要点数：markdown 列表、数字编号、中文顿号编号都算。
+fn count_points(answer: &str) -> usize {
+    answer
+        .lines()
+        .map(|l| l.trim_start())
+        .filter(|l| {
+            if ["- ", "* ", "+ ", "• ", "· ", "-\t"]
+                .iter()
+                .any(|p| l.starts_with(p))
+            {
+                return true;
+            }
+            let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
+            digits > 0
+                && l[digits..]
+                    .trim_start()
+                    .starts_with(['.', '、', '．', ')', '）'])
+        })
+        .count()
+}
+
+/// 判据不能是整句：含句末标点或以句号结尾会让门禁退化成“抄指导者的句子”。
+fn sentence_like(s: &str) -> bool {
+    let t = s.trim();
+    if t.ends_with(['。', '！', '？', '!', '?', '.']) || t.contains(['。', '！', '？']) {
+        return true;
+    }
+    // 没有句末标点但带“是/的/了/和/并/而/为”这类连接词、且够长，也当整句处理：
+    // 4B 模型最爱的写法就是“X 是 Y 的 Z”，把这种当关键词等于把答案写进判据。
+    t.chars().count() >= 12
+        && ["是", "的", "了", "和", "并", "而", "为", "把", "将", "以及"]
+            .iter()
+            .any(|m| t.contains(m))
+}
+
+/// 归一化答案与 evidence：去掉 markdown 标记并压缩空白，再做连续子串比对。
+fn quote_norm(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, '*' | '`' | '#' | '>' | '_' | '~'))
+        .collect::<String>()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// evidence 必须能在答案里找到连续 ≥10 字（答案不足 10 字时按答案长度算）。
+fn evidence_quotes(answer: &str, evidence: &str) -> bool {
+    let a: Vec<char> = quote_norm(answer).chars().collect();
+    let e: Vec<char> = quote_norm(evidence).chars().collect();
+    if a.is_empty() {
+        return true;
+    }
+    let need = 10.min(a.len());
+    if e.len() < need {
+        return false;
+    }
+    for i in 0..=(e.len() - need) {
+        if a.windows(need).any(|w| w == &e[i..i + need]) {
+            return true;
+        }
+    }
+    false
 }
 
 fn quoted_literal(check: &str) -> Option<String> {
@@ -856,6 +1000,26 @@ fn quoted_literal(check: &str) -> Option<String> {
     None
 }
 
+/// 判据上限：条数太多会让 4B 模型直接放弃，太少又退化成单点检查。
+const RUBRIC_MIN_ITEMS: usize = 2;
+const RUBRIC_MAX_ITEMS: usize = 5;
+/// 单条字面判据上限：超过就是“把答案写进判据”。
+const MUST_INCLUDE_MAX_CHARS: usize = 20;
+const PATTERN_MAX_CHARS: usize = 120;
+
+fn literal_list(v: &Value) -> Vec<String> {
+    match v {
+        Value::String(s) => vec![s.trim().to_string()],
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn parse_rubric(text: &str) -> Result<Value, String> {
     let v: Value = serde_json::from_str(json_slice(text))
         .map_err(|e| format!("验收清单不是合法 JSON: {e}"))?;
@@ -865,10 +1029,15 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
         .and_then(|x| x.as_array())
         .or_else(|| v.as_array())
         .ok_or("验收清单缺少 rubric 数组")?;
-    if arr.is_empty() || arr.len() > 12 {
-        return Err(format!("验收清单条数必须在 1–12 之间，实际 {}", arr.len()));
+    if !(RUBRIC_MIN_ITEMS..=RUBRIC_MAX_ITEMS).contains(&arr.len()) {
+        return Err(format!(
+            "验收清单条数必须在 {RUBRIC_MIN_ITEMS}–{RUBRIC_MAX_ITEMS} 之间，实际 {}",
+            arr.len()
+        ));
     }
     let mut out = Vec::new();
+    let mut must_includes = 0usize;
+    let mut has_non_substring = false;
     for (i, item) in arr.iter().enumerate() {
         let criterion = item
             .get("criterion")
@@ -883,6 +1052,8 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
         if criterion.is_empty() || check.is_empty() {
             return Err(format!("验收项 {} 缺少 criterion/check", i + 1));
         }
+        let mut norm = serde_json::Map::new();
+        // must_include：关键词/短语，禁整句，≤20 字。
         let must_include = item
             .get("must_include")
             .and_then(|x| x.as_str())
@@ -895,15 +1066,85 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
                     .to_string()
             })
             .filter(|x| !x.is_empty())
-            .or_else(|| quoted_literal(check));
-        let Some(must_include) = must_include else {
+            .or_else(|| {
+                // 只有在模型没写任何判据时才从 check 里提取『…』；否则 must_not_include 里的
+                // 被禁词会被误当成 must_include，等于把禁词变成必选词。
+                let has_explicit = item
+                    .get("must_not_include")
+                    .map(|v| !literal_list(v).is_empty())
+                    .unwrap_or(false)
+                    || item.get("min_points").is_some()
+                    || item
+                        .get("pattern")
+                        .and_then(|x| x.as_str())
+                        .map(|x| !x.trim().is_empty())
+                        .unwrap_or(false)
+                    || item.get("hard").is_some();
+                if has_explicit {
+                    None
+                } else {
+                    quoted_literal(check)
+                }
+            });
+        if let Some(lit) = &must_include {
+            if lit.chars().count() > MUST_INCLUDE_MAX_CHARS {
+                return Err(format!(
+                    "验收项 {} 的 must_include 超过 {MUST_INCLUDE_MAX_CHARS} 字（{} 字）：判据只能是短语，不能是答案原句",
+                    i + 1,
+                    lit.chars().count()
+                ));
+            }
+            if sentence_like(lit) {
+                return Err(format!(
+                    "验收项 {} 的 must_include 是整句：判据只能是关键词/短语",
+                    i + 1
+                ));
+            }
+            must_includes += 1;
+            norm.insert("must_include".into(), json!(lit));
+        }
+        let banned = literal_list(item.get("must_not_include").unwrap_or(&Value::Null));
+        if !banned.is_empty() {
+            if banned
+                .iter()
+                .any(|b| b.chars().count() > MUST_INCLUDE_MAX_CHARS)
+            {
+                return Err(format!(
+                    "验收项 {} 的 must_not_include 超过 {MUST_INCLUDE_MAX_CHARS} 字",
+                    i + 1
+                ));
+            }
+            has_non_substring = true;
+            norm.insert("must_not_include".into(), json!(banned));
+        }
+        if let Some(n) = item.get("min_points").and_then(|x| x.as_u64()) {
+            if !(1..=12).contains(&n) {
+                return Err(format!("验收项 {} 的 min_points 必须在 1–12 之间", i + 1));
+            }
+            has_non_substring = true;
+            norm.insert("min_points".into(), json!(n));
+        }
+        if let Some(pat) = item
+            .get("pattern")
+            .and_then(|x| x.as_str())
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+        {
+            if pat.chars().count() > PATTERN_MAX_CHARS {
+                return Err(format!("验收项 {} 的 pattern 过长", i + 1));
+            }
+            has_non_substring = true;
+            norm.insert("pattern".into(), json!(pat));
+        }
+        if item.get("hard").is_some() {
+            norm.insert("hard".into(), item.get("hard").cloned().unwrap());
+            has_non_substring = true;
+        }
+        if norm.is_empty() {
             return Err(format!(
-                "验收项 {} 的 check 不是字面判据：必须提供 must_include 或在 check 中用『』标出应逐字出现的短语",
+                "验收项 {} 没有判据：需要 must_include / must_not_include / min_points / pattern 之一",
                 i + 1
             ));
-        };
-        if must_include.chars().count() > 40 {
-            return Err(format!("验收项 {} 的 must_include 超过 40 字", i + 1));
         }
         let id = item
             .get("id")
@@ -912,19 +1153,25 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
             .map(|x| x.to_string())
             .unwrap_or_else(|| format!("c{}", i + 1));
         let weight = item.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0);
-        out.push(json!({
-            "id": id,
-            "criterion": criterion,
-            "check": check,
-            "must_include": must_include,
-            "weight": weight.clamp(0.1, 10.0),
-            "hard": item.get("hard").cloned(),
-        }));
+        norm.insert("id".into(), json!(id));
+        norm.insert("criterion".into(), json!(criterion));
+        norm.insert("check".into(), json!(check));
+        norm.insert("weight".into(), json!(weight.clamp(0.1, 10.0)));
+        out.push(Value::Object(norm));
+    }
+    if must_includes == 0 {
+        return Err("验收清单至少需要一条 must_include 字面判据".into());
+    }
+    if !has_non_substring {
+        return Err(
+            "验收清单必须至少含一条非子串判据（must_not_include / min_points / pattern），否则门禁只会衡量抄写"
+                .into(),
+        );
     }
     Ok(json!({"rubric": out, "count": out.len()}))
 }
 
-fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
+fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, String> {
     let v: Value = serde_json::from_str(json_slice(text))
         .map_err(|e| format!("审批结果不是合法 JSON: {e}"))?;
     let expected: Vec<String> = rubric
@@ -963,6 +1210,12 @@ fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
                 "审批项 {id} 的 evidence 过短（少于 10 字）：{evidence:?}"
             ));
         }
+        // evidence 必须能在答案里找到连续原文：抄提示词、写空话都不算证据。
+        if !evidence_quotes(answer, &evidence) {
+            return Err(format!(
+                "审批项 {id} 的 evidence 不是答案原文（须为答案中连续 ≥10 字）：{evidence:?}"
+            ));
+        }
         if !pass {
             failed.push(Value::String(id.clone()));
         }
@@ -994,6 +1247,11 @@ fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
         .trim();
     if summary.chars().count() < 10 {
         return Err(format!("审批总结 evidence 过短（少于 10 字）：{summary:?}"));
+    }
+    if !evidence_quotes(answer, summary) {
+        return Err(format!(
+            "审批总结 evidence 不是答案原文（须为答案中连续 ≥10 字）：{summary:?}"
+        ));
     }
     let pass = failed.is_empty() && v.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
     Ok(json!({
@@ -1242,68 +1500,145 @@ mod tests {
 
     #[test]
     fn review_rubric_requires_literal_must_include() {
-        let ok = parse_rubric("```json\n{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案第一段有『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"}]}\n```").unwrap();
-        assert_eq!(ok["count"], 1);
+        let ok = parse_rubric(
+            "```json\n{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案第一段有『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"},
+                {\"id\":\"c2\",\"criterion\":\"不得出现占位词\",\"check\":\"禁止『TODO』\",\"must_not_include\":\"TODO\"}
+            ]}\n```",
+        )
+        .unwrap();
+        assert_eq!(ok["count"], 2);
         assert_eq!(ok["rubric"][0]["id"], "c1");
         assert_eq!(ok["rubric"][0]["must_include"], "REVIEW-FINAL");
         let quoted = parse_rubric(
-            "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案出现『REVIEW-FINAL』\"}]}",
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案出现『REVIEW-FINAL』\"},
+                {\"id\":\"c2\",\"criterion\":\"至少两个要点\",\"check\":\"分点作答\",\"min_points\":2}
+            ]}",
         )
         .unwrap();
         assert_eq!(quoted["rubric"][0]["must_include"], "REVIEW-FINAL");
-        let bad = parse_rubric("{\"rubric\":[{\"criterion\":\"只有标题\",\"check\":\"\"}]}");
-        assert!(bad.is_err());
-        let vague = parse_rubric(
-            "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"结论完整\",\"check\":\"答案逻辑清晰\"}]}",
+        let bad = parse_rubric(
+            "{\"rubric\":[{\"criterion\":\"只有标题\",\"check\":\"\"},{\"criterion\":\"x\",\"check\":\"y\"}]}",
         );
-        assert!(vague.is_err());
+        assert!(bad.is_err());
+        // 只有一项、或全是子串判据：门禁会退化成“抄句子”，必须拒绝。
+        let single = parse_rubric(
+            "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"有『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"}]}",
+        );
+        assert!(single.is_err());
+        let only_substring = parse_rubric(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"a\",\"check\":\"有『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"},
+                {\"id\":\"c2\",\"criterion\":\"b\",\"check\":\"有『w1.txt』\",\"must_include\":\"w1.txt\"}
+            ]}",
+        );
+        assert!(only_substring.is_err());
     }
 
     #[test]
-    fn review_verdict_short_evidence_is_rejected() {
+    fn review_rubric_rejects_whole_sentence_must_include() {
+        let sentence = "操作系统是管理计算机硬件和软件资源的系统。";
+        let err = parse_rubric(&format!(
+            "{{\"rubric\":[
+                {{\"id\":\"c1\",\"criterion\":\"结论\",\"check\":\"出现结论句\",\"must_include\":\"{sentence}\"}},
+                {{\"id\":\"c2\",\"criterion\":\"禁词\",\"check\":\"禁止『TODO』\",\"must_not_include\":\"TODO\"}}
+            ]}}"
+        ))
+        .unwrap_err();
+        assert!(err.contains("整句") || err.contains("20"), "{err}");
+        let long = parse_rubric(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"结论\",\"check\":\"出现关键词\",\"must_include\":\"REVIEW-FINAL-PLACEHOLDER-TOKEN-VERY-LONG\"},
+                {\"id\":\"c2\",\"criterion\":\"禁词\",\"check\":\"禁止『TODO』\",\"must_not_include\":\"TODO\"}
+            ]}",
+        )
+        .unwrap_err();
+        assert!(long.contains("20"), "{long}");
+    }
+
+    #[test]
+    fn review_rubric_accepts_new_criterion_kinds() {
+        let v = parse_rubric(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"有结论\",\"check\":\"出现『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"},
+                {\"id\":\"c2\",\"criterion\":\"分点\",\"check\":\"至少三个要点\",\"min_points\":3},
+                {\"id\":\"c3\",\"criterion\":\"格式\",\"check\":\"匹配 workspace/*.txt\",\"pattern\":\"workspace/*.txt\"}
+            ]}",
+        )
+        .unwrap();
+        assert_eq!(v["rubric"][1]["min_points"], 3);
+        assert_eq!(v["rubric"][2]["pattern"], "workspace/*.txt");
+    }
+
+    #[test]
+    fn review_verdict_short_or_prompt_echo_evidence_is_rejected() {
+        let answer = "第一，操作系统管理硬件与软件资源；第二，它提供用户界面和程序接口。";
         let rubric = json!([
-            {"id":"c1","criterion":"包含结论","check":"答案出现『REVIEW-FINAL』"},
-            {"id":"c2","criterion":"包含文件","check":"答案出现『w1.txt』"}
+            {"id":"c1","criterion":"包含结论","check":"答案出现『硬件』"},
+            {"id":"c2","criterion":"包含要点","check":"答案出现『用户界面』"}
         ]);
         let short = parse_verdict(
-            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"总结\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"答案中出现 w1.txt 路径\"}],\"evidence\":\"总结\"}",
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"总结\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"总结\"}],\"evidence\":\"总结\"}",
             &rubric,
+            answer,
         );
         assert!(short.is_err());
-        let ok = parse_verdict(
-            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案第一段出现 REVIEW-FINAL 标记\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"答案写明 workspace/w1.txt 路径\"}],\"evidence\":\"逐条核对通过，答案包含两个必须短语\"}",
+        // 抄提示词：长度够但不是答案原文，必须拒绝。
+        let echo = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"引用答案中的原文至少 10 字，禁止总结通过 ok 是等占位词\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"每条 evidence 必须引用答案原文并至少 10 字\"}],\"evidence\":\"逐条核对结论，至少 10 字，禁止占位词\"}",
             &rubric,
+            answer,
+        );
+        assert!(echo.is_err());
+        let ok = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"操作系统管理硬件与软件资源\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"它提供用户界面和程序接口\"}],\"evidence\":\"第一，操作系统管理硬件与软件资源\"}",
+            &rubric,
+            answer,
         )
         .unwrap();
         assert_eq!(ok["pass"], true);
         assert_eq!(ok["items"][0]["criterion"], "包含结论");
-        assert_eq!(ok["items"][0]["check"], "答案出现『REVIEW-FINAL』");
     }
 
     #[test]
-    fn review_hardcheck_requires_literal_must_include() {
-        let rubric = json!([{
-            "id":"c1",
-            "criterion":"包含结论",
-            "check":"答案出现『REVIEW-FINAL』",
-            "must_include":"REVIEW-FINAL"
-        }]);
+    fn review_hardcheck_covers_all_criterion_kinds() {
+        let rubric = json!([
+            {"id":"c1","criterion":"结论","check":"出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL"},
+            {"id":"c2","criterion":"禁词","check":"禁止『TODO』","must_not_include":["TODO","FIXME"]},
+            {"id":"c3","criterion":"要点","check":"至少两个要点","min_points":2},
+            {"id":"c4","criterion":"路径","check":"匹配 workspace/*.txt","pattern":"workspace/*.txt"}
+        ]);
         let bad = review_gate_plugin(
             "review.hardcheck",
-            &json!({"answer":"这里只有一段普通总结", "rubric":rubric}),
+            &json!({"answer":"这里只有一段普通总结 TODO", "rubric":rubric}),
         )
         .unwrap();
         assert_eq!(bad["pass"], false);
-        assert!(bad["failed"][0]["evidence"]
-            .as_str()
+        let ids: Vec<&str> = bad["failed"]
+            .as_array()
             .unwrap()
-            .contains("REVIEW-FINAL"));
+            .iter()
+            .filter_map(|x| x["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"c1"));
+        assert!(ids.contains(&"c2"));
         let ok = review_gate_plugin(
             "review.hardcheck",
-            &json!({"answer":"最终答案 REVIEW-FINAL", "rubric":rubric}),
+            &json!({"answer":"最终答案 REVIEW-FINAL\n- 第一点\n- 第二点\n路径 workspace/a.txt", "rubric":rubric}),
         )
         .unwrap();
-        assert_eq!(ok["pass"], true);
+        assert_eq!(ok["pass"], true, "{ok}");
+    }
+
+    #[test]
+    fn glob_and_point_helpers_work() {
+        assert!(glob_match("workspace/*.txt", "workspace/a.txt"));
+        assert!(glob_match("*.md|*.txt", "notes.md"));
+        assert!(!glob_match("workspace/*.txt", "workspace/a.md"));
+        assert_eq!(count_points("- a\n* b\n1. c\n2、d\n普通一行"), 4);
+        assert!(sentence_like("操作系统是管理系统。"));
+        assert!(!sentence_like("REVIEW-FINAL"));
     }
 
     #[test]

@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.2.1 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.3 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.2.1-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.3-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.2.1 follows the rc.2 retest. It fixes native Ollama model discovery (`/api/tags`, not `/models`), adds every review-gate field to the TUI settings page, requires a literal `must_include` rubric with a pre-judge hardcheck, retries short judge evidence and invalid guide rubrics, and makes `chat.finished.status` report `ok`/`unapproved`/`degraded`. The rc.2 provider-body, temperature, banner, and embedding fixes remain. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.3 makes plugin settings a declaration: a plugin states its schema in `plugin.json`, the kernel relays it via `plugin.settings`, and the TUI and WebUI render it generically. It also fixes the rc.2.1 retest findings H1–H4: phrase-only rubrics (2–5 items, `must_include` ≤20 characters, at least one non-substring criterion), a hardcheck covering literal/banned/point-count/glob, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that require exactly one tool call. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.2.1\
+D:\FeatherAgent-1.2.1-rc.3\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.2.1`, then continue.
+Wait for `serve ready: 1.2.1-rc.3`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.2.1
+cd D:\FeatherAgent-1.2.1-rc.3
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -156,6 +156,16 @@ v1.2.1-rc.2.1 regression checks:
 4. Force an unapproved review (or set `review_gate.max_rounds=1` with a model that cannot satisfy the rubric). `chat.finished.status` must be `unapproved` (or `degraded` when guide/judge fails twice), not `ok`.
 5. Review with 4B only: if the model cannot produce a literal rubric, the turn must end `degraded`; it must not silently pass.
 
+v1.2.1-rc.3 regression checks:
+
+1. **Plugin-declared settings, both front ends.** Open the TUI `/settings` and the WebUI plugin page. Every plugin must appear in the sidebar under its own name. `review-gate` must show nine declared fields (enable, max rounds, guide model/temp, exec model/temp, judge model/temp, on-exhausted) and `search` must show its four; a plugin with no declaration must show “declares no settings” plus the enable toggle, not an empty form.
+2. Change `max_rounds` to 3 in the TUI (`Ctrl+S`) and in the WebUI (Save plugin settings), then read `data/config.json`: both must land on `review_gate.max_rounds = 3`. The general settings page must **not** contain any review-gate or search fields any more.
+3. Send a message after closing the settings page on both front ends: `model.message` and `chat.finished(ok)` must still arrive.
+4. With a real 7B guide/judge, send a task whose answer is long. The rubric must contain 2–5 short criteria (no full sentences), at least one of them non-substring; `review.hardcheck` must report deterministic failures for banned phrases/point count/glob when violated.
+5. Affirmative check on judge evidence: `review.verdict.items[].evidence` must be copied from the answer. Prompt echoes must trigger a judge retry, then `degraded` after two failures.
+6. Tool name correction: ask the model to use a tool that does not exist (or feed `TOOL:{"name":"tool.fs"}`) and confirm `tool.error` returns `未知工具 tool.fs。可用工具：…`, with the turn continuing rather than the plugin tripping its breaker.
+7. S3 reproducibility: run `tools/s3_batch.py` (or the same prompts by hand). t5 must call the read tool once before answering, and t6 must call it exactly once and then report the failure.
+
 v1.2.1 additional checks:
 
 1. Settings shows `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, and `provider-openai`; changing provider fills the corresponding default base URL unless a custom URL is already present.
@@ -169,13 +179,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.2.1 did not run Wine; passing Wine does not equal passing Windows.
+- v1.2.1-rc.3 did not run Wine; passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.2.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

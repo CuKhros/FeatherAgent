@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.2.1**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.3**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.2.1","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -170,6 +170,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `storage.stats` / `storage.gc` | 存储统计/回收 | 无 |
 | `plugin.list` | 插件清单 | 无 |
 | `plugin.enable` / `plugin.disable` | 启停插件 | `name` |
+| `plugin.settings` | 读取插件自述的设置 schema 与当前值 | `name` |
 | `plugin.install` | 安装插件 | `path`（含 `plugin.json` 的目录绝对路径） |
 
 完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`。业务错误（路径越界/缺参数/文件不存在）为 `tool.error`；只有插件崩溃/超时/IO 故障才为 `tool.failed`；连续 3 次技术失败会为该工具发 `tool.degraded`。provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
@@ -240,11 +241,26 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 // 启停：同步 registry 与运行进程
 {"method":"plugin.enable","params":{"name":"my-tool"}}
 {"method":"plugin.disable","params":{"name":"my-tool"}}
+
+// 设置：插件自述 schema，内核原样转述
+{"method":"plugin.settings","params":{"name":"review-gate"}}
+// → {"name":"review-gate","root":"review_gate","title":"...","description":"...",
+//    "fields":[{"key":"max_rounds","label":"最大修订轮次","type":"int",
+//               "default":2,"min":1,"max":5,"step":1}, ...],
+//    "values":{"enabled":false,"max_rounds":3,...},
+//    "defaults":{...}}
 ```
 
 - `plugin.install` 成功且插件启用时，会立即把 spec 注册进运行 host；`plugin.enable` 重新登记，按需拉起；`plugin.disable` 会终止已运行进程。
 - `plugin.list` 的 `registry` 可用于生成动态侧栏；`live.state` 为 `ready` 表示已运行，`stopped` 表示按需启动。
 - 插件 manifest 的 `api` 必须落在契约 `>=1.0 <2.0`；不满足时安装失败。
+- `manifest.settings`（可选，v1.2.1-rc.3）是插件设置界面的唯一来源：
+  - `root`——这批字段落在哪个配置路径（缺省 `plugin_settings.<插件名>`）；
+  - `title` / `description`——表单上方显示什么；
+  - `fields[]`——`key`、可选绝对 `path`（用于指向既有顶层键）、`label`、`type`（只允许 `bool|int|number|string|enum`）、`default`、`description`、`placeholder`、`min`、`max`、`step`、`options`、`secret`。
+- 未声明设置项的插件仍会出现在 `plugin.list`；`plugin.settings` 对它返回业务错误（“插件 X 未声明设置项”），前端应回退到清单摘要 + 启用开关。
+- 写入走 `config.set`，路径为展开后的 `<root>.<key>`；内核校验类型/区间/枚举，并拒绝 `plugin_settings.<name>` 下未声明的键；首次写声明路径会自动补父级。前端不得硬编码任何插件的字段名，一律按 `plugin.settings` 渲染。
+- `registry[]` 条目自带 `settings`（同一份 schema），因此侧边栏可以在插件进程启动前就建好。
 
 ### 5.4 工具错误事件
 

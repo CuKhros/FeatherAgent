@@ -61,7 +61,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.2.1 待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.3 待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -107,7 +107,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.2.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.3-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -119,7 +119,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.2.1）
+## 平台门禁差异（v1.2.1-rc.3）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -148,6 +148,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.3 变更说明](docs/v1.2.1-rc.3-变更说明.zh-CN.md)** —— 插件自述设置（`manifest.settings` + `plugin.settings`）、TUI/WebUI 通用表单、短语判据四类硬校验、judge evidence 必须是答案原文、未知工具纠错
 - **[v1.2.1-rc.2.1 变更说明](docs/v1.2.1-rc.2.1-变更说明.zh-CN.md)** —— Ollama `/api/tags` 模型列表、TUI review-gate 设置、字面 rubric/硬校验、judge 重试、`chat.finished` status
 - **[v1.2.1-rc.2 变更说明](docs/v1.2.1-rc.2-变更说明.zh-CN.md)** —— provider 空 body 修复、review 温度校验、生效配置 banner
 - **[v1.2.1-rc.1 变更说明](docs/v1.2.1-rc.1-变更说明.zh-CN.md)** —— R1 热/冷启动拆分、review-gate、本地 provider、API Key 与测试
@@ -165,7 +166,8 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 状态
 
-`v1.2.1-rc.2.1` 是 rc.2 Windows 复测后的补丁版：修复 Ollama 模型发现（改走 `/api/tags`，不再请求 `/models`）；TUI 设置页补齐 review-gate 全部字段；并加固 review 质量：字面 `must_include` rubric 与 judge 前硬校验、evidence 至少 10 字并重试 judge/guide、空响应重试、`chat.finished.status` 如实返回 `ok`/`unapproved`/`degraded`。rc.2 的 provider body、温度校验、banner 与 embedding 修复保持。Linux 自动化共 **102 个测试：101 通过、1 个默认 ignored**（59 lib、9 plugin、2 kernel、3 TUI、3 WebUI、2 golden、24 integration）；ignored 的需公网用例单独运行通过。`fmt` 与 `clippy -D warnings` 通过。
+`v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过新增的 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单——装新插件不用改任何前端代码。同时修掉 rc.2.1 复测的 H1–H4：判据限制为 2–5 条短语且至少一条非子串判据，judge 前的硬校验覆盖字面/禁词/要点数/glob 四类，judge evidence 必须是答案中连续 ≥10 字原文，畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并在 rc.2 复测中确认 provider body、温度拒绝、banner、R1 门禁与 review-gate 机制。v1.2.1-rc.2.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；真实 Ollama 模型发现、TUI review-gate 编辑与 7B review 质量仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
+Linux 自动化共 **109 个测试：108 通过、1 个默认 ignored**（61 lib、12 plugin、2 kernel、3 TUI、3 WebUI、2 golden、26 integration）；ignored 的需公网用例单独运行通过。`fmt` 与 `clippy -D warnings` 通过。设置页两端都实测：TUI 用 PTY（改 `max_rounds` 2→3、`Ctrl+S`，`config.json` 读到 3），WebUI 在真实浏览器（9 个声明字段含枚举全部渲染、保存后落盘），并在保存后用 WebSocket 复测桥层（`model.message` + `chat.finished(ok)`）。
 
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并在 rc.2 复测中确认 provider body、温度拒绝、banner、R1 门禁与 review-gate 机制。v1.2.1-rc.3 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；两端插件自述设置、7B review 质量与 S3 复现性仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。

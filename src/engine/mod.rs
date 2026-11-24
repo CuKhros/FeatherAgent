@@ -3,7 +3,7 @@
 //! 内核**不认识**任何具体能力：会话循环只看事件与契约，
 //! provider / tool / storage 全部经 `PluginHost` 的进程外契约调用。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -22,7 +22,7 @@ use crate::governance::permission::{Decision, Gate};
 use crate::governance::sandbox::SandboxCfg;
 use crate::governance::volume::{self, Purpose, Verdict};
 use crate::log::LogStore;
-use crate::proto::types::{Event, EventKind};
+use crate::proto::types::{Event, EventKind, SettingField};
 use crate::runtime::registry::Registry;
 use crate::runtime::{PluginError, PluginHost, PluginState};
 use crate::util::{json_u64, now_ms};
@@ -72,6 +72,10 @@ pub struct Config {
     /// 三段校验（guide → exec → judge）；默认关闭。
     #[serde(default)]
     pub review_gate: ReviewGateConfig,
+    /// 插件自述设置的兜底命名空间：键为插件名，值为该插件 `manifest.settings`
+    /// 里声明的字段。插件若声明了 `root`（如 `review_gate`），值落在对应顶层键。
+    #[serde(default)]
+    pub plugin_settings: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +189,7 @@ impl Default for Config {
             search_count: default_search_count(),
             review_gate_plugin: default_review_plugin(),
             review_gate: ReviewGateConfig::default(),
+            plugin_settings: BTreeMap::new(),
         }
     }
 }
@@ -744,6 +749,18 @@ impl Kernel {
         let _guard = self.config_lock.lock();
         let mut cur = self.config_json();
         let pointer = format!("/{}", path.split('.').collect::<Vec<_>>().join("/"));
+        if cur.pointer(&pointer).is_none() {
+            // 插件声明的设置项允许首次写入：由内核按声明补齐缺失的父级对象。
+            // 未声明的路径仍然拒绝，避免把拼写错误静默丢弃。
+            if !self
+                .declared_settings()
+                .iter()
+                .any(|(p, _)| p == &path.to_string())
+            {
+                return Err(format!("配置项不存在: {path}"));
+            }
+            create_pointer(&mut cur, &pointer);
+        }
         let Some(slot) = cur.pointer_mut(&pointer) else {
             return Err(format!("配置项不存在: {path}"));
         };
@@ -765,11 +782,59 @@ impl Kernel {
 
     fn apply_config(&self, cfg: Config, changed: Value) -> Result<Value, String> {
         validate_config(&cfg, &self.plugins)?;
+        self.validate_plugin_settings(&cfg)?;
         cfg.save(&self.cfg_path).map_err(|e| e.to_string())?;
         self.gate.set_auto_allow_safe(cfg.auto_allow_safe);
         *self.cfg.write() = cfg.clone();
         self.emit("_system", EventKind::ConfigChanged, changed);
         Ok(serde_json::to_value(cfg).unwrap_or(Value::Null))
+    }
+
+    /// 插件在 `plugin.json` 里声明的设置项，展开成 `(完整 config 路径, 字段)`。
+    ///
+    /// 内核不认识具体插件：只负责把声明原样转述给前端，并按声明校验写入。
+    pub fn declared_settings(&self) -> Vec<(String, SettingField)> {
+        let mut out = Vec::new();
+        for e in self.registry.list() {
+            let Some(schema) = &e.settings else { continue };
+            let root = schema.root_for(&e.name);
+            for f in &schema.fields {
+                out.push((f.path(&root), f.clone()));
+            }
+        }
+        out
+    }
+
+    /// 按插件声明校验配置：类型、区间、枚举值，以及未声明的键。
+    fn validate_plugin_settings(&self, cfg: &Config) -> Result<(), String> {
+        let declared = self.declared_settings();
+        if declared.is_empty() {
+            return Ok(());
+        }
+        let full = serde_json::to_value(cfg).unwrap_or(Value::Null);
+        for (path, field) in &declared {
+            let pointer = format!("/{}", path.split('.').collect::<Vec<_>>().join("/"));
+            if let Some(v) = full.pointer(&pointer) {
+                field.validate(v).map_err(|e| format!("{path}: {e}"))?;
+            }
+        }
+        // 兜底命名空间只允许声明过的键：`plugin_settings.<插件名>` 下出现未声明键即拒绝。
+        for (name, value) in &cfg.plugin_settings {
+            let root = format!("plugin_settings.{name}");
+            if let Some(obj) = value.as_object() {
+                for k in obj.keys() {
+                    let top = k.split('.').next().unwrap_or(k).to_string();
+                    let head = format!("{root}.{top}");
+                    let declared_key = declared
+                        .iter()
+                        .any(|(p, _)| p == &head || p.starts_with(&format!("{head}.")));
+                    if !declared_key {
+                        return Err(format!("插件 {name} 未声明设置项 {top}"));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// L4 召回：优先向量（provider.embed → storage.vec.search），失败回落 FTS。
@@ -1818,7 +1883,7 @@ impl Kernel {
             )?;
             match gate.call(
                 "review.parse_verdict",
-                json!({"text": raw, "rubric": req.rubric}),
+                json!({"text": raw, "rubric": req.rubric, "answer": req.answer}),
             ) {
                 Ok(verdict) => {
                     return Ok(json!({
@@ -2172,6 +2237,27 @@ impl Kernel {
         {
             return self.execute_web_tool(cfg, name, args);
         }
+        // 未知工具名（例如模型自己拼的 tool.fs / tool.read_file）在这里就纠正：
+        // 直接转发给工具插件只会得到一句难懂的 rpc 错误，模型往往继续乱试。
+        let known: Vec<String> = self
+            .available_tools(&session.locked_tools)
+            .iter()
+            .filter_map(|t| {
+                t.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        if !known.iter().any(|k| k == name) {
+            let hint = if known.is_empty() {
+                "(无)".to_string()
+            } else {
+                known.join(", ")
+            };
+            return Err(ToolExecError::Business(format!(
+                "未知工具 {name}。可用工具：{hint}。只能使用列出的工具名，不要自行拼接前缀或猜名字。"
+            )));
+        }
         let plugin_name = if name.starts_with("tool.") {
             cfg.tool_plugin.clone()
         } else if name.starts_with("storage.") {
@@ -2486,6 +2572,21 @@ fn review_feedback_text(verdict: &Value) -> String {
     }
     lines.push("直接给出修订后的最终答案，不要解释校验过程。".into());
     lines.join("\n")
+}
+
+/// 按需创建 `pointer` 指向的槽位（只创建中间对象，不覆盖已有标量）。
+fn create_pointer(target: &mut Value, pointer: &str) {
+    let parts: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
+    let mut cur = target;
+    for part in parts {
+        if !cur.is_object() {
+            *cur = Value::Object(serde_json::Map::new());
+        }
+        let obj = cur.as_object_mut().expect("刚创建的对象");
+        cur = obj
+            .entry(part.to_string())
+            .or_insert(Value::Object(serde_json::Map::new()));
+    }
 }
 
 fn merge_json(base: Value, patch: Value) -> Value {

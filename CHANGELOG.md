@@ -1,6 +1,28 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.2.1` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3] - 2026-11-24
+
+### Added
+
+- `manifest.settings` plugin contract: `root`, `title`, `description`, and `fields[]` limited to `bool|int|number|string|enum` with `default`, range, options, and optional absolute `path`.
+- `plugin.settings` RPC returning the declared schema plus current values and defaults; undeclared plugins return a business error.
+- `Config.plugin_settings` namespace for plugins that declare no `root`.
+
+### Changed
+
+- Plugin settings are no longer hard-coded into the general settings page: TUI and WebUI render every plugin's declared form generically, so adding a plugin needs no front-end change.
+- The registry persists each plugin's settings schema and backfills entries registered before this release.
+- `config.set` validates declared paths (type, range, enum) and creates missing parents on first write; undeclared `plugin_settings.<name>` keys are rejected.
+- Plugin sidebars and detail headers show the plugin name, with category as secondary text.
+
+### Fixed
+
+- H1: rubrics are now 2–5 phrase-only items (`must_include` ≤20 characters, no sentence-like phrases) with at least one `must_include` and at least one non-substring criterion (`must_not_include`, `min_points`, `pattern`); the hardcheck covers all four kinds before the judge runs.
+- H2: judge evidence and the verdict summary must be a verbatim contiguous ≥10-character window of the answer; prompt echoes and placeholders are rejected.
+- H3: unknown tool names return `未知工具 … 可用工具：…` as a normal tool error instead of a forwarded RPC failure.
+- H4: S3 t5 requires calling `tool.fs.read` and t6 requires exactly one call, making the S3 rate reproducible.
 
 ## [1.2.1-rc.2.1] - 2026-11-24
 

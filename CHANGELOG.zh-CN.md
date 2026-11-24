@@ -1,6 +1,28 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.2.1` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3] - 2026-11-24
+
+### 新增
+
+- `manifest.settings` 插件契约：`root`、`title`、`description` 与 `fields[]`；字段类型限定 `bool|int|number|string|enum`，支持 `default`、区间、选项与可选绝对 `path`。
+- `plugin.settings` RPC：返回声明 schema、当前值与默认值；未声明设置项的插件返回业务错误。
+- `Config.plugin_settings` 命名空间，作为未声明 `root` 插件的兜底。
+
+### 变更
+
+- 插件设置不再塞进通用设置页：TUI 与 WebUI 都按声明通用渲染任意插件的表单，装新插件不需要改前端。
+- 登记表持久化每个插件的设置 schema，并自动补齐本版之前登记的旧条目。
+- `config.set` 按声明校验（类型、区间、枚举），首次写入自动补父级；`plugin_settings.<name>` 下未声明的键被拒绝。
+- 插件侧边栏与详情标题以插件名为主标签，类别只作次要信息。
+
+### 修复
+
+- H1：判据限制为 2–5 条短语（`must_include` ≤20 字、拒绝整句），且至少一条 `must_include`、至少一条非子串判据（`must_not_include`、`min_points`、`pattern`）；judge 前的硬校验覆盖四类。
+- H2：judge 的 evidence 与总结必须是答案中连续 ≥10 字原文；抄提示词与占位词一律拒绝。
+- H3：未知工具名返回 `未知工具 … 可用工具：…` 的正常工具错误，不再原样转发成 RPC 失败。
+- H4：S3 的 t5 强制调用 `tool.fs.read`、t6 强制只调用一次，S3 口径可复现。
 
 ## [1.2.1-rc.2.1] - 2026-11-24
 

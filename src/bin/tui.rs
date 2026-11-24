@@ -37,14 +37,6 @@ struct SettingsState {
     max_turns: String,
     workspace_root: String,
     auto_allow_safe: bool,
-    review_enabled: bool,
-    review_rounds: String,
-    review_guide_model: String,
-    review_guide_temp: String,
-    review_exec_model: String,
-    review_exec_temp: String,
-    review_judge_model: String,
-    review_judge_temp: String,
     field: usize,
     status: String,
     models_hint: String,
@@ -54,9 +46,74 @@ struct SettingsState {
     nav_idx: usize,
     nav_focus: bool,
     detail: bool,
+    /// 当前打开的插件页；内容由内核 `plugin.settings` 转述的声明驱动。
+    plugin: Option<PluginFormState>,
 }
 
-const SETTINGS_FIELDS: usize = 19;
+/// 插件设置页：字段类型与取值全部来自内核转述，TUI 不认识具体插件。
+struct PluginFormState {
+    name: String,
+    /// 声明的设置根路径（如 `review_gate` 或 `plugin_settings.<name>`）。
+    root: String,
+    title: String,
+    description: String,
+    /// 原始声明（`fields[].key/label/type/min/max/step/options/...`）。
+    fields: Vec<Value>,
+    /// 编辑中的值；类型与声明一致，字符串在 `text` 里暂存。
+    values: Vec<Value>,
+    text: Vec<String>,
+    enabled: bool,
+    enabled0: bool,
+    field: usize,
+    status: String,
+    dirty: bool,
+}
+
+/// 把值转成可编辑文本；空值用空串，避免把 null 显示给用户。
+fn value_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 按点号路径把值写进嵌套对象（`guide.model` → `{guide:{model:...}}`）。
+fn set_nested(target: &mut serde_json::Map<String, Value>, path: &str, v: Value) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut cur = target;
+    for (i, part) in parts.iter().enumerate() {
+        if i + 1 == parts.len() {
+            cur.insert(part.to_string(), v);
+            return;
+        }
+        let entry = cur
+            .entry(part.to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if !entry.is_object() {
+            *entry = Value::Object(serde_json::Map::new());
+        }
+        cur = entry.as_object_mut().expect("刚建的对象");
+    }
+}
+
+/// 插件页字段序：0 = 启用开关，1..=n = 声明字段，之后是保存/取消。
+const PLUGIN_EXTRA: usize = 3;
+
+impl PluginFormState {
+    fn len(&self) -> usize {
+        self.fields.len() + PLUGIN_EXTRA
+    }
+    fn save_idx(&self) -> usize {
+        self.fields.len() + 1
+    }
+    fn cancel_idx(&self) -> usize {
+        self.fields.len() + 2
+    }
+}
+
+const SETTINGS_FIELDS: usize = 11;
 
 fn default_provider_base(provider: &str) -> &'static str {
     match provider {
@@ -448,17 +505,6 @@ impl App {
             .unwrap_or("qwen2.5:7b")
             .to_string();
         let provider_idx = providers.iter().position(|x| x == &provider).unwrap_or(0);
-        let rg = cfg.get("review_gate").cloned().unwrap_or(Value::Null);
-        let review_enabled = rg.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
-        let review_rounds = rg
-            .get("max_rounds")
-            .and_then(|x| x.as_u64())
-            .unwrap_or(2)
-            .to_string();
-        let role = |name: &str| rg.get(name).cloned().unwrap_or(Value::Null);
-        let guide = role("guide");
-        let exec = role("exec");
-        let judge = role("judge");
         let state = SettingsState {
             providers,
             models: Vec::new(),
@@ -501,43 +547,6 @@ impl App {
                 .get("auto_allow_safe")
                 .and_then(|x| x.as_bool())
                 .unwrap_or(true),
-            review_enabled,
-            review_rounds,
-            review_guide_model: guide
-                .get("model")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string(),
-            review_guide_temp: format!(
-                "{:.2}",
-                guide
-                    .get("temperature")
-                    .and_then(|x| x.as_f64())
-                    .unwrap_or(0.3)
-            ),
-            review_exec_model: exec
-                .get("model")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string(),
-            review_exec_temp: format!(
-                "{:.2}",
-                exec.get("temperature")
-                    .and_then(|x| x.as_f64())
-                    .unwrap_or(0.7)
-            ),
-            review_judge_model: judge
-                .get("model")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string(),
-            review_judge_temp: format!(
-                "{:.2}",
-                judge
-                    .get("temperature")
-                    .and_then(|x| x.as_f64())
-                    .unwrap_or(0.1)
-            ),
             field: 2,
             status: "读取配置成功；←/↑↓ 侧栏，Tab 表单，Ctrl+S 保存".into(),
             models_hint: "正在读取模型列表…".into(),
@@ -571,6 +580,7 @@ impl App {
             nav_idx: 0,
             nav_focus: true,
             detail: false,
+            plugin: None,
         };
         self.settings = Some(state);
         self.refresh_settings_plugins();
@@ -715,14 +725,6 @@ impl App {
             max_turns,
             workspace_root,
             auto_allow_safe,
-            review_enabled,
-            review_rounds,
-            review_guide_model,
-            review_guide_temp,
-            review_exec_model,
-            review_exec_temp,
-            review_judge_model,
-            review_judge_temp,
         ) = match &self.settings {
             Some(s) => (
                 s.provider.clone(),
@@ -734,37 +736,14 @@ impl App {
                 s.max_turns.trim().parse::<u64>(),
                 s.workspace_root.trim().to_string(),
                 s.auto_allow_safe,
-                s.review_enabled,
-                s.review_rounds.trim().parse::<u64>(),
-                s.review_guide_model.trim().to_string(),
-                s.review_guide_temp.trim().parse::<f64>(),
-                s.review_exec_model.trim().to_string(),
-                s.review_exec_temp.trim().parse::<f64>(),
-                s.review_judge_model.trim().to_string(),
-                s.review_judge_temp.trim().parse::<f64>(),
             ),
             None => return,
         };
-        let (
-            Ok(temperature),
-            Ok(context_window),
-            Ok(max_turns),
-            Ok(review_rounds),
-            Ok(review_guide_temp),
-            Ok(review_exec_temp),
-            Ok(review_judge_temp),
-        ) = (
-            temperature,
-            context_window,
-            max_turns,
-            review_rounds,
-            review_guide_temp,
-            review_exec_temp,
-            review_judge_temp,
-        )
+        let (Ok(temperature), Ok(context_window), Ok(max_turns)) =
+            (temperature, context_window, max_turns)
         else {
             if let Some(s) = &mut self.settings {
-                s.status = "温度/上下文/回合数/校验温度必须是数字".into();
+                s.status = "温度/上下文/回合数必须是数字".into();
             }
             return;
         };
@@ -780,19 +759,6 @@ impl App {
             }
             return;
         }
-        if !(1..=5).contains(&review_rounds)
-            || !(0.2..=0.5).contains(&review_guide_temp)
-            || !(0.6..=1.5).contains(&review_exec_temp)
-            || !(0.0..=0.2).contains(&review_judge_temp)
-        {
-            if let Some(s) = &mut self.settings {
-                s.status =
-                    "review-gate 区间：轮次 1–5，guide 0.20–0.50，exec 0.60–1.50，judge 0.00–0.20"
-                        .into();
-            }
-            return;
-        }
-        let role_model = |m: &str| json!(m);
         let patch = json!({
             "provider_plugin": provider,
             "base_url": base_url,
@@ -803,13 +769,6 @@ impl App {
             "max_turns": max_turns,
             "workspace_root": workspace_root,
             "auto_allow_safe": auto_allow_safe,
-            "review_gate": {
-                "enabled": review_enabled,
-                "max_rounds": review_rounds,
-                "guide": {"model": role_model(&review_guide_model), "temperature": review_guide_temp},
-                "exec": {"model": role_model(&review_exec_model), "temperature": review_exec_temp},
-                "judge": {"model": role_model(&review_judge_model), "temperature": review_judge_temp},
-            },
         });
         match self.conn.client.call("config.set", json!({"patch": patch})) {
             Ok(v) => {
@@ -837,14 +796,22 @@ impl App {
         if mods.contains(KeyModifiers::CONTROL)
             && matches!(code, KeyCode::Char('s') | KeyCode::Char('S'))
         {
-            self.save_settings();
+            if self.settings.as_ref().is_some_and(|s| s.plugin.is_some()) {
+                self.save_plugin_settings();
+            } else {
+                self.save_settings();
+            }
             return;
         }
-        let (nav_idx, nav_focus, detail) = match &self.settings {
-            Some(s) => (s.nav_idx, s.nav_focus, s.detail),
+        let (nav_idx, nav_focus, detail, in_plugin) = match &self.settings {
+            Some(s) => (s.nav_idx, s.nav_focus, s.detail, s.plugin.is_some()),
             None => return,
         };
         if detail {
+            if in_plugin {
+                self.on_plugin_key(code);
+                return;
+            }
             match code {
                 KeyCode::Esc => {
                     if let Some(s) = &mut self.settings {
@@ -872,24 +839,14 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Tab => {
                     if nav_idx == 0 {
                         if let Some(s) = &mut self.settings {
                             s.nav_focus = false;
                             s.field = 0;
                         }
-                    } else if let Some(s) = &mut self.settings {
-                        s.detail = true;
-                    }
-                }
-                KeyCode::Tab => {
-                    if nav_idx == 0 {
-                        if let Some(s) = &mut self.settings {
-                            s.nav_focus = false;
-                            s.field = 0;
-                        }
-                    } else if let Some(s) = &mut self.settings {
-                        s.detail = true;
+                    } else {
+                        self.open_plugin_page();
                     }
                 }
                 KeyCode::Char('r') => self.refresh_settings_plugins(),
@@ -923,7 +880,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if field == 18 {
+                if field == SETTINGS_FIELDS - 1 {
                     self.settings = None;
                 } else {
                     self.save_settings();
@@ -984,42 +941,6 @@ impl App {
                             let v = s.max_turns.parse::<i64>().unwrap_or(6);
                             s.max_turns = (v + dir as i64).clamp(1, 32).to_string();
                         }
-                        9 => s.review_enabled = !s.review_enabled,
-                        10 => {
-                            let v = s.review_rounds.parse::<i64>().unwrap_or(2);
-                            s.review_rounds = (v + dir as i64).clamp(1, 5).to_string();
-                        }
-                        11 | 13 | 15 if !s.models.is_empty() => {
-                            let n = s.models.len() as i32;
-                            let cur = match field {
-                                11 => &s.review_guide_model,
-                                13 => &s.review_exec_model,
-                                _ => &s.review_judge_model,
-                            };
-                            let idx = s.models.iter().position(|m| m == cur).unwrap_or(0) as i32;
-                            let idx = (idx + dir + n) % n;
-                            let m = s.models[idx as usize].clone();
-                            match field {
-                                11 => s.review_guide_model = m,
-                                13 => s.review_exec_model = m,
-                                _ => s.review_judge_model = m,
-                            }
-                        }
-                        12 => {
-                            let v = s.review_guide_temp.parse::<f64>().unwrap_or(0.3);
-                            s.review_guide_temp =
-                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.2, 0.5));
-                        }
-                        14 => {
-                            let v = s.review_exec_temp.parse::<f64>().unwrap_or(0.7);
-                            s.review_exec_temp =
-                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.6, 1.5));
-                        }
-                        16 => {
-                            let v = s.review_judge_temp.parse::<f64>().unwrap_or(0.1);
-                            s.review_judge_temp =
-                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.0, 0.2));
-                        }
                         _ => {}
                     }
                 }
@@ -1037,13 +958,6 @@ impl App {
                         5 => Some(&mut s.context_window),
                         6 => Some(&mut s.max_turns),
                         7 => Some(&mut s.workspace_root),
-                        10 => Some(&mut s.review_rounds),
-                        11 => Some(&mut s.review_guide_model),
-                        12 => Some(&mut s.review_guide_temp),
-                        13 => Some(&mut s.review_exec_model),
-                        14 => Some(&mut s.review_exec_temp),
-                        15 => Some(&mut s.review_judge_model),
-                        16 => Some(&mut s.review_judge_temp),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -1051,13 +965,9 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(' ') if field == 8 || field == 9 => {
+            KeyCode::Char(' ') if field == 8 => {
                 if let Some(s) = &mut self.settings {
-                    if field == 8 {
-                        s.auto_allow_safe = !s.auto_allow_safe;
-                    } else {
-                        s.review_enabled = !s.review_enabled;
-                    }
+                    s.auto_allow_safe = !s.auto_allow_safe;
                 }
             }
             KeyCode::Char(c) => {
@@ -1070,13 +980,6 @@ impl App {
                         5 => Some(&mut s.context_window),
                         6 => Some(&mut s.max_turns),
                         7 => Some(&mut s.workspace_root),
-                        10 => Some(&mut s.review_rounds),
-                        11 => Some(&mut s.review_guide_model),
-                        12 => Some(&mut s.review_guide_temp),
-                        13 => Some(&mut s.review_exec_model),
-                        14 => Some(&mut s.review_exec_temp),
-                        15 => Some(&mut s.review_judge_model),
-                        16 => Some(&mut s.review_judge_temp),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -1086,6 +989,401 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// 打开插件页：内核用 `plugin.settings` 转述插件声明；未声明时退回只读详情。
+    fn open_plugin_page(&mut self) {
+        let name = match &self.settings {
+            Some(s) if s.nav_idx > 0 => s.nav[s.nav_idx - 1]
+                .get("name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            _ => return,
+        };
+        let enabled = self
+            .settings
+            .as_ref()
+            .and_then(|s| s.nav.get(s.nav_idx - 1))
+            .and_then(|v| v.get("enabled"))
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        match self
+            .conn
+            .client
+            .call("plugin.settings", json!({"name": name}))
+        {
+            Ok(v) => {
+                let fields: Vec<Value> = v
+                    .get("fields")
+                    .and_then(|x| x.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let values: Vec<Value> = fields
+                    .iter()
+                    .map(|f| {
+                        v.get("values")
+                            .and_then(|x| {
+                                x.get(f.get("key").and_then(|k| k.as_str()).unwrap_or(""))
+                            })
+                            .cloned()
+                            .unwrap_or_else(|| f.get("default").cloned().unwrap_or(Value::Null))
+                    })
+                    .collect();
+                let text: Vec<String> = values.iter().map(value_text).collect();
+                let title = v
+                    .get("title")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(&name)
+                    .to_string();
+                let description = v
+                    .get("description")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(s) = &mut self.settings {
+                    s.detail = true;
+                    s.nav_focus = false;
+                    s.plugin = Some(PluginFormState {
+                        name: name.clone(),
+                        root: v
+                            .get("root")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        title,
+                        description,
+                        fields,
+                        values,
+                        text,
+                        enabled,
+                        enabled0: enabled,
+                        field: 0,
+                        status: format!("已读取 {name} 的声明；←/→ 调整，Enter 保存"),
+                        dirty: false,
+                    });
+                }
+            }
+            Err(e) => {
+                // 插件没有声明设置项：保留原来的只读详情页（启停 + 元信息）。
+                if let Some(s) = &mut self.settings {
+                    s.detail = true;
+                    s.plugin = None;
+                    s.status = format!("{name}: {e}");
+                }
+            }
+        }
+    }
+
+    /// 插件页按键：字段 0 是启用开关，其余字段按内核声明的类型调整。
+    fn on_plugin_key(&mut self, code: KeyCode) {
+        let (n, save_idx, cancel_idx, field) = match &self.settings {
+            Some(s) => match &s.plugin {
+                Some(p) => (p.len(), p.save_idx(), p.cancel_idx(), p.field),
+                None => return,
+            },
+            None => return,
+        };
+        if code == KeyCode::Esc {
+            if let Some(s) = &mut self.settings {
+                s.plugin = None;
+                s.detail = false;
+                s.nav_focus = true;
+                s.status = "已返回侧栏（未保存的修改已丢弃）".into();
+            }
+            return;
+        }
+        if code == KeyCode::Enter {
+            if field == save_idx {
+                self.save_plugin_settings();
+            } else if field == cancel_idx {
+                if let Some(s) = &mut self.settings {
+                    s.plugin = None;
+                    s.detail = false;
+                    s.nav_focus = true;
+                }
+            } else if field == 0 {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        p.enabled = !p.enabled;
+                        p.dirty = true;
+                    }
+                }
+            }
+            return;
+        }
+        match code {
+            KeyCode::Up => {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        p.field = (p.field + n - 1) % n;
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        p.field = (p.field + 1) % n;
+                    }
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        p.field = (p.field + n - 1) % n;
+                    }
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let dir: i32 = if matches!(code, KeyCode::Left) { -1 } else { 1 };
+                self.adjust_plugin_field(field, dir);
+            }
+            KeyCode::Char(' ') => {
+                if field == 0 {
+                    if let Some(s) = &mut self.settings {
+                        if let Some(p) = &mut s.plugin {
+                            p.enabled = !p.enabled;
+                            p.dirty = true;
+                        }
+                    }
+                } else {
+                    self.adjust_plugin_field(field, 1);
+                }
+            }
+            KeyCode::Backspace => {
+                if field >= 1 && field <= n - PLUGIN_EXTRA {
+                    if let Some(s) = &mut self.settings {
+                        if let Some(p) = &mut s.plugin {
+                            p.text[field - 1].pop();
+                            p.dirty = true;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        if (1..=n - PLUGIN_EXTRA).contains(&field) {
+                            let kind = p.fields[field - 1]
+                                .get("type")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("string");
+                            if matches!(kind, "string" | "int" | "number") {
+                                p.text[field - 1].push(c);
+                                p.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 按声明类型调整一个字段：bool 翻转，enum 循环，int/number 按步进。
+    fn adjust_plugin_field(&mut self, field: usize, dir: i32) {
+        if let Some(s) = &mut self.settings {
+            if let Some(p) = &mut s.plugin {
+                if field == 0 {
+                    p.enabled = !p.enabled;
+                    p.dirty = true;
+                    return;
+                }
+                let Some(f) = p.fields.get(field - 1).cloned() else {
+                    return;
+                };
+                let kind = f.get("type").and_then(|x| x.as_str()).unwrap_or("string");
+                let idx = field - 1;
+                match kind {
+                    "bool" => {
+                        let cur = p.values[idx].as_bool().unwrap_or(false);
+                        p.values[idx] = json!(!cur);
+                    }
+                    "enum" => {
+                        let opts: Vec<String> = f
+                            .get("options")
+                            .and_then(|x| x.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|o| o.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if !opts.is_empty() {
+                            let cur = p.values[idx].as_str().unwrap_or("").to_string();
+                            let pos = opts.iter().position(|o| *o == cur).unwrap_or(0) as i32;
+                            let next = ((pos + dir).rem_euclid(opts.len() as i32)) as usize;
+                            p.values[idx] = json!(opts[next]);
+                            p.text[idx] = opts[next].clone();
+                        }
+                    }
+                    "int" => {
+                        let step = f.get("step").and_then(|x| x.as_i64()).unwrap_or(1);
+                        let mut v = p.text[idx].trim().parse::<i64>().unwrap_or_else(|_| {
+                            f.get("default").and_then(|x| x.as_i64()).unwrap_or(0)
+                        });
+                        v += dir as i64 * step;
+                        if let Some(m) = f.get("min").and_then(|x| x.as_f64()) {
+                            v = v.max(m as i64);
+                        }
+                        if let Some(m) = f.get("max").and_then(|x| x.as_f64()) {
+                            v = v.min(m as i64);
+                        }
+                        p.text[idx] = v.to_string();
+                    }
+                    "number" => {
+                        let step = f.get("step").and_then(|x| x.as_f64()).unwrap_or(0.05);
+                        let mut v = p.text[idx].trim().parse::<f64>().unwrap_or_else(|_| {
+                            f.get("default").and_then(|x| x.as_f64()).unwrap_or(0.0)
+                        });
+                        v = (v + dir as f64 * step).max(0.0);
+                        if let Some(m) = f.get("min").and_then(|x| x.as_f64()) {
+                            v = v.max(m);
+                        }
+                        if let Some(m) = f.get("max").and_then(|x| x.as_f64()) {
+                            v = v.min(m);
+                        }
+                        p.text[idx] = format!("{v:.2}");
+                    }
+                    _ => {}
+                }
+                p.dirty = true;
+            }
+        }
+    }
+
+    /// 保存插件页：只提交改动的声明字段；启用状态走 plugin.enable/disable。
+    fn save_plugin_settings(&mut self) {
+        let (name, values, text, fields, enabled, enabled0) = match &self.settings {
+            Some(s) => match &s.plugin {
+                Some(p) => (
+                    p.name.clone(),
+                    p.values.clone(),
+                    p.text.clone(),
+                    p.fields.clone(),
+                    p.enabled,
+                    p.enabled0,
+                ),
+                None => return,
+            },
+            None => return,
+        };
+        // 声明字段 → 值；数字/字符串以编辑中的文本为准，解析失败即报错。
+        let mut patch = serde_json::Map::new();
+        for (i, f) in fields.iter().enumerate() {
+            let kind = f.get("type").and_then(|x| x.as_str()).unwrap_or("string");
+            let v = match kind {
+                "bool" => values[i].clone(),
+                "enum" => values[i].clone(),
+                "int" => match text[i].trim().parse::<i64>() {
+                    Ok(n) => json!(n),
+                    Err(_) => {
+                        if let Some(s) = &mut self.settings {
+                            if let Some(p) = &mut s.plugin {
+                                p.status = format!(
+                                    "{} 必须是整数",
+                                    f["label"].as_str().unwrap_or("该字段")
+                                );
+                            }
+                        }
+                        return;
+                    }
+                },
+                "number" => match text[i].trim().parse::<f64>() {
+                    Ok(n) => json!(n),
+                    Err(_) => {
+                        if let Some(s) = &mut self.settings {
+                            if let Some(p) = &mut s.plugin {
+                                p.status = format!(
+                                    "{} 必须是数字",
+                                    f["label"].as_str().unwrap_or("该字段")
+                                );
+                            }
+                        }
+                        return;
+                    }
+                },
+                _ => json!(text[i].clone()),
+            };
+            let path = f
+                .get("path")
+                .and_then(|x| x.as_str())
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| {
+                    let root = match &self.settings {
+                        Some(s) => match &s.plugin {
+                            Some(p) => p.root.clone(),
+                            None => String::new(),
+                        },
+                        None => String::new(),
+                    };
+                    let key = f.get("key").and_then(|x| x.as_str()).unwrap_or("");
+                    if root.is_empty() {
+                        key.to_string()
+                    } else {
+                        format!("{root}.{key}")
+                    }
+                });
+            set_nested(&mut patch, &path, v);
+        }
+        let ok = if patch.is_empty() {
+            true
+        } else {
+            match self
+                .conn
+                .client
+                .call("config.set", json!({"patch": Value::Object(patch)}))
+            {
+                Ok(_) => true,
+                Err(e) => {
+                    if let Some(s) = &mut self.settings {
+                        if let Some(p) = &mut s.plugin {
+                            p.status = format!("保存失败: {e}");
+                        }
+                    }
+                    false
+                }
+            }
+        };
+        if !ok {
+            return;
+        }
+        if enabled != enabled0 {
+            let method = if enabled {
+                "plugin.enable"
+            } else {
+                "plugin.disable"
+            };
+            if let Err(e) = self.conn.client.call(method, json!({"name": name})) {
+                if let Some(s) = &mut self.settings {
+                    if let Some(p) = &mut s.plugin {
+                        p.status = format!("设置已保存，但启停失败: {e}");
+                    }
+                }
+                return;
+            }
+        }
+        if let Some(s) = &mut self.settings {
+            if let Some(p) = &mut s.plugin {
+                p.status = format!(
+                    "已保存 {name} 的设置{}",
+                    if enabled != enabled0 {
+                        if enabled {
+                            "，并已启用"
+                        } else {
+                            "，并已停用"
+                        }
+                    } else {
+                        ""
+                    }
+                );
+                p.enabled0 = enabled;
+                p.dirty = false;
+            }
+        }
+        self.refresh_settings_plugins();
+        self.refresh_ctx();
     }
 
     fn input_len(&self) -> usize {
@@ -2244,53 +2542,65 @@ fn draw_settings(f: &mut Frame, app: &App) {
 
     if s.nav_idx > 0 {
         let item = s.nav.get(s.nav_idx - 1).cloned().unwrap_or(Value::Null);
-        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
-        let enabled = item
-            .get("enabled")
-            .and_then(|x| x.as_bool())
-            .unwrap_or(false);
-        let live = item
-            .get("live_state")
-            .and_then(|x| x.as_str())
-            .unwrap_or("stopped");
-        let category = item
-            .get("category")
-            .and_then(|x| x.as_str())
-            .unwrap_or("plugin");
-        let program = item.get("program").and_then(|x| x.as_str()).unwrap_or("-");
-        let hash = item.get("blake3").and_then(|x| x.as_str()).unwrap_or("-");
-        let version = item.get("version").and_then(|x| x.as_str()).unwrap_or("-");
-        let caps = item.get("capabilities").cloned().unwrap_or(Value::Null);
-        let perms = item.get("permissions").cloned().unwrap_or(Value::Null);
-        let lines = vec![
-            Line::from(vec![
-                Span::styled(name, Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(format!("  [{category}]")),
-            ]),
-            Line::from(""),
-            Line::from(format!(
-                "状态      {}",
-                if enabled { "已启用" } else { "已停用" }
-            )),
-            Line::from(format!("live      {live}")),
-            Line::from(format!("版本      {version}")),
-            Line::from(format!("capabilities  {}", caps)),
-            Line::from(format!("permissions   {}", perms)),
-            Line::from(format!("program   {program}")),
-            Line::from(format!("blake3    {hash}")),
-            Line::from(""),
-            Line::from(if s.detail {
-                "Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
-            } else {
-                "Enter 打开详情"
-            }),
-        ];
-        f.render_widget(
-            Paragraph::new(lines)
-                .block(Block::default().borders(Borders::ALL).title("插件详情"))
-                .wrap(Wrap { trim: false }),
-            body[1],
-        );
+        if let Some(p) = &s.plugin {
+            let enabled = item
+                .get("enabled")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false);
+            let category = item
+                .get("category")
+                .and_then(|x| x.as_str())
+                .unwrap_or("plugin");
+            draw_plugin_form(f, p, enabled, category, body[1]);
+        } else {
+            let name = item.get("name").and_then(|x| x.as_str()).unwrap_or("?");
+            let enabled = item
+                .get("enabled")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false);
+            let live = item
+                .get("live_state")
+                .and_then(|x| x.as_str())
+                .unwrap_or("stopped");
+            let category = item
+                .get("category")
+                .and_then(|x| x.as_str())
+                .unwrap_or("plugin");
+            let program = item.get("program").and_then(|x| x.as_str()).unwrap_or("-");
+            let hash = item.get("blake3").and_then(|x| x.as_str()).unwrap_or("-");
+            let version = item.get("version").and_then(|x| x.as_str()).unwrap_or("-");
+            let caps = item.get("capabilities").cloned().unwrap_or(Value::Null);
+            let perms = item.get("permissions").cloned().unwrap_or(Value::Null);
+            let lines = vec![
+                Line::from(vec![
+                    Span::styled(name, Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(format!("  [{category}]")),
+                ]),
+                Line::from(""),
+                Line::from(format!(
+                    "状态      {}",
+                    if enabled { "已启用" } else { "已停用" }
+                )),
+                Line::from(format!("live      {live}")),
+                Line::from(format!("版本      {version}")),
+                Line::from(format!("capabilities  {}", caps)),
+                Line::from(format!("permissions   {}", perms)),
+                Line::from(format!("program   {program}")),
+                Line::from(format!("blake3    {hash}")),
+                Line::from(""),
+                Line::from(if s.detail {
+                    "Space/Enter 启停 · r 刷新 · Esc 返回侧栏"
+                } else {
+                    "Enter 打开详情"
+                }),
+            ];
+            f.render_widget(
+                Paragraph::new(lines)
+                    .block(Block::default().borders(Borders::ALL).title("插件详情"))
+                    .wrap(Wrap { trim: false }),
+                body[1],
+            );
+        }
     } else {
         let values = [
             ("Provider", s.provider.clone()),
@@ -2325,48 +2635,6 @@ fn draw_settings(f: &mut Frame, app: &App) {
                     "[ ] 关".into()
                 },
             ),
-            (
-                "Review gate",
-                if s.review_enabled {
-                    "[x] 启用 guide→exec→judge".into()
-                } else {
-                    "[ ] 关闭".into()
-                },
-            ),
-            ("Review rounds", format!("{}（1–5）", s.review_rounds)),
-            (
-                "Guide model",
-                if s.review_guide_model.is_empty() {
-                    "(跟随当前模型)".into()
-                } else {
-                    s.review_guide_model.clone()
-                },
-            ),
-            (
-                "Guide temp",
-                format!("{}（0.20–0.50）", s.review_guide_temp),
-            ),
-            (
-                "Exec model",
-                if s.review_exec_model.is_empty() {
-                    "(跟随当前模型)".into()
-                } else {
-                    s.review_exec_model.clone()
-                },
-            ),
-            ("Exec temp", format!("{}（0.60–1.50）", s.review_exec_temp)),
-            (
-                "Judge model",
-                if s.review_judge_model.is_empty() {
-                    "(跟随当前模型)".into()
-                } else {
-                    s.review_judge_model.clone()
-                },
-            ),
-            (
-                "Judge temp",
-                format!("{}（0.00–0.20）", s.review_judge_temp),
-            ),
             ("保存并应用", "按 Enter / Ctrl+S".into()),
             ("取消/返回", "Esc 回侧栏".into()),
         ];
@@ -2391,7 +2659,7 @@ fn draw_settings(f: &mut Frame, app: &App) {
         }
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "guide/judge 建议 ≥7B；4B 可能无法产出合规 rubric（must_include 字面判据）",
+            "插件自己的设置在左侧对应插件页里（由插件声明，内核转述）",
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from(Span::styled(
@@ -2405,7 +2673,7 @@ fn draw_settings(f: &mut Frame, app: &App) {
         for m in s.models.iter().take(12) {
             lines.push(Line::from(format!("  · {m}")));
         }
-        // 19 个字段在 80x24 终端放不下；只滚动表单，保证当前字段可见。
+        // 11 个字段在 80x24 终端放不下；只滚动表单，保证当前字段可见。
         let viewport = body[1].height.saturating_sub(2) as usize;
         let offset = if viewport > 0 && s.field >= viewport {
             (s.field + 1 - viewport) as u16
@@ -2425,16 +2693,145 @@ fn draw_settings(f: &mut Frame, app: &App) {
         );
     }
 
-    let status = if s.status.is_empty() {
-        "设置页已打开"
-    } else {
-        s.status.as_str()
+    let plugin_status = s.plugin.as_ref().map(|p| p.status.clone());
+    let status = match (&plugin_status, s.status.is_empty()) {
+        (Some(p), _) => p.as_str(),
+        (None, true) => "设置页已打开",
+        (None, false) => s.status.as_str(),
     };
     f.render_widget(
         Paragraph::new(status)
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default().borders(Borders::ALL).title("状态")),
         chunks[2],
+    );
+}
+
+/// 插件设置页：完全由内核转述的 `plugin.settings` 声明驱动，TUI 不认识具体插件。
+fn draw_plugin_form(f: &mut Frame, p: &PluginFormState, enabled: bool, category: &str, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(
+            p.name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(
+            "  [{category}]  {}",
+            if enabled { "已启用" } else { "已停用" }
+        )),
+        if p.dirty {
+            Span::styled("  未保存", Style::default().fg(Color::Yellow))
+        } else {
+            Span::raw("")
+        },
+    ]));
+    if !p.description.trim().is_empty() {
+        lines.push(Line::from(Span::styled(
+            p.description.clone(),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::from(""));
+
+    // 字段 0：启停开关；1..=n：声明字段；之后保存/取消。
+    let rows = p.len();
+    for i in 0..rows {
+        let marker = if i == p.field { "▶ " } else { "  " };
+        let text = if i == 0 {
+            format!(
+                "{marker}{:<16} {}",
+                "启用插件",
+                if p.enabled { "[x] 开" } else { "[ ] 关" }
+            )
+        } else if i == p.save_idx() {
+            format!("{marker}{:<16} Enter / Ctrl+S", "保存并应用")
+        } else if i == p.cancel_idx() {
+            format!("{marker}{:<16} Esc", "取消/返回")
+        } else {
+            let f = &p.fields[i - 1];
+            let label = f.get("label").and_then(|x| x.as_str()).unwrap_or("?");
+            let kind = f.get("type").and_then(|x| x.as_str()).unwrap_or("string");
+            let shown = match kind {
+                "bool" => {
+                    if p.values[i - 1].as_bool().unwrap_or(false) {
+                        "[x] 开".to_string()
+                    } else {
+                        "[ ] 关".to_string()
+                    }
+                }
+                "enum" => p.values[i - 1].as_str().unwrap_or("").to_string(),
+                _ => {
+                    let t = &p.text[i - 1];
+                    if t.trim().is_empty() {
+                        f.get("placeholder")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("(空)")
+                            .to_string()
+                    } else {
+                        t.clone()
+                    }
+                }
+            };
+            let hint = match kind {
+                "int" | "number" => {
+                    let mut h = String::new();
+                    if let Some(m) = f.get("min").and_then(|x| x.as_f64()) {
+                        h.push_str(&format!("{m}–"));
+                    }
+                    if let Some(m) = f.get("max").and_then(|x| x.as_f64()) {
+                        h.push_str(&m.to_string());
+                    }
+                    if h.is_empty() {
+                        String::new()
+                    } else {
+                        format!("（{h}）")
+                    }
+                }
+                _ => String::new(),
+            };
+            format!("{marker}{label:<16} {shown}{hint}")
+        };
+        let mut line = Line::from(text);
+        if i == p.field {
+            line = line.style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+        lines.push(line);
+    }
+
+    // 当前字段的说明放在列表下方，避免长描述撑乱表格。
+    if p.field >= 1 && p.field <= p.fields.len() {
+        let f = &p.fields[p.field - 1];
+        if let Some(d) = f.get("description").and_then(|x| x.as_str()) {
+            if !d.trim().is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    d.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+    }
+    let viewport = area.height.saturating_sub(2) as usize;
+    let offset = if viewport > 0 && p.field >= viewport {
+        (p.field + 1 - viewport) as u16
+    } else {
+        0
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("{}（由插件声明）", p.title)),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((offset, 0)),
+        area,
     );
 }
 

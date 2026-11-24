@@ -785,6 +785,50 @@ fn dispatch(
                 "live": live.iter().map(|(n, st, m)| json!({"name": n, "state": st, "manifest": m})).collect::<Vec<_>>(),
             }))
         }
+        "plugin.settings" => {
+            // 内核只转述：插件在 plugin.json 里声明什么，前端就渲染什么。
+            let name = params
+                .get("name")
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| invalid("name required"))?;
+            let schema = kernel
+                .registry
+                .find(name)
+                .and_then(|e| e.settings.clone())
+                .or_else(|| {
+                    kernel
+                        .plugins
+                        .list()
+                        .into_iter()
+                        .find(|(n, _, _)| n == name)
+                        .and_then(|(_, _, m)| m.and_then(|m| m.settings))
+                })
+                .ok_or_else(|| (rpc::ERR_NO_SESSION, format!("插件 {name} 未声明设置项")))?;
+            let root = schema.root_for(name);
+            let cfg = kernel.config_json();
+            let mut values = serde_json::Map::new();
+            let mut defaults = serde_json::Map::new();
+            for f in &schema.fields {
+                let pointer = format!(
+                    "/{}",
+                    f.path(&root).split('.').collect::<Vec<_>>().join("/")
+                );
+                values.insert(
+                    f.key.clone(),
+                    cfg.pointer(&pointer).cloned().unwrap_or(Value::Null),
+                );
+                defaults.insert(f.key.clone(), f.default.clone());
+            }
+            Ok(json!({
+                "name": name,
+                "root": root,
+                "title": schema.title,
+                "description": schema.description,
+                "fields": schema.fields,
+                "values": Value::Object(values),
+                "defaults": Value::Object(defaults),
+            }))
+        }
         "plugin.enable" | "plugin.disable" => {
             let name = params
                 .get("name")

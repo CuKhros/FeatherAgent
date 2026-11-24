@@ -64,14 +64,14 @@
         <button class="nav-item" data-view="plugins">插件管理</button>
         <div class="nav-subtitle">插件页面</div>
         <div id="plugin-nav" class="plugin-nav"></div>
-        <div class="nav-foot">安装或启停插件后，侧栏会随内核登记表更新；页面内容由插件清单驱动。</div>
+        <div class="nav-foot">侧栏与设置项都由插件清单声明：内核只转述，前端按声明渲染，装新插件不需要改 UI。</div>
       </aside>
 
       <div class="settings-card">
         <div class="settings-head">
           <div>
             <h2 id="settings-title">设置</h2>
-            <p id="settings-subtitle" class="warn">保存后通过 <code>config.set</code> 提交给内核；工作区改动在下次启动 serve 时生效。</p>
+            <p id="settings-subtitle" class="warn">保存后通过 <code>config.set</code> 提交给内核；插件自己的设置在左侧对应插件页里，由插件声明、内核转述。</p>
           </div>
           <button id="btn-settings-close" class="ghost">关闭</button>
         </div>
@@ -110,37 +110,6 @@
           </div>
 
           <div class="settings-section">
-            <div class="section-title">三段校验 review-gate（可选）</div>
-            <label class="check-row">
-              <input id="cfg-review-enabled" type="checkbox"> 启用 guide → exec → judge（默认关闭）
-            </label>
-            <div class="settings-grid">
-              <label>最大修订轮次（1–5）
-                <input id="cfg-review-max-rounds" type="number" min="1" max="5" step="1" value="2">
-              </label>
-              <label>Guide 模型（留空跟随当前）
-                <input id="cfg-review-guide-model" placeholder="留空 = 当前模型" autocomplete="off">
-              </label>
-              <label>Guide 温度（0.2–0.5）
-                <input id="cfg-review-guide-temp" type="number" min="0.2" max="0.5" step="0.05" value="0.3">
-              </label>
-              <label>Exec 模型（留空跟随当前）
-                <input id="cfg-review-exec-model" placeholder="留空 = 当前模型" autocomplete="off">
-              </label>
-              <label>Exec 温度（0.6–1.5）
-                <input id="cfg-review-exec-temp" type="number" min="0.6" max="1.5" step="0.05" value="0.7">
-              </label>
-              <label>Judge 模型（留空跟随当前）
-                <input id="cfg-review-judge-model" placeholder="留空 = 当前模型" autocomplete="off">
-              </label>
-              <label>Judge 温度（0.0–0.2）
-                <input id="cfg-review-judge-temp" type="number" min="0" max="0.2" step="0.01" value="0.1">
-              </label>
-            </div>
-            <span class="form-hint">Guide 只出验收清单，Exec 看不到清单；每条必须带字面 must_include，Judge 先做字面核对再引用答案原文（evidence 少于 10 字算 judge 失败并重试）。guide/judge 建议使用 ≥7B 模型；4B 可能无法产出合规 rubric。未通过时带判据与证据重答，达到轮次上限返回最后一版并标记 unapproved。</span>
-          </div>
-
-          <div class="settings-section">
             <div class="section-title">上下文与工作区</div>
             <div class="settings-grid">
               <label>上下文窗口（tokens）
@@ -157,29 +126,6 @@
             <label class="check-row">
               <input id="cfg-auto-allow-safe" type="checkbox"> 自动放行安全工具（如读文件）
             </label>
-          </div>
-
-          <div class="settings-section">
-            <div class="section-title">联网搜索</div>
-            <div class="settings-grid">
-              <label>提供方
-                <select id="cfg-search-provider">
-                  <option value="local">本地搜索（免费，无需 Key）</option>
-                  <option value="deepseek">DeepSeek Search API（可选）</option>
-                  <option value="none">关闭</option>
-                </select>
-              </label>
-              <label>API Base URL（仅 DeepSeek）
-                <input id="cfg-search-base-url" placeholder="https://api.deepseek.com" autocomplete="off">
-              </label>
-              <label>API Key 环境变量（仅 DeepSeek）
-                <input id="cfg-search-key-env" placeholder="DEEPSEEK_API_KEY" autocomplete="off">
-              </label>
-              <label>单次结果数
-                <input id="cfg-search-count" type="number" min="1" max="20" step="1" value="5">
-              </label>
-            </div>
-            <span id="search-status" class="form-hint">本地模式无需密钥；DeepSeek 密钥只从环境变量读取，不落盘、不进日志。</span>
           </div>
 
           <div class="settings-actions">

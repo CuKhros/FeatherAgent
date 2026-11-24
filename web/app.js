@@ -37,6 +37,8 @@
   let cfgModels = [];
   let pluginData = { registry: [], live: [] };
   let pluginDetailName = "";
+  // 当前打开的插件设置声明：{name, root, fields, values}，由内核 plugin.settings 转述。
+  let pluginSettings = null;
   let workspaces = [];
   let curState = "idle";
   const pending = new Map();
@@ -554,7 +556,7 @@
       const b = document.createElement("button");
       b.className = "nav-item plugin-nav-item";
       b.textContent = `${r.enabled === false ? "○" : "●"} ${r.name}`;
-      b.title = `${r.category || "plugin"} · ${r.enabled === false ? "已停用" : "已启用"}`;
+      b.title = `${r.name} · ${r.category || "plugin"} · ${r.enabled === false ? "已停用" : "已启用"}`;
       b.onclick = () => showPluginDetail(r.name);
       nav.appendChild(b);
     }
@@ -639,13 +641,91 @@
     const subtitles = {
       general: "保存后通过 config.set 提交给内核；工作区改动在下次启动 serve 时生效。",
       plugins: "插件来自内核登记表；安装会登记清单，启停会同步运行进程。",
-      plugin: "此页由 plugin.list 生成；安装或卸载插件后刷新设置页即可增删侧栏。",
+      plugin: "设置项由插件在 plugin.json 里声明，内核原样转述；安装新插件无需改前端。",
     };
     $("#settings-subtitle").textContent = subtitles[name] || subtitles.general;
     if (name !== "plugin") pluginDetailName = "";
   }
 
-  function showPluginDetail(name) {
+  // 按点号路径把值写进嵌套对象：`guide.model` → {guide:{model:...}}
+  function setPath(obj, path, value) {
+    const parts = String(path).split(".");
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!cur[parts[i]] || typeof cur[parts[i]] !== "object") cur[parts[i]] = {};
+      cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = value;
+    return obj;
+  }
+
+  function fieldInputId(f) {
+    return "ps-" + String(f.key || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  }
+
+  // 渲染一个声明字段；TUI/WebUI 都只认 bool/int/number/string/enum 五种类型。
+  function pluginFieldHtml(f, value) {
+    const id = fieldInputId(f);
+    const label = esc(f.label || f.key || "?");
+    const desc = f.description ? `<span class="form-hint">${esc(f.description)}</span>` : "";
+    const type = f.type || "string";
+    if (type === "bool") {
+      return `<label class="check-row"><input id="${id}" type="checkbox" ${value ? "checked" : ""}> ${label}</label>${desc}`;
+    }
+    if (type === "enum") {
+      const opts = (f.options || []).map((o) =>
+        `<option value="${esc(o)}" ${o === value ? "selected" : ""}>${esc(o)}</option>`).join("");
+      return `<label>${label}<select id="${id}">${opts}</select></label>${desc}`;
+    }
+    const attrs = [
+      f.min !== undefined && f.min !== null ? `min="${f.min}"` : "",
+      f.max !== undefined && f.max !== null ? `max="${f.max}"` : "",
+      f.step !== undefined && f.step !== null ? `step="${f.step}"` : "",
+    ].join(" ");
+    if (type === "int" || type === "number") {
+      return `<label>${label}<input id="${id}" type="number" ${attrs} value="${esc(value ?? f.default ?? "")}"></label>${desc}`;
+    }
+    const kind = f.secret ? "password" : "text";
+    return `<label>${label}<input id="${id}" type="${kind}" placeholder="${esc(f.placeholder || "")}" value="${esc(value ?? "")}"></label>${desc}`;
+  }
+
+  function readFieldInput(f) {
+    const el = document.getElementById(fieldInputId(f));
+    if (!el) return { value: f.default };
+    if (f.type === "bool") return { value: el.checked };
+    if (f.type === "int") {
+      const n = Number(el.value);
+      if (!Number.isInteger(n)) throw new Error(`${f.label} 必须是整数`);
+      return { value: n };
+    }
+    if (f.type === "number") {
+      const n = Number(el.value);
+      if (!Number.isFinite(n)) throw new Error(`${f.label} 必须是数字`);
+      return { value: n };
+    }
+    return { value: el.value };
+  }
+
+  async function savePluginSettings(name) {
+    if (!pluginSettings || pluginSettings.name !== name) return;
+    const patch = {};
+    for (const f of pluginSettings.fields) {
+      const path = f.path && String(f.path).trim() ? f.path.trim()
+        : `${pluginSettings.root}.${f.key}`;
+      setPath(patch, path, readFieldInput(f).value);
+    }
+    try {
+      await rpc("config.set", { patch }, 15000);
+      const st = document.getElementById("plugin-settings-status");
+      if (st) { st.textContent = `已保存 ${name} 的设置`; st.className = "form-hint ok"; }
+      cfg = await rpc("config.get", {}, 15000);
+    } catch (e) {
+      const st = document.getElementById("plugin-settings-status");
+      if (st) { st.textContent = "保存失败：" + e.message; st.className = "form-hint err"; }
+    }
+  }
+
+  async function showPluginDetail(name) {
     const r = pluginRegistry(name);
     if (!r) return;
     const live = pluginLive(name);
@@ -659,11 +739,11 @@
     const enabled = r.enabled !== false;
     const caps = Array.isArray(m.capabilities) ? m.capabilities : [];
     const perms = Array.isArray(m.permissions) ? m.permissions : [];
-    $("#plugin-detail").innerHTML = `
+    const head = `
       <div class="settings-section">
         <div class="section-title">插件清单</div>
         <div class="plugin-detail-head">
-          <div><h3>${esc(name)}</h3><p class="warn">${esc(r.category || "plugin")} · 版本 ${esc(m.version || "未运行/未读取")} · ${enabled ? "已启用" : "已停用"}</p></div>
+          <div><h3>${esc(name)}</h3><p class="warn">${esc(name)} · ${esc(r.category || "plugin")} · 版本 ${esc(m.version || "未运行/未读取")} · ${enabled ? "已启用" : "已停用"}</p></div>
           <button id="btn-plugin-detail-toggle" class="${enabled ? "ghost" : "primary"}">${enabled ? "停用" : "启用"}</button>
         </div>
         <div class="kv-grid">
@@ -674,9 +754,37 @@
           <div class="wide"><span>program</span><code>${esc(r.program || "-")}</code></div>
           <div class="wide"><span>blake3</span><code>${esc(r.blake3 || "-")}</code></div>
         </div>
-        <p class="form-hint">该侧栏页由内核 <code>plugin.list</code> 的登记表生成；安装/卸载后刷新设置页即可增删。</p>
       </div>`;
+
+    // 插件声明了设置项 → 渲染它自己的表单；没声明就只有清单页。
+    let settings = null;
+    try {
+      settings = await rpc("plugin.settings", { name }, 15000);
+    } catch (e) {
+      settings = null;
+    }
+    pluginSettings = settings;
+    let form = "";
+    if (settings && Array.isArray(settings.fields) && settings.fields.length) {
+      const rows = settings.fields.map((f) => {
+        const v = (settings.values || {})[f.key];
+        return pluginFieldHtml(f, v === null || v === undefined ? f.default : v);
+      }).join("");
+      form = `
+      <div class="settings-section">
+        <div class="section-title">${esc(settings.title || "插件设置")}</div>
+        ${settings.description ? `<p class="warn">${esc(settings.description)}</p>` : ""}
+        <div class="settings-grid">${rows}</div>
+        <div class="settings-actions">
+          <span id="plugin-settings-status" class="hint"></span>
+          <button id="btn-plugin-settings-save" class="primary">保存插件设置</button>
+        </div>
+      </div>`;
+    }
+    $("#plugin-detail").innerHTML = head + form;
     $("#btn-plugin-detail-toggle").onclick = () => togglePlugin(name, enabled);
+    const save = document.getElementById("btn-plugin-settings-save");
+    if (save) save.onclick = () => savePluginSettings(name);
   }
 
   async function openSettings() {
@@ -707,35 +815,6 @@
       $("#cfg-max-turns").value = String(cfg.max_turns ?? 6);
       $("#cfg-auto-allow-safe").checked = cfg.auto_allow_safe !== false;
       $("#cfg-workspace-root").value = cfg.workspace_root || "";
-      $("#cfg-search-provider").value = cfg.search_provider || "local";
-      $("#cfg-search-base-url").value = cfg.search_base_url || "https://api.deepseek.com";
-      $("#cfg-search-key-env").value = cfg.search_api_key_env || "DEEPSEEK_API_KEY";
-      $("#cfg-search-count").value = String(cfg.search_count ?? 5);
-      const rg = cfg.review_gate || {};
-      $("#cfg-review-enabled").checked = !!rg.enabled;
-      $("#cfg-review-max-rounds").value = String(rg.max_rounds ?? 2);
-      $("#cfg-review-guide-model").value = (rg.guide && rg.guide.model) || "";
-      $("#cfg-review-guide-temp").value = String((rg.guide && rg.guide.temperature) ?? 0.3);
-      $("#cfg-review-exec-model").value = (rg.exec && rg.exec.model) || "";
-      $("#cfg-review-exec-temp").value = String((rg.exec && rg.exec.temperature) ?? 0.7);
-      $("#cfg-review-judge-model").value = (rg.judge && rg.judge.model) || "";
-      $("#cfg-review-judge-temp").value = String((rg.judge && rg.judge.temperature) ?? 0.1);
-      try {
-        const st = await rpc("search.status");
-        if (st.provider === "local") {
-          $("#search-status").textContent = st.configured
-            ? `本地搜索可用：必应 / DuckDuckGo / Wikipedia / Hacker News / GitHub，免费且无需 Key`
-            : "本地搜索插件未就绪，请检查插件管理页";
-        } else if (st.provider === "none") {
-          $("#search-status").textContent = "联网搜索已关闭；模型不会获得任何联网工具";
-        } else {
-          $("#search-status").textContent = st.configured
-            ? `已配置：${st.key_env} 已设置；Search/Fetch 按成功请求计费（5 元/1000 次）`
-            : `未配置：设置环境变量 ${st.key_env} 后重启 serve，或切换为本地搜索`;
-        }
-      } catch (e) {
-        $("#search-status").textContent = "读取联网状态失败：" + e.message;
-      }
       syncTemperature();
       try {
         await refreshPlugins();
@@ -774,23 +853,6 @@
       setSettingsStatus("温度必须在 0.00–2.00 之间", "err");
       return;
     }
-    const reviewEnabled = $("#cfg-review-enabled").checked;
-    const reviewRounds = Number($("#cfg-review-max-rounds").value || 2);
-    const guideTemp = Number($("#cfg-review-guide-temp").value || 0.3);
-    const execTemp = Number($("#cfg-review-exec-temp").value || 0.7);
-    const judgeTemp = Number($("#cfg-review-judge-temp").value || 0.1);
-    // 即使当前未启用，也先校验，避免把越界值写进 config.json 后再打开。
-    if (!Number.isInteger(reviewRounds) || reviewRounds < 1 || reviewRounds > 5) {
-      setSettingsStatus("三段校验轮次必须在 1–5 之间", "err");
-      return;
-    }
-    if (![guideTemp, execTemp, judgeTemp].every(Number.isFinite)
-        || guideTemp < 0.2 || guideTemp > 0.5
-        || execTemp < 0.6 || execTemp > 1.5
-        || judgeTemp < 0 || judgeTemp > 0.2) {
-      setSettingsStatus("三段校验温度越界：guide 0.2–0.5 / exec 0.6–1.5 / judge 0.0–0.2", "err");
-      return;
-    }
     setSettingsStatus("正在提交给内核…", "warn");
     try {
       const v = await rpc("config.set", { patch: {
@@ -803,18 +865,6 @@
         max_turns: maxTurns,
         workspace_root: ($("#cfg-workspace-root").value || "").trim(),
         auto_allow_safe: $("#cfg-auto-allow-safe").checked,
-        search_provider: $("#cfg-search-provider").value,
-        search_base_url: ($("#cfg-search-base-url").value || "").trim(),
-        search_api_key_env: ($("#cfg-search-key-env").value || "").trim(),
-        search_count: Number($("#cfg-search-count").value || 5),
-        review_gate: {
-          enabled: reviewEnabled,
-          max_rounds: reviewRounds,
-          guide: { model: ($("#cfg-review-guide-model").value || "").trim(), temperature: guideTemp },
-          exec: { model: ($("#cfg-review-exec-model").value || "").trim(), temperature: execTemp },
-          judge: { model: ($("#cfg-review-judge-model").value || "").trim(), temperature: judgeTemp },
-          on_exhausted: "return_last_with_flag",
-        },
       }});
       cfg = v.config || cfg;
       setSettingsStatus("已保存并应用，下一轮推理使用新配置", "ok");

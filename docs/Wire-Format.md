@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.2.1** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.3** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.2.1","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -169,6 +169,7 @@ On Windows, Python can use `open(r'\\.\pipe\featheragent-...', 'r+b', buffering=
 | `plugin.list` | plugin inventory | none |
 | `plugin.enable` / `plugin.disable` | enable/disable plugin | `name` |
 | `plugin.install` | install plugin | `path` (absolute directory containing `plugin.json`) |
+| `plugin.settings` | read a plugin's declared settings schema and values | `name` |
 
 Full parameter details live in `src/server/mod.rs::dispatch`; this document locks down the **transport** so third parties do not get stuck on framing. Tool calls have no standalone RPC: the model/session triggers them through `chat.send`, and results return as events. `model.message.finish` may be `tool_calls`, followed by `tool.call` / `tool.result`. Business errors (path escape/missing args/file not found) are `tool.error`; only plugin crash/timeout/IO are `tool.failed`; three consecutive technical failures emit `tool.degraded`. Providers must put structured tool calls into the `done` event, not just concatenated text.
 
@@ -238,11 +239,26 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 // enable/disable: sync registry and running process
 {"method":"plugin.enable","params":{"name":"my-tool"}}
 {"method":"plugin.disable","params":{"name":"my-tool"}}
+
+// settings: the plugin declares the schema, the kernel relays it verbatim
+{"method":"plugin.settings","params":{"name":"review-gate"}}
+// → {"name":"review-gate","root":"review_gate","title":"...","description":"...",
+//    "fields":[{"key":"max_rounds","label":"Max rounds","type":"int",
+//               "default":2,"min":1,"max":5,"step":1}, ...],
+//    "values":{"enabled":false,"max_rounds":3,...},
+//    "defaults":{...}}
 ```
 
 - A successful `plugin.install` with an enabled plugin registers the spec immediately; `plugin.enable` re-registers and starts on demand; `plugin.disable` terminates the running process.
 - `plugin.list.registry` can drive dynamic sidebars; `live.state=ready` means running, `stopped` means on-demand.
 - Plugin manifest `api` must satisfy `>=1.0 <2.0`; otherwise installation fails.
+- `manifest.settings` (optional, v1.2.1-rc.3) is the only source of plugin settings UI:
+  - `root` — config path holding these fields (default `plugin_settings.<name>`);
+  - `title` / `description` — shown above the form;
+  - `fields[]` — `key`, optional absolute `path` (to point at an existing top-level key), `label`, `type` (`bool|int|number|string|enum` only), `default`, `description`, `placeholder`, `min`, `max`, `step`, `options`, `secret`.
+- A plugin that declares no settings still appears in `plugin.list`; `plugin.settings` returns a business error (“plugin X declares no settings”). Frontends should fall back to the manifest summary plus the enable toggle.
+- Writes go through `config.set` with the expanded paths (`<root>.<key>`). The kernel validates type/range/enum and rejects undeclared keys under `plugin_settings.<name>`; first write to a declared path creates missing parents. Frontends must not hard-code plugin field names — render from `plugin.settings`.
+- `registry[]` entries carry `settings` (the same schema) so a sidebar can be built before any plugin process starts.
 
 ### 5.4 Tool error events
 

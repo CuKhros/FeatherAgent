@@ -71,8 +71,10 @@ TASKS = [
     ("t2-write", "请用工具把这段文本写入 workspace/w1.txt：HELLO_W_99", "write", None),
     ("t3-shell", "请用 shell 工具执行命令 echo S3SHELL 并把输出告诉我。", "shell", "S3SHELL"),
     ("t4-notool", "1 加 1 等于几？直接回答。", None, "2"),
-    ("t5-multi", "先读 workspace/s3-probe.txt，然后用一句话总结它的内容。", "read", "FEATHER"),
-    ("t6-missing", "请读取 workspace/no-such-file-xyz.txt 并告诉我内容。", "read", "不存在", True),
+    # t5/t6 显式写出“必须调用工具/只调用一次”：不写死这条约束时，4B 模型会直接凭上下文猜答案，
+    # 或失败后换路径反复重试，S3 口径无法稳定复现（rc.2.1 真机报告 H4）。
+    ("t5-multi", "必须先调用 tool.fs.read 工具读取 workspace/s3-probe.txt，再用一句话总结它的内容。禁止不调用工具直接回答。", "read", "FEATHER"),
+    ("t6-missing", "请调用 tool.fs.read 读取 workspace/no-such-file-xyz.txt 并把结果告诉我。只调用一次读取工具；如果读取失败，直接说明失败原因，不要重试、不要换路径、不要改用其他工具。", "read", "不存在", True),
 ]
 
 print(f"项目工作区: {WORKSPACE}")

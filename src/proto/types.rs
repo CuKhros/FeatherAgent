@@ -250,6 +250,148 @@ pub struct PluginManifest {
     /// `tool` / `provider` / `storage` / `context` / `bridge`
     #[serde(default)]
     pub category: String,
+    /// 插件自述的设置项；内核只转述与校验，不解释语义（§4.6）。
+    #[serde(default)]
+    pub settings: Option<SettingsSchema>,
+}
+
+/// 插件声明的设置分组：由插件在 `plugin.json` 里自述，内核原样转述给任意前端。
+///
+/// 这是“装一个插件不要为它单独适配 UI”的关键：前端只认 `fields` 的类型与范围，
+/// 不认识具体插件；GUI / TUI / WebUI 都按同一份声明渲染表单。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SettingsSchema {
+    /// 设置在 config 中的根路径；空表示 `plugin_settings.<插件名>`。
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub fields: Vec<SettingField>,
+}
+
+/// 单个设置项。`kind` 只用 `bool` / `int` / `number` / `string` / `enum` 五种，
+/// 保证任何前端都能在不了解插件的情况下渲染。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingField {
+    /// 相对 `root` 的键；支持点号表示嵌套（如 `guide.model`）。
+    pub key: String,
+    /// 绝对 config 路径；非空时覆盖 `root + key`（用于把插件设置指到既有顶层键）。
+    #[serde(default)]
+    pub path: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub default: Value,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub placeholder: String,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub step: Option<f64>,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub secret: bool,
+}
+
+impl SettingsSchema {
+    /// 设置落在 config 的根路径（点号分隔）。
+    pub fn root_for(&self, plugin: &str) -> String {
+        if self.root.trim().is_empty() {
+            format!("plugin_settings.{plugin}")
+        } else {
+            self.root.trim().to_string()
+        }
+    }
+}
+
+impl SettingField {
+    /// 该字段在 config 中的完整路径。
+    pub fn path(&self, root: &str) -> String {
+        if !self.path.trim().is_empty() {
+            return self.path.trim().to_string();
+        }
+        if self.key.trim().is_empty() {
+            root.to_string()
+        } else {
+            format!("{root}.{}", self.key.trim())
+        }
+    }
+
+    /// 类型与区间校验；错误信息给前端直接显示。
+    pub fn validate(&self, v: &Value) -> Result<(), String> {
+        match self.kind.as_str() {
+            "bool" => {
+                if v.is_boolean() {
+                    Ok(())
+                } else {
+                    Err(format!("{} 必须是布尔值", self.label))
+                }
+            }
+            "int" => {
+                let n = v
+                    .as_i64()
+                    .ok_or_else(|| format!("{} 必须是整数", self.label))?;
+                if let Some(m) = self.min {
+                    if (n as f64) < m {
+                        return Err(format!("{} 不能小于 {}", self.label, m));
+                    }
+                }
+                if let Some(m) = self.max {
+                    if (n as f64) > m {
+                        return Err(format!("{} 不能大于 {}", self.label, m));
+                    }
+                }
+                Ok(())
+            }
+            "number" => {
+                let n = v
+                    .as_f64()
+                    .ok_or_else(|| format!("{} 必须是数字", self.label))?;
+                if !n.is_finite() {
+                    return Err(format!("{} 必须是有限数字", self.label));
+                }
+                if let Some(m) = self.min {
+                    if n < m {
+                        return Err(format!("{} 不能小于 {}", self.label, m));
+                    }
+                }
+                if let Some(m) = self.max {
+                    if n > m {
+                        return Err(format!("{} 不能大于 {}", self.label, m));
+                    }
+                }
+                Ok(())
+            }
+            "string" => v
+                .as_str()
+                .map(|_| ())
+                .ok_or_else(|| format!("{} 必须是字符串", self.label)),
+            "enum" => {
+                let s = v
+                    .as_str()
+                    .ok_or_else(|| format!("{} 必须是字符串", self.label))?;
+                if self.options.is_empty() || self.options.iter().any(|o| o == s) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "{} 只能是：{}",
+                        self.label,
+                        self.options.join(" / ")
+                    ))
+                }
+            }
+            other => Err(format!("{} 的类型 {other} 不受支持", self.label)),
+        }
+    }
 }
 
 /// 工具风险级别（§4.5 / §13 协作式权限门）。
@@ -304,5 +446,63 @@ mod tests {
         assert_eq!(EventKind::ToolError.code(), 22);
         assert_eq!(EventKind::ToolDegraded.code(), 23);
         assert_eq!(EventKind::ContextCompacted.code(), 24);
+    }
+
+    fn field(kind: &str, key: &str) -> SettingField {
+        SettingField {
+            key: key.into(),
+            path: String::new(),
+            label: key.into(),
+            kind: kind.into(),
+            default: serde_json::Value::Null,
+            description: String::new(),
+            placeholder: String::new(),
+            min: Some(1.0),
+            max: Some(5.0),
+            step: Some(1.0),
+            options: vec!["a".into(), "b".into()],
+            secret: false,
+        }
+    }
+
+    #[test]
+    fn setting_field_path_and_root_default() {
+        let mut s = SettingsSchema::default();
+        assert_eq!(s.root_for("review-gate"), "plugin_settings.review-gate");
+        s.root = "review_gate".into();
+        assert_eq!(s.root_for("review-gate"), "review_gate");
+        assert_eq!(
+            field("int", "max_rounds").path(&s.root_for("x")),
+            "review_gate.max_rounds"
+        );
+        let mut f = field("int", "x");
+        f.path = "search_count".into();
+        assert_eq!(f.path("ignored"), "search_count", "绝对 path 覆盖 root");
+    }
+
+    #[test]
+    fn setting_field_validates_type_and_range() {
+        assert!(field("int", "n").validate(&serde_json::json!(3)).is_ok());
+        assert!(field("int", "n").validate(&serde_json::json!(9)).is_err());
+        assert!(field("int", "n").validate(&serde_json::json!("3")).is_err());
+        assert!(field("number", "n")
+            .validate(&serde_json::json!(2.5))
+            .is_ok());
+        assert!(field("bool", "n")
+            .validate(&serde_json::json!(true))
+            .is_ok());
+        assert!(field("bool", "n")
+            .validate(&serde_json::json!("true"))
+            .is_err());
+        assert!(field("enum", "n").validate(&serde_json::json!("a")).is_ok());
+        assert!(field("enum", "n")
+            .validate(&serde_json::json!("z"))
+            .is_err());
+        assert!(field("string", "n")
+            .validate(&serde_json::json!("x"))
+            .is_ok());
+        assert!(field("string", "n")
+            .validate(&serde_json::json!(1))
+            .is_err());
     }
 }

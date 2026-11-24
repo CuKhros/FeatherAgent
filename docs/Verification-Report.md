@@ -1,10 +1,29 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.2.1)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.2.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.2.1 summary (current candidate)
+## v1.2.1-rc.3 summary (current candidate)
+
+The rc.2.1 real-hardware retest closed G1 (review can approve) and G3 (`chat.finished.status` tri-state) but showed that the gate can still be satisfied by copying the guide's own sentences (H1), that the judge echoes the prompt instead of the answer (H2), that malformed tool names surface as opaque RPC errors (H3), and that S3 t5/t6 depend on prompt luck (H4). It also asked for an architectural change: plugin settings must be declared by the plugin, relayed by the kernel, and rendered generically, instead of being hard-coded into each front end.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| A-01 settings declaration | `manifest.settings` (`SettingsSchema`/`SettingField`, types limited to `bool|int|number|string|enum`) is the single source; `feather-plugin` handshakes `settings: None` to prevent drift | Two unit tests (`setting_field_path_and_root_default`, `setting_field_validates_type_and_range`) |
+| A-02 kernel relay | Registry persists the schema and backfills old entries; `plugin.settings` RPC returns schema/values/defaults; undeclared plugins get a business error | Integration `plugin_settings_are_relayed_and_validated` |
+| A-03 validation | `Config.plugin_settings` fallback namespace; `declared_settings()` + `validate_plugin_settings()` enforce type/range/enum and reject undeclared keys; declared paths accept a first write | Same integration: temperature 0.9 rejected, `max_rounds=3` round-trips, `plugin_settings.search.unknown` rejected |
+| A-04 generic front ends | TUI plugin page built from `plugin.settings` (11 general fields restored); WebUI plugin page renders manifest + declared form; neither hard-codes plugin field names | TUI PTY: open review-gate → `max_rounds` 2→3 → `Ctrl+S` → `config.json` reads 3. WebUI browser: all nine declared fields incl. enum rendered; save persisted `max_rounds: 3`; WebSocket re-check after save returned `model.message` + `chat.finished(ok)` |
+| H1 rubric degeneration | 2–5 items, `must_include` ≤20 chars, sentence-like phrases rejected, at least one `must_include` and one non-substring criterion; hardcheck covers literal/banned/point-count/glob | Unit tests for all four criterion kinds, sentence/length rejection, and glob/point helpers |
+| H2 judge echo | `parse_verdict` receives the answer; item and summary evidence must be a verbatim contiguous ≥10-character window (normalized) | Unit test rejects short evidence and prompt echoes, accepts copied answer text |
+| H3 unknown tool | `execute_tool` checks names against `available_tools` and returns `未知工具 … 可用工具：…` as a business error | Integration `unknown_tool_name_gets_correction_instead_of_raw_rpc_error` (lists `tool.fs.read`, session still finishes, no breaker) |
+| H4 S3 prompts | t5 requires calling the tool first; t6 requires exactly one call and then reporting failure | Prompt text in `tools/s3_batch.py`; S3 numbers still require a real model run |
+
+Linux has **109 tests: 108 passed, 1 ignored by default** (61 lib, 12 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 26 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Release bench: kernel **2,458,744 B (2.345 MiB)**; warm **1.507 / 1.393 / 1.403 ms**; cold **7.828 / 6.578 / 7.033 ms**; RSS max **3,584 KiB**; write P95 **4.03 / 3.70 / 3.88 µs**; assemble P95 **0.138 / 0.146 / 0.139 ms**; RPC P95 **0.129 / 0.040 / 0.096 ms**; all gates true.
+
+Not verified: v1.2.1-rc.3 Windows real hardware (plugin-declared settings on both front ends after a fresh install, 7B phrase-only rubric quality, judge evidence being answer text, S3 reproducibility), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run; it remains startup-only evidence.
+
+## v1.2.1-rc.2.1 summary (historical, released)
 
 The rc.2 real-hardware retest confirmed the P0 provider body, P1 temperature rejection, P2 effective-config banner, R1 gates, and the review-gate mechanism. It also exposed two regressions and three quality gaps: the Ollama model list, TUI review settings, free-text rubric checks, placeholder judge evidence, and `chat.finished.status` hiding unapproved reviews.
 

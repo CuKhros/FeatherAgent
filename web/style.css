@@ -200,6 +200,8 @@ button.danger { background: #5a2027; border-color: #8d303a; }
 .model-row select { flex: 0 0 42%; min-width: 110px; max-width: 180px; }
 .settings-grid input[type="range"] { padding: 0; border: 0; accent-color: var(--accent); }
 .form-hint { color: var(--muted); font-size: 12px; min-height: 16px; }
+.form-hint.ok { color: var(--ok, #4ade80); }
+.form-hint.err { color: var(--danger, #f87171); }
 .check-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 13px; }
 .check-row input { accent-color: var(--accent); }
 .settings-view.hidden { display: none; }

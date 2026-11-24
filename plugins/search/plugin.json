@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "search",
-    "version": "1.2.1-rc.2.1",
+    "version": "1.2.1-rc.3",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "search",
@@ -12,7 +12,53 @@
     "permissions": [
       "net:public"
     ],
-    "category": "search"
+    "category": "search",
+    "settings": {
+      "title": "联网搜索 search",
+      "description": "内置公开网页抓取与可选的 DeepSeek Search API。密钥只从环境变量读取，不落盘。",
+      "fields": [
+        {
+          "key": "provider",
+          "path": "search_provider",
+          "label": "提供方",
+          "type": "enum",
+          "default": "local",
+          "options": [
+            "local",
+            "deepseek",
+            "none"
+          ],
+          "description": "local 免费无需密钥；deepseek 需要 API Key；none 关闭联网。"
+        },
+        {
+          "key": "base_url",
+          "path": "search_base_url",
+          "label": "API Base URL",
+          "type": "string",
+          "default": "https://api.deepseek.com",
+          "placeholder": "https://api.deepseek.com",
+          "description": "仅 DeepSeek 模式使用。"
+        },
+        {
+          "key": "key_env",
+          "path": "search_api_key_env",
+          "label": "API Key 环境变量",
+          "type": "string",
+          "default": "DEEPSEEK_API_KEY",
+          "placeholder": "DEEPSEEK_API_KEY"
+        },
+        {
+          "key": "count",
+          "path": "search_count",
+          "label": "单次结果数",
+          "type": "int",
+          "default": 5,
+          "min": 1,
+          "max": 20,
+          "step": 1
+        }
+      ]
+    }
   },
   "program": "../../feather-plugin",
   "args": [

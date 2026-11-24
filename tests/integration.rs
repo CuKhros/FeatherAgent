@@ -852,6 +852,48 @@ fn wasm_and_log_unit_paths_smoke() {
 }
 
 #[test]
+fn unknown_tool_name_gets_correction_instead_of_raw_rpc_error() {
+    // H3：模型拼出畸形工具名（tool.fs / tool.read_file）时，内核必须回注“未知工具 + 可用清单”，
+    // 而不是把畸形名字原样转发给工具插件（那样只会得到一句难懂的 rpc 错误）。
+    let (h, conn) = start("unknown-tool", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "utool"}))
+        .unwrap();
+    let ws = h.kernel.paths.workspace.join("default");
+    std::fs::create_dir_all(&ws).unwrap();
+
+    let seen = send_and_wait(
+        &conn,
+        "utool",
+        r#"TOOL:{"name":"tool.fs","arguments":{"path":"a.txt"}}"#,
+        Duration::from_secs(15),
+    );
+    let err = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("tool.error"))
+        .unwrap_or_else(|| panic!("未知工具应发 tool.error: {seen:?}"));
+    let msg = err
+        .pointer("/params/payload/error")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    assert!(msg.contains("未知工具 tool.fs"), "error={msg}");
+    assert!(msg.contains("可用工具"), "error={msg}");
+    assert!(msg.contains("tool.fs.read"), "应列出真实工具名: {msg}");
+    // 纠错提示要回注给模型，后续轮次必须仍能正常对话收尾。
+    assert!(
+        seen.iter()
+            .any(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("chat.finished")),
+        "纠错后会话应正常结束: {seen:?}"
+    );
+    assert!(
+        !seen
+            .iter()
+            .any(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("plugin.degraded")),
+        "未知工具名不应熔断插件: {seen:?}"
+    );
+}
+
+#[test]
 fn leading_slash_workspace_and_business_error_are_not_fatal() {
     let (h, conn) = start("paths", |_| {});
     conn.client
@@ -1245,4 +1287,72 @@ fn manual_compaction_creates_checkpoint_and_keeps_log() {
     );
     let after = send_and_wait(&conn, "scomp", "after-compact", Duration::from_secs(10));
     assert!(last_model_text(&after).starts_with("echo: after-compact"));
+}
+
+#[test]
+fn plugin_settings_are_relayed_and_validated() {
+    let (_h, conn) = start("plugin-settings", |_| {});
+    // 1) 内核把插件声明原样转述：registry 条目带 settings。
+    let list = conn.client.call("plugin.list", json!({})).unwrap();
+    let entry = list["registry"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "review-gate")
+        .expect("review-gate 已登记");
+    assert_eq!(entry["settings"]["root"], "review_gate");
+    assert_eq!(
+        entry["settings"]["fields"].as_array().unwrap().len(),
+        9,
+        "review-gate 声明 9 个字段"
+    );
+
+    // 2) plugin.settings 返回声明 + 当前值；内核不解释语义。
+    let s = conn
+        .client
+        .call("plugin.settings", json!({"name": "review-gate"}))
+        .unwrap();
+    assert_eq!(s["root"], "review_gate");
+    assert_eq!(s["values"]["enabled"], false);
+    assert!((s["values"]["guide.temperature"].as_f64().unwrap() - 0.3).abs() < 1e-9);
+
+    // 3) 未声明设置项的插件返回明确错误，而不是空表单。
+    let err = conn
+        .client
+        .call("plugin.settings", json!({"name": "tool"}))
+        .unwrap_err();
+    assert!(err.to_string().contains("未声明设置项"), "{err}");
+
+    // 4) 写入按声明校验：guide 温度越界被内核拒绝。
+    let err = conn
+        .client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.guide.temperature", "value": 0.9}),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("guide.temperature"), "{err}");
+
+    // 5) 合法值写入后 plugin.settings 立刻反映。
+    conn.client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.max_rounds", "value": 3}),
+        )
+        .unwrap();
+    let s2 = conn
+        .client
+        .call("plugin.settings", json!({"name": "review-gate"}))
+        .unwrap();
+    assert_eq!(s2["values"]["max_rounds"], 3);
+
+    // 6) 未声明的键不能借 plugin_settings 命名空间写入。
+    let err = conn
+        .client
+        .call(
+            "config.set",
+            json!({"path": "plugin_settings.search.unknown", "value": 1}),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("配置项不存在"), "{err}");
 }

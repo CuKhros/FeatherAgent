@@ -614,5 +614,6 @@ fn manifest() -> PluginManifest {
         ],
         permissions: vec!["fs:data".into()],
         category: "storage".into(),
+        settings: None,
     }
 }

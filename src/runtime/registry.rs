@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::proto::types::PluginManifest;
+use crate::proto::types::{PluginManifest, SettingsSchema};
 use crate::proto::Codec;
 use crate::runtime::plugin::PluginSpec;
 
@@ -28,10 +28,22 @@ pub struct Entry {
     /// 签名位预留；为空表示未签名
     #[serde(default)]
     pub signature: Option<String>,
+    /// 插件自述的设置项（`plugin.json` 的 `manifest.settings`），内核原样转述给前端。
+    #[serde(default)]
+    pub settings: Option<SettingsSchema>,
 }
 
 fn yes() -> bool {
     true
+}
+
+/// 读取插件目录里 `plugin.json` 的 `manifest.settings`；没有或解析失败返回 None。
+fn read_settings(dir: &Path) -> Option<SettingsSchema> {
+    let v: Value = serde_json::from_slice(&std::fs::read(dir.join("plugin.json")).ok()?).ok()?;
+    v.get("manifest")?
+        .get("settings")
+        .cloned()
+        .and_then(|s| serde_json::from_value(s).ok())
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -91,6 +103,7 @@ impl Registry {
             enabled: true,
             blake3: String::new(),
             signature: None,
+            settings: None,
         };
         if manifest_path.exists() {
             let v: Value = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
@@ -100,6 +113,7 @@ impl Registry {
             {
                 entry.name = m.name;
                 entry.category = m.category;
+                entry.settings = m.settings;
             }
             if let Some(p) = v.get("program").and_then(|p| p.as_str()) {
                 #[allow(unused_mut)]
@@ -167,9 +181,10 @@ impl Registry {
     }
 
     /// 扫描内置插件目录：每个子目录若含 `plugin.json` 且未登记，则自动安装。
+    /// 已登记的条目若缺少设置声明（旧版本安装的插件），从 `plugin.json` 补齐后落盘。
     pub fn scan_builtin(&self, dir: &Path) -> std::io::Result<Vec<Entry>> {
         let mut installed = Vec::new();
-        let existing: Vec<String> = self.list().iter().map(|e| e.name.clone()).collect();
+        let existing: Vec<Entry> = self.list();
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 let p = e.path();
@@ -180,7 +195,12 @@ impl Registry {
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                if existing.iter().any(|n| n == &name) {
+                if let Some(cur) = existing.iter().find(|n| n.name == name) {
+                    if cur.settings.is_none() {
+                        if let Some(s) = read_settings(&p) {
+                            self.update_settings(&name, s);
+                        }
+                    }
                     continue;
                 }
                 eprintln!("[init] 登记内置插件 {name}（首次启动可能被杀毒软件扫描，耗时较长）");
@@ -190,6 +210,21 @@ impl Registry {
             }
         }
         Ok(installed)
+    }
+
+    /// 更新某个插件的设置声明；无变化时不写盘。
+    pub fn update_settings(&self, name: &str, settings: SettingsSchema) {
+        let mut f = self.inner.lock();
+        let mut changed = false;
+        for p in f.plugins.iter_mut() {
+            if p.name == name && p.settings.as_ref() != Some(&settings) {
+                p.settings = Some(settings.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = self.save(&f);
+        }
     }
 
     pub fn find(&self, name: &str) -> Option<Entry> {

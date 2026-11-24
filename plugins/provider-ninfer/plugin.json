@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "provider-ninfer",
-    "version": "1.2.1-rc.2.1",
+    "version": "1.2.1-rc.3",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "chat",
