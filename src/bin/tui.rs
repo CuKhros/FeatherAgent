@@ -37,6 +37,14 @@ struct SettingsState {
     max_turns: String,
     workspace_root: String,
     auto_allow_safe: bool,
+    review_enabled: bool,
+    review_rounds: String,
+    review_guide_model: String,
+    review_guide_temp: String,
+    review_exec_model: String,
+    review_exec_temp: String,
+    review_judge_model: String,
+    review_judge_temp: String,
     field: usize,
     status: String,
     models_hint: String,
@@ -48,7 +56,7 @@ struct SettingsState {
     detail: bool,
 }
 
-const SETTINGS_FIELDS: usize = 11;
+const SETTINGS_FIELDS: usize = 19;
 
 fn default_provider_base(provider: &str) -> &'static str {
     match provider {
@@ -440,6 +448,17 @@ impl App {
             .unwrap_or("qwen2.5:7b")
             .to_string();
         let provider_idx = providers.iter().position(|x| x == &provider).unwrap_or(0);
+        let rg = cfg.get("review_gate").cloned().unwrap_or(Value::Null);
+        let review_enabled = rg.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false);
+        let review_rounds = rg
+            .get("max_rounds")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(2)
+            .to_string();
+        let role = |name: &str| rg.get(name).cloned().unwrap_or(Value::Null);
+        let guide = role("guide");
+        let exec = role("exec");
+        let judge = role("judge");
         let state = SettingsState {
             providers,
             models: Vec::new(),
@@ -482,6 +501,43 @@ impl App {
                 .get("auto_allow_safe")
                 .and_then(|x| x.as_bool())
                 .unwrap_or(true),
+            review_enabled,
+            review_rounds,
+            review_guide_model: guide
+                .get("model")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            review_guide_temp: format!(
+                "{:.2}",
+                guide
+                    .get("temperature")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.3)
+            ),
+            review_exec_model: exec
+                .get("model")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            review_exec_temp: format!(
+                "{:.2}",
+                exec.get("temperature")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.7)
+            ),
+            review_judge_model: judge
+                .get("model")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            review_judge_temp: format!(
+                "{:.2}",
+                judge
+                    .get("temperature")
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(0.1)
+            ),
             field: 2,
             status: "读取配置成功；←/↑↓ 侧栏，Tab 表单，Ctrl+S 保存".into(),
             models_hint: "正在读取模型列表…".into(),
@@ -659,6 +715,14 @@ impl App {
             max_turns,
             workspace_root,
             auto_allow_safe,
+            review_enabled,
+            review_rounds,
+            review_guide_model,
+            review_guide_temp,
+            review_exec_model,
+            review_exec_temp,
+            review_judge_model,
+            review_judge_temp,
         ) = match &self.settings {
             Some(s) => (
                 s.provider.clone(),
@@ -670,14 +734,37 @@ impl App {
                 s.max_turns.trim().parse::<u64>(),
                 s.workspace_root.trim().to_string(),
                 s.auto_allow_safe,
+                s.review_enabled,
+                s.review_rounds.trim().parse::<u64>(),
+                s.review_guide_model.trim().to_string(),
+                s.review_guide_temp.trim().parse::<f64>(),
+                s.review_exec_model.trim().to_string(),
+                s.review_exec_temp.trim().parse::<f64>(),
+                s.review_judge_model.trim().to_string(),
+                s.review_judge_temp.trim().parse::<f64>(),
             ),
             None => return,
         };
-        let (Ok(temperature), Ok(context_window), Ok(max_turns)) =
-            (temperature, context_window, max_turns)
+        let (
+            Ok(temperature),
+            Ok(context_window),
+            Ok(max_turns),
+            Ok(review_rounds),
+            Ok(review_guide_temp),
+            Ok(review_exec_temp),
+            Ok(review_judge_temp),
+        ) = (
+            temperature,
+            context_window,
+            max_turns,
+            review_rounds,
+            review_guide_temp,
+            review_exec_temp,
+            review_judge_temp,
+        )
         else {
             if let Some(s) = &mut self.settings {
-                s.status = "温度/上下文/回合数必须是数字".into();
+                s.status = "温度/上下文/回合数/校验温度必须是数字".into();
             }
             return;
         };
@@ -693,6 +780,19 @@ impl App {
             }
             return;
         }
+        if !(1..=5).contains(&review_rounds)
+            || !(0.2..=0.5).contains(&review_guide_temp)
+            || !(0.6..=1.5).contains(&review_exec_temp)
+            || !(0.0..=0.2).contains(&review_judge_temp)
+        {
+            if let Some(s) = &mut self.settings {
+                s.status =
+                    "review-gate 区间：轮次 1–5，guide 0.20–0.50，exec 0.60–1.50，judge 0.00–0.20"
+                        .into();
+            }
+            return;
+        }
+        let role_model = |m: &str| json!(m);
         let patch = json!({
             "provider_plugin": provider,
             "base_url": base_url,
@@ -703,6 +803,13 @@ impl App {
             "max_turns": max_turns,
             "workspace_root": workspace_root,
             "auto_allow_safe": auto_allow_safe,
+            "review_gate": {
+                "enabled": review_enabled,
+                "max_rounds": review_rounds,
+                "guide": {"model": role_model(&review_guide_model), "temperature": review_guide_temp},
+                "exec": {"model": role_model(&review_exec_model), "temperature": review_exec_temp},
+                "judge": {"model": role_model(&review_judge_model), "temperature": review_judge_temp},
+            },
         });
         match self.conn.client.call("config.set", json!({"patch": patch})) {
             Ok(v) => {
@@ -816,7 +923,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if field == 10 {
+                if field == 18 {
                     self.settings = None;
                 } else {
                     self.save_settings();
@@ -877,6 +984,42 @@ impl App {
                             let v = s.max_turns.parse::<i64>().unwrap_or(6);
                             s.max_turns = (v + dir as i64).clamp(1, 32).to_string();
                         }
+                        9 => s.review_enabled = !s.review_enabled,
+                        10 => {
+                            let v = s.review_rounds.parse::<i64>().unwrap_or(2);
+                            s.review_rounds = (v + dir as i64).clamp(1, 5).to_string();
+                        }
+                        11 | 13 | 15 if !s.models.is_empty() => {
+                            let n = s.models.len() as i32;
+                            let cur = match field {
+                                11 => &s.review_guide_model,
+                                13 => &s.review_exec_model,
+                                _ => &s.review_judge_model,
+                            };
+                            let idx = s.models.iter().position(|m| m == cur).unwrap_or(0) as i32;
+                            let idx = (idx + dir + n) % n;
+                            let m = s.models[idx as usize].clone();
+                            match field {
+                                11 => s.review_guide_model = m,
+                                13 => s.review_exec_model = m,
+                                _ => s.review_judge_model = m,
+                            }
+                        }
+                        12 => {
+                            let v = s.review_guide_temp.parse::<f64>().unwrap_or(0.3);
+                            s.review_guide_temp =
+                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.2, 0.5));
+                        }
+                        14 => {
+                            let v = s.review_exec_temp.parse::<f64>().unwrap_or(0.7);
+                            s.review_exec_temp =
+                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.6, 1.5));
+                        }
+                        16 => {
+                            let v = s.review_judge_temp.parse::<f64>().unwrap_or(0.1);
+                            s.review_judge_temp =
+                                format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.0, 0.2));
+                        }
                         _ => {}
                     }
                 }
@@ -894,6 +1037,13 @@ impl App {
                         5 => Some(&mut s.context_window),
                         6 => Some(&mut s.max_turns),
                         7 => Some(&mut s.workspace_root),
+                        10 => Some(&mut s.review_rounds),
+                        11 => Some(&mut s.review_guide_model),
+                        12 => Some(&mut s.review_guide_temp),
+                        13 => Some(&mut s.review_exec_model),
+                        14 => Some(&mut s.review_exec_temp),
+                        15 => Some(&mut s.review_judge_model),
+                        16 => Some(&mut s.review_judge_temp),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -901,9 +1051,13 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(' ') if field == 8 => {
+            KeyCode::Char(' ') if field == 8 || field == 9 => {
                 if let Some(s) = &mut self.settings {
-                    s.auto_allow_safe = !s.auto_allow_safe;
+                    if field == 8 {
+                        s.auto_allow_safe = !s.auto_allow_safe;
+                    } else {
+                        s.review_enabled = !s.review_enabled;
+                    }
                 }
             }
             KeyCode::Char(c) => {
@@ -916,6 +1070,13 @@ impl App {
                         5 => Some(&mut s.context_window),
                         6 => Some(&mut s.max_turns),
                         7 => Some(&mut s.workspace_root),
+                        10 => Some(&mut s.review_rounds),
+                        11 => Some(&mut s.review_guide_model),
+                        12 => Some(&mut s.review_guide_temp),
+                        13 => Some(&mut s.review_exec_model),
+                        14 => Some(&mut s.review_exec_temp),
+                        15 => Some(&mut s.review_judge_model),
+                        16 => Some(&mut s.review_judge_temp),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -2164,6 +2325,48 @@ fn draw_settings(f: &mut Frame, app: &App) {
                     "[ ] 关".into()
                 },
             ),
+            (
+                "Review gate",
+                if s.review_enabled {
+                    "[x] 启用 guide→exec→judge".into()
+                } else {
+                    "[ ] 关闭".into()
+                },
+            ),
+            ("Review rounds", format!("{}（1–5）", s.review_rounds)),
+            (
+                "Guide model",
+                if s.review_guide_model.is_empty() {
+                    "(跟随当前模型)".into()
+                } else {
+                    s.review_guide_model.clone()
+                },
+            ),
+            (
+                "Guide temp",
+                format!("{}（0.20–0.50）", s.review_guide_temp),
+            ),
+            (
+                "Exec model",
+                if s.review_exec_model.is_empty() {
+                    "(跟随当前模型)".into()
+                } else {
+                    s.review_exec_model.clone()
+                },
+            ),
+            ("Exec temp", format!("{}（0.60–1.50）", s.review_exec_temp)),
+            (
+                "Judge model",
+                if s.review_judge_model.is_empty() {
+                    "(跟随当前模型)".into()
+                } else {
+                    s.review_judge_model.clone()
+                },
+            ),
+            (
+                "Judge temp",
+                format!("{}（0.00–0.20）", s.review_judge_temp),
+            ),
             ("保存并应用", "按 Enter / Ctrl+S".into()),
             ("取消/返回", "Esc 回侧栏".into()),
         ];
@@ -2188,6 +2391,10 @@ fn draw_settings(f: &mut Frame, app: &App) {
         }
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
+            "guide/judge 建议 ≥7B；4B 可能无法产出合规 rubric（must_include 字面判据）",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
             &s.models_hint,
             Style::default().fg(Color::DarkGray),
         )));
@@ -2198,6 +2405,13 @@ fn draw_settings(f: &mut Frame, app: &App) {
         for m in s.models.iter().take(12) {
             lines.push(Line::from(format!("  · {m}")));
         }
+        // 19 个字段在 80x24 终端放不下；只滚动表单，保证当前字段可见。
+        let viewport = body[1].height.saturating_sub(2) as usize;
+        let offset = if viewport > 0 && s.field >= viewport {
+            (s.field + 1 - viewport) as u16
+        } else {
+            0
+        };
         f.render_widget(
             Paragraph::new(lines)
                 .block(
@@ -2205,7 +2419,8 @@ fn draw_settings(f: &mut Frame, app: &App) {
                         .borders(Borders::ALL)
                         .title("常规（保存后提交 config.set）"),
                 )
-                .wrap(Wrap { trim: false }),
+                .wrap(Wrap { trim: false })
+                .scroll((offset, 0)),
             body[1],
         );
     }

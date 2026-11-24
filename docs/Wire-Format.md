@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.2** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.2.1** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.2","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.2.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -319,6 +319,8 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 ```
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.2.1: when review-gate is enabled and the turn completes, `chat.finished.status` is `ok` (approved), `unapproved` (round limit reached without approval), or `degraded` (guide/judge failed twice). The payload `review.status` mirrors `approved|unapproved|degraded`; `review.verdict.items[]` carries `criterion` and `check` in addition to `evidence`. Clients must not assume `ok` means reviewed-and-approved.
+
 - `chat.inject` writes `user.message` (`source:"steer"`, `during_turn:true`) then interrupts generation; an idle session returns a business error, so use `chat.send`.
 - Compaction writes `context.compacted` (code 24) with `summary` / `covers_until_seq` / `compacted_events` / `before_chars` / `after_chars`; the model view keeps only events after the cutoff, while raw text remains in the append-only log.
 - `web.search` / `web.fetch` / `web.news` / `web.suggest` / `web.status` are absent when `search_provider=none`; `local` needs no key, `deepseek` does. Web results are always `untrusted:true`. Local search is keyless; DeepSeek billing is in `docs/v1.2.0-rc.1-Changes.md` §2.

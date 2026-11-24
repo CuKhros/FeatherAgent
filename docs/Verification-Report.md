@@ -1,10 +1,27 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.2)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.2.1)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.2.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.2 summary (current candidate)
+## v1.2.1-rc.2.1 summary (current candidate)
+
+The rc.2 real-hardware retest confirmed the P0 provider body, P1 temperature rejection, P2 effective-config banner, R1 gates, and the review-gate mechanism. It also exposed two regressions and three quality gaps: the Ollama model list, TUI review settings, free-text rubric checks, placeholder judge evidence, and `chat.finished.status` hiding unapproved reviews.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| R-01 Ollama models | Native Ollama probe uses `/api/tags`; OpenAI-compatible bases keep `/models` | Plugin unit test asserts `GET /api/tags`; integration `provider.models` returns models and mock sees `/api/tags` |
+| R-02 TUI review settings | 19-field settings form with enabled/rounds/guide/exec/judge model+temperature, range validation, scrolling, one `config.set` patch | `cargo check`; TUI PTY smoke; WebUI shares `config.set` schema |
+| R-03 literal rubric (G1) | `must_include` literal required; `review.hardcheck` runs before judge; feedback includes `criterion`/`check` | Parser tests reject missing/vague literal; hardcheck test fails a missing phrase |
+| R-04 judge evidence (G2) | Item and top-level evidence ≥ 10 chars; judge retried once; guide retried once; empty review response retried once | Short-evidence parser test; integration review still passes after retry |
+| R-05 status (G3) | `chat.finished.status` = `ok`/`unapproved`/`degraded`; `review.status` and verdict `items` exposed | Integration forces an unapproved review and asserts both statuses |
+| rc.2 retained | Provider body, temperature ranges, banner/source, embedding model | rc.2 tests still pass |
+
+Linux has **102 tests: 101 passed, 1 ignored by default** (59 lib, 9 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 24 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Release bench: kernel **2,413,136 B (2.301 MiB)**; warm **1.151 / 1.155 / 1.141 ms**; cold **3.045 / 3.340 / 3.225 ms**; RSS max **3,456 KiB**; write P95 **2.68 / 2.69 / 2.71 µs**; assemble P95 **0.125 / 0.125 / 0.135 ms**; RPC P95 **0.042 / 0.042 / 0.035 ms**; all gates true. One earlier run in six showed an RPC P95 of 1.234 ms (scheduler spike, same binary); the three consecutive clean runs above are reported.
+
+Not verified: v1.2.1-rc.2.1 Windows real hardware (real Ollama model list, TUI review-field save/scroll, 7B literal rubric and evidence quality, honest unapproved/degraded status), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine, if run, remains startup-only evidence.
+
+## v1.2.1-rc.2 summary (historical, released)
 
 The rc.1 real-hardware retest closed R1 and confirmed the review-gate flow, but exposed a P0 provider regression and two configuration issues. This patch fixes them without changing R1 thresholds or the review-gate protocol.
 
@@ -159,11 +176,11 @@ NEW-K fixed; TUI session/chat modes, CJK cursor alignment, external workspace, p
 
 ## 3. Test matrix
 
-### 3.1 Unit tests (59 in v1.2.1-rc.2)
+### 3.1 Unit tests (59 lib + 9 plugin in v1.2.1-rc.2.1)
 
 `cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net (Bearer headers and optional-header/body layout), util, provider HTTP/Ollama JSON and review-gate parsers.
 
-### 3.2 Integration tests (21, `tests/integration.rs`)
+### 3.2 Integration tests (24, `tests/integration.rs`)
 
 Real kernel + plugin subprocesses over UDS:
 
@@ -186,6 +203,8 @@ Real kernel + plugin subprocesses over UDS:
 | `ollama_native_chat_uses_api_key` | native `/api/chat` with `Authorization: Bearer` over chunked NDJSON |
 | `ninfer_probe_uses_v1_and_bearer_key` | base URL without `/v1` is normalized; probe carries the key |
 | `ollama_native_chat_without_key_still_sends_body` | empty key still sends `Content-Length` + `/api/chat` body; `/api/embed` carries model/input |
+| `ollama_provider_models_reads_api_tags` | `provider.models` returns native models and requests `/api/tags`, not `/models` |
+| `review_gate_unapproved_is_reflected_in_chat_status` | forced unapproved review yields `chat.finished.status=unapproved` and `review.status=unapproved` |
 
 ### 3.3 Golden trace
 
@@ -197,15 +216,15 @@ Real kernel + plugin subprocesses over UDS:
 
 Command: `./target/release/featheragent bench --json`
 
-| Metric | Gate (Linux) | v1.2.1-rc.2 measured (3 runs) | Result |
+| Metric | Gate (Linux) | v1.2.1-rc.2.1 measured (3 runs) | Result |
 |---|---|---|---|
-| Kernel binary | ≤ 8 MiB | **2,408,072 B (2.297 MiB)** | ✅ |
-| Warm boot P50 (`boot_ms_p50`) | < 20 ms | **1.127 / 1.147 / 1.150 ms** | ✅ |
-| Cold spawn P50 (`cold_spawn_ms_p50`) | < 100 ms | **1.850 / 2.310 / 1.915 ms** | ✅ |
-| Idle RSS | ≤ 15 MiB | **3,328 / 3,584 / 3,328 KiB (max 3.5 MiB)** | ✅ |
-| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.533 / 2.664 µs** (run 3) | ✅ |
-| Context assembly P95 (no summary model) | < 30 ms | **0.135 ms** (run 3) | ✅ |
-| RPC round-trip P95 | < 1 ms | **0.029 ms** (run 3) | ✅ |
+| Kernel binary | ≤ 8 MiB | **2,413,136 B (2.301 MiB)** | ✅ |
+| Warm boot P50 (`boot_ms_p50`) | < 20 ms | **1.151 / 1.155 / 1.141 ms** | ✅ |
+| Cold spawn P50 (`cold_spawn_ms_p50`) | < 100 ms | **3.045 / 3.340 / 3.225 ms** | ✅ |
+| Idle RSS | ≤ 15 MiB | **3,456 / 3,328 / 3,456 KiB (max 3.4 MiB)** | ✅ |
+| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.68 / 2.69 / 2.71 µs** | ✅ |
+| Context assembly P95 (no summary model) | < 30 ms | **0.125 / 0.125 / 0.135 ms** | ✅ |
+| RPC round-trip P95 | < 1 ms | **0.042 / 0.042 / 0.035 ms** | ✅ |
 
 > Warm boot uses the same install root, one discarded warm-up, then five samples; cold spawn is a real `serve` child process measured to socket readiness. Event dispatch P95 < 200 µs has no standalone number; the bus and write share the in-process path, so no independent benchmark exists.
 
@@ -214,7 +233,7 @@ Command: `./target/release/featheragent bench --json`
 - Toolchain: `x86_64-w64-mingw32-gcc` + `x86_64-pc-windows-gnu`, static CRT.
 - Five PE32+ x64 exes; only system DLLs (`kernel32/ntdll/msvcrt/ws2_32/user32/...`), no `libgcc/libwinpthread/libstdc++`.
 - Wine smoke was not repeated for rc.2 (Wine 6 cannot exercise Windows named-pipe concurrency or ConPTY); earlier Wine results remain non-Windows evidence.
-- v1.2.1-rc.2 PE resources: `.rsrc` 0x1200, `FileVersion/ProductVersion=1.2.1-rc.2`, MIT copyright visible via `strings -el`; kernel exe 2,177,536 B.
+- v1.2.1-rc.2.1 PE resources: `.rsrc` present at RVA 0x217000, `FileVersion/ProductVersion=1.2.1-rc.2.1`, MIT copyright visible in `FileInfo`; kernel exe **2,181,632 B**.
 
 ## 5. Crash recovery (S2)
 
@@ -231,6 +250,8 @@ Each iteration: write 1–40 events (Always sync) → randomly truncate the last
 ### 6.1 TUI
 
 PTY-driven: `/new s-tui` → `hello tui` → Esc. Exit code 0, no panic; `data/sessions/s-tui` and `_system` created; `doctor --verify-log` `ok=true`, 7 records, 0 issues.
+
+v1.2.1-rc.2.1 review-field smoke: 110×34 PTY, `featheragent-tui --root <packaged core>`, `/settings` showed all 19 fields including the nine review fields and the ≥7B hint. Toggling Review gate, changing rounds to 3, and guide temperature to 0.35, then Enter, persisted `review_gate.enabled=true`, `max_rounds=3`, `guide.temperature=0.35` to `data/config.json`; status showed `已保存并应用`. A second 80×18 PTY run used BackTab from field 0 to the cancel field; the form scrolled so `取消/返回` and the judge/exec fields stayed visible.
 
 ### 6.2 WebUI bridge
 
@@ -256,12 +277,12 @@ Security checks:
 
 | Artifact | Content |
 |---|---|
-| `featheragent-core-1.2.1-rc.2-linux-x64.tar.gz` | kernel, TUI, WebUI launcher, `feather-plugin`, `feather-storage`, 11 plugin manifests, docs, README |
-| `featheragent-webui-1.2.1-rc.2-linux-x64.tar.gz` | WebUI launcher, `web/`, favicon, docs |
-| `featheragent-plugins-1.2.1-rc.2-linux-x64.tar.gz` | 11 plugin manifests |
-| `FeatherAgent-1.2.1-rc.2-windows-x64.zip` | five PE exes, 11 plugin manifests, docs, icon; kernel exe 2,177,536 B |
+| `featheragent-core-1.2.1-rc.2.1-linux-x64.tar.gz` | kernel, TUI, WebUI launcher, `feather-plugin`, `feather-storage`, 11 plugin manifests, docs, README |
+| `featheragent-webui-1.2.1-rc.2.1-linux-x64.tar.gz` | WebUI launcher, `web/`, favicon, docs |
+| `featheragent-plugins-1.2.1-rc.2.1-linux-x64.tar.gz` | 11 plugin manifests |
+| `FeatherAgent-1.2.1-rc.2.1-windows-x64.zip` | five PE exes, 11 plugin manifests, docs, icon; kernel exe 2,181,632 B |
 
-Exact package bytes and SHA-256 values are recorded in the adjacent `.sha256` files and the GitHub Release notes. The release kernel is 2,408,072 B (2.297 MiB); `sha256sum -c`, `tar -tzf`, and `unzip -t` all pass.
+Exact package bytes and SHA-256 values are recorded in the adjacent `.sha256` files and the GitHub Release notes. The release kernel is 2,413,136 B (2.301 MiB); `sha256sum -c`, `tar -tzf`, and `unzip -t` all pass.
 
 ## 7. Real defects found and fixed
 

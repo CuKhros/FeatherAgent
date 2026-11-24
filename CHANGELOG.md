@@ -1,6 +1,20 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.2` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.2.1` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.2.1] - 2026-11-24
+
+### Fixed
+
+- R-01: native Ollama model discovery now probes `/api/tags` instead of `/models`; TUI and WebUI model lists work again for `provider-ollama`.
+- R-02: TUI `/settings` now edits and saves all review-gate fields (enabled, rounds, guide/exec/judge model and temperature), validates temperature ranges, and scrolls the 19-field form.
+- R-03: review rubrics require a literal `must_include`; the kernel hard-checks it before the judge, and revision feedback now carries `criterion` and `check`.
+- R-04: judge evidence shorter than 10 characters is rejected and the judge is retried once; guide rubrics are retried once; empty review responses retry once.
+- R-05: `chat.finished.status` is now `ok`, `unapproved`, or `degraded` according to the review result; `review.status` and normalized verdict `items` are exposed.
+
+### Changed
+
+- TUI and WebUI review hints recommend a ≥7B guide/judge model because 4B models may not produce a compliant literal rubric.
 
 ## [1.2.1-rc.2] - 2026-11-24
 

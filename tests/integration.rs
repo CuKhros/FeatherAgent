@@ -356,6 +356,26 @@ fn ollama_native_chat_uses_api_key() {
 }
 
 #[test]
+fn ollama_provider_models_reads_api_tags() {
+    let mock = MockOpenAi::new();
+    let base = mock.base.clone();
+    let (_h, conn) = start("ollamamodels", move |cfg| {
+        cfg.provider_plugin = "provider-ollama".into();
+        cfg.base_url = base;
+        cfg.model = "local-test".into();
+    });
+    let v = conn.client.call("provider.models", json!({})).unwrap();
+    assert_eq!(v["models"], json!(["local-test"]));
+    assert!(v.get("error").is_none(), "provider.models 不应报错: {v}");
+    let reqs = mock.requests.lock().unwrap();
+    let tags = reqs
+        .iter()
+        .find(|r| r.starts_with("GET /api/tags "))
+        .expect("没有请求 /api/tags");
+    assert!(!tags.contains("/models"), "误用了 OpenAI 路径: {tags}");
+}
+
+#[test]
 fn ollama_native_chat_without_key_still_sends_body() {
     let mock = MockOpenAi::new();
     let base = mock.base.clone();
@@ -396,6 +416,35 @@ fn ollama_native_chat_without_key_still_sends_body() {
     );
     assert!(embed.contains("\"input\""), "embed 请求体丢失: {embed}");
     assert!(embed.contains("\"model\""), "embed 未带模型名: {embed}");
+}
+
+#[test]
+fn review_gate_unapproved_is_reflected_in_chat_status() {
+    let (_h, conn) = start("reviewbad", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sreviewbad"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "sreviewbad", "REVIEW_NEVER", Duration::from_secs(20));
+    assert!(last_model_text(&seen).contains("REVIEW_NEVER"));
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("unapproved")
+    );
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/status")
+            .and_then(|x| x.as_str()),
+        Some("unapproved")
+    );
 }
 
 #[test]

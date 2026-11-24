@@ -1,6 +1,20 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.2` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.2.1` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.2.1] - 2026-11-24
+
+### 修复
+
+- R-01：原生 Ollama 模型发现改走 `/api/tags`，不再请求会 404 的 `/models`；TUI 与 WebUI 的 `provider-ollama` 模型列表恢复。
+- R-02：TUI `/settings` 可编辑并保存 review-gate 的启用、轮次、guide/exec/judge 模型与温度；校验温度区间，19 字段表单支持滚动。
+- R-03：review rubric 强制字面 `must_include`；内核在 judge 前硬校验，修订反馈带上 `criterion` 与 `check`。
+- R-04：judge evidence 少于 10 字视为失败并重试 judge 一次；guide rubric 失败重试一次；review 空响应自动重试一次。
+- R-05：`chat.finished.status` 按评审结果返回 `ok`/`unapproved`/`degraded`；新增 `review.status` 与规范化 verdict `items`。
+
+### 变更
+
+- TUI 与 WebUI 的 review 提示建议 guide/judge 使用 ≥7B 模型，4B 可能无法产出合规字面 rubric。
 
 ## [1.2.1-rc.2] - 2026-11-24
 

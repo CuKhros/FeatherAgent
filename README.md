@@ -62,7 +62,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.2 pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.2.1 pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -110,7 +110,7 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.2-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.2.1-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
 .\featheragent.exe help                       # command table
@@ -122,7 +122,7 @@ Unzip `FeatherAgent-1.2.1-rc.2-windows-x64.zip` into a writable directory (not `
 
 The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.2)
+## Platform gate differences (v1.2.1-rc.2.1)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
@@ -151,6 +151,7 @@ The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runt
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.2.1 Changes](docs/v1.2.1-rc.2.1-Changes.md)** — Ollama `/api/tags` model list, TUI review-gate settings, literal rubric/hardcheck, judge retry, `chat.finished` status ([中文](docs/v1.2.1-rc.2.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.2 Changes](docs/v1.2.1-rc.2-Changes.md)** — provider empty-body fix, review temperature validation, effective-config banner ([中文](docs/v1.2.1-rc.2-变更说明.zh-CN.md))
 - **[v1.2.1-rc.1 Changes](docs/v1.2.1-rc.1-Changes.md)** — R1 warm/cold split, review-gate, local providers, API keys, tests ([中文](docs/v1.2.1-rc.1-变更说明.zh-CN.md))
 - **[v1.2.0-rc.1 Changes](docs/v1.2.0-rc.1-Changes.md)** — Q1/Q2, dual-platform version/build alignment, MIT and public-repository materials, platform matrix ([中文](docs/v1.2.0-rc.1-变更说明.zh-CN.md))
@@ -163,6 +164,6 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
-`v1.2.1-rc.2` is the Windows-retest patch for rc.1. It fixes the empty provider request body (missing `Content-Length` when the API key was blank), enforces review-gate temperature ranges even while the gate is disabled, prints the effective model/provider/base URL and their source at startup, and makes embeddings use the active model. Linux automation passes **97/97** with one network-dependent test run separately (59 lib, 7 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 21 integration). `fmt` and `clippy -D warnings` pass. R1 and review-gate behavior remain as verified in rc.1.
+`v1.2.1-rc.2.1` is the follow-up to the rc.2 Windows retest. It fixes Ollama model discovery (`/api/tags` instead of `/models`), adds all review-gate fields to the TUI settings page, and hardens review quality: literal `must_include` rubrics with a pre-judge hardcheck, 10-character evidence minimums with judge/guide retries, empty-response retry, and honest `chat.finished.status` values (`ok`/`unapproved`/`degraded`). The rc.2 provider-body, temperature, banner, and embedding fixes remain. Linux automation has **102 tests: 101 passed, 1 ignored by default** (59 lib, 9 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 24 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass.
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9. The v1.2.1-rc.2 Windows package is cross-compiled and its automation runs only on Linux; the P0 provider path, config rejection, effective-config banner, review-gate UI/events, API key fields, local providers, and high-DPI/Chinese rendering still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus the rc.2 retest that verified the provider body, temperature rejection, banner, R1 gates, and review-gate mechanism. The v1.2.1-rc.2.1 Windows package is cross-compiled and its automation runs only on Linux; real Ollama model discovery, TUI review-gate editing, and 7B review quality still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.

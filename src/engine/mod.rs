@@ -1084,6 +1084,7 @@ impl Kernel {
                                         "round": review_round + 1,
                                         "pass": pass,
                                         "failed": failed,
+                                        "items": verdict.get("items").cloned().unwrap_or(json!([])),
                                         "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
                                     }),
                                 );
@@ -1252,7 +1253,21 @@ impl Kernel {
 
         session.interrupt.store(0, Ordering::SeqCst);
         session.cancel.store(false, Ordering::SeqCst);
-        *session.state.write() = match last_status {
+        // G3：status 必须反映三段校验的真实结果，不能 reviewed-but-unapproved 仍报 ok。
+        let final_status = if last_status == "ok" && rg.enabled {
+            if review_degraded {
+                "degraded"
+            } else if review_approved {
+                "ok"
+            } else if review_rubric.is_some() {
+                "unapproved"
+            } else {
+                "ok"
+            }
+        } else {
+            last_status
+        };
+        *session.state.write() = match final_status {
             "stopped" | "cancelled" => SessionState::Cancelled,
             _ => SessionState::Idle,
         };
@@ -1260,11 +1275,18 @@ impl Kernel {
             &session.id,
             EventKind::ChatFinished,
             json!({
-                "status": last_status,
+                "status": final_status,
                 "review": if rg.enabled {
                     json!({
                         "enabled": true,
                         "approved": review_approved,
+                        "status": if review_degraded {
+                            "degraded"
+                        } else if review_approved {
+                            "approved"
+                        } else {
+                            "unapproved"
+                        },
                         "rounds": review_round + if review_approved || !review_degraded { 1 } else { 0 },
                         "degraded": review_degraded,
                     })
@@ -1273,7 +1295,7 @@ impl Kernel {
                 },
             }),
         );
-        self.append_worklog(session, last_status);
+        self.append_worklog(session, final_status);
         Ok(())
     }
 
@@ -1570,6 +1592,28 @@ impl Kernel {
         messages: Value,
         timeout: Duration,
     ) -> Result<String, String> {
+        self.review_model_call_once(session, cfg, model, temperature, messages.clone(), timeout)
+            .or_else(|e| {
+                if e.contains("空响应")
+                    && session.interrupt.load(Ordering::SeqCst) == 0
+                    && !session.cancel.load(Ordering::SeqCst)
+                {
+                    self.review_model_call_once(session, cfg, model, temperature, messages, timeout)
+                } else {
+                    Err(e)
+                }
+            })
+    }
+
+    fn review_model_call_once(
+        &self,
+        session: &Arc<Session>,
+        cfg: &Config,
+        model: &str,
+        temperature: f64,
+        messages: Value,
+        timeout: Duration,
+    ) -> Result<String, String> {
         let proc = self
             .plugins
             .get(&cfg.provider_plugin)
@@ -1664,29 +1708,41 @@ impl Kernel {
             .cloned()
             .ok_or("review.guide 未返回 messages")?;
         let model = rg.guide.effective_model(&cfg.model);
-        let raw = self.review_model_call(
-            session,
-            cfg,
-            &model,
-            rg.guide.temperature,
-            messages,
-            Duration::from_secs(180),
-        )?;
-        let parsed = gate
-            .call("review.parse_rubric", json!({"text": raw}))
-            .map_err(|e| e.to_string())?;
-        let count = parsed.get("count").and_then(|x| x.as_u64()).unwrap_or(0);
-        self.emit(
-            &session.id,
-            EventKind::ReviewGuide,
-            json!({
-                "count": count,
-                "model": model,
-                "temperature": rg.guide.temperature,
-                "tokens_approx": raw.chars().count() / 4,
-            }),
-        );
-        Ok(parsed.get("rubric").cloned().unwrap_or(json!([])))
+        let mut last = String::new();
+        for attempt in 1..=2u32 {
+            // 空响应在 review_model_call 内已重试一次；这里只负责 rubric 不合格时重出清单。
+            let raw = self.review_model_call(
+                session,
+                cfg,
+                &model,
+                rg.guide.temperature,
+                messages.clone(),
+                Duration::from_secs(180),
+            )?;
+            match gate.call("review.parse_rubric", json!({"text": raw})) {
+                Ok(parsed) => {
+                    let rubric = parsed.get("rubric").cloned().unwrap_or(json!([]));
+                    let count = rubric.as_array().map(|x| x.len()).unwrap_or(0);
+                    if count > 0 {
+                        self.emit(
+                            &session.id,
+                            EventKind::ReviewGuide,
+                            json!({
+                                "count": count,
+                                "model": model,
+                                "temperature": rg.guide.temperature,
+                                "tokens_approx": raw.chars().count() / 4,
+                                "attempts": attempt,
+                            }),
+                        );
+                        return Ok(rubric);
+                    }
+                    last = "验收清单为空".into();
+                }
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(format!("guide 连续 2 次未产出合规 rubric：{last}"))
     }
 
     fn review_judge(
@@ -1700,6 +1756,45 @@ impl Kernel {
             .plugins
             .get(&cfg.review_gate_plugin)
             .map_err(|e| e.to_string())?;
+        // 先做确定的字面判据，避免 guide/exec/judge 对自由文本 check 的理解漂移。
+        let hard = gate
+            .call(
+                "review.hardcheck",
+                json!({"answer": req.answer, "rubric": req.rubric}),
+            )
+            .map_err(|e| e.to_string())?;
+        if !hard.get("pass").and_then(|x| x.as_bool()).unwrap_or(false) {
+            let mut items = hard
+                .get("failed")
+                .and_then(|x| x.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let mut failed = Vec::new();
+            for item in &mut items {
+                if let Some(obj) = item.as_object_mut() {
+                    obj.insert("pass".into(), json!(false));
+                }
+                if let Some(id) = item.get("id") {
+                    failed.push(id.clone());
+                }
+            }
+            let evidence = items
+                .first()
+                .and_then(|x| x.get("evidence"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("硬性字面判据未通过")
+                .to_string();
+            let model = rg.judge.effective_model(&cfg.model);
+            return Ok(json!({
+                "pass": false,
+                "items": items,
+                "failed": failed,
+                "evidence": evidence,
+                "model": model,
+                "attempts": 0,
+                "source": "hardcheck",
+            }));
+        }
         let prompt = gate
             .call(
                 "review.judge",
@@ -1711,27 +1806,35 @@ impl Kernel {
             .cloned()
             .ok_or("review.judge 未返回 messages")?;
         let model = rg.judge.effective_model(&cfg.model);
-        let raw = self.review_model_call(
-            session,
-            cfg,
-            &model,
-            rg.judge.temperature,
-            messages,
-            Duration::from_secs(180),
-        )?;
-        let verdict = gate
-            .call(
+        let mut last = String::new();
+        for attempt in 1..=2u32 {
+            let raw = self.review_model_call(
+                session,
+                cfg,
+                &model,
+                rg.judge.temperature,
+                messages.clone(),
+                Duration::from_secs(180),
+            )?;
+            match gate.call(
                 "review.parse_verdict",
                 json!({"text": raw, "rubric": req.rubric}),
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(json!({
-            "pass": verdict.get("pass").cloned().unwrap_or(json!(false)),
-            "items": verdict.get("items").cloned().unwrap_or(json!([])),
-            "failed": verdict.get("failed").cloned().unwrap_or(json!([])),
-            "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
-            "model": model,
-        }))
+            ) {
+                Ok(verdict) => {
+                    return Ok(json!({
+                        "pass": verdict.get("pass").cloned().unwrap_or(json!(false)),
+                        "items": verdict.get("items").cloned().unwrap_or(json!([])),
+                        "failed": verdict.get("failed").cloned().unwrap_or(json!([])),
+                        "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
+                        "model": model,
+                        "attempts": attempt,
+                        "source": "judge",
+                    }));
+                }
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(format!("judge 连续 2 次未产出合规审批：{last}"))
     }
 
     fn run_model(
@@ -2353,14 +2456,24 @@ fn review_feedback_text(verdict: &Value) -> String {
             .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id))
         {
             let evidence = item.get("evidence").and_then(|x| x.as_str()).unwrap_or("");
-            lines.push(format!(
-                "- {id}: {}",
+            let criterion = item.get("criterion").and_then(|x| x.as_str()).unwrap_or("");
+            let check = item.get("check").and_then(|x| x.as_str()).unwrap_or("");
+            let mut line = format!("- {id}:");
+            if !criterion.is_empty() {
+                line.push_str(&format!(" 判据=「{criterion}」"));
+            }
+            if !check.is_empty() {
+                line.push_str(&format!("；核对={check}"));
+            }
+            line.push_str(&format!(
+                "；未通过证据={}",
                 if evidence.is_empty() {
                     "无证据（按不通过处理）"
                 } else {
                     evidence
                 }
             ));
+            lines.push(line);
             used += 1;
         }
     }

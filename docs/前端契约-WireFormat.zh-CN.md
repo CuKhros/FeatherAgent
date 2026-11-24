@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.2**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.2.1**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.2","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.2.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -320,6 +320,8 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 ```
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.2.1：review-gate 启用且回合正常结束时，`chat.finished.status` 为 `ok`（approved）、`unapproved`（达到轮次上限仍未通过）或 `degraded`（guide/judge 连续两次失败）。payload 的 `review.status` 同步为 `approved|unapproved|degraded`；`review.verdict.items[]` 除 `evidence` 外新增 `criterion` 与 `check`。客户端不得再假设 `ok` 一定代表“已评审通过”。
+
 - `chat.inject` 先写 `user.message`（`source:"steer"`、`during_turn:true`），再打断当前生成；若会话空闲返回业务错误，请改用 `chat.send`。
 - 压缩写 `context.compacted` 事件（码 24），payload 含 `summary` / `covers_until_seq` / `compacted_events` / `before_chars` / `after_chars`；模型视图只保留 cutoff 之后的事件，旧原文仍在 append-only 日志。
 - `web.search` / `web.fetch` / `web.news` / `web.suggest` / `web.status` 在 `search_provider=none` 时不出现；`local` 不需要 key，`deepseek` 仍需 key。网页返回一律 `untrusted:true`。本地搜索为零 Key，DeepSeek 计费详见 `docs/v1.2.0-rc.1-变更说明.zh-CN.md` §2。

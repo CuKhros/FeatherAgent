@@ -250,7 +250,7 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             if last_user.contains("[REVIEW-GUIDE]") {
                 return Ok((
                     json!({"rubric":[
-                        {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案包含字符串 REVIEW-FINAL","weight":1.0}
+                        {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL","weight":1.0}
                     ]})
                     .to_string(),
                     0,
@@ -284,6 +284,12 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                         .map(|c| c.contains("[review_feedback]"))
                         .unwrap_or(false)
             }) {
+                if last_user.contains("REVIEW_NEVER") {
+                    return Ok((
+                        format!("echo: {}", last_user.chars().take(60).collect::<String>()),
+                        0,
+                    ));
+                }
                 return Ok(("REVIEW-FINAL".into(), 0));
             }
             if last_is_tool {
@@ -452,7 +458,12 @@ fn provider_http(
 
     match method {
         "probe" => {
-            let url = format!("{base}/models");
+            // Ollama 原生列表在 /api/tags；/models 是 OpenAI 兼容路径，原生服务会 404。
+            let url = if kind == "ollama" && !openai {
+                format!("{base}/api/tags")
+            } else {
+                format!("{base}/models")
+            };
             let r = net::get_json_timeout_auth(&url, std::time::Duration::from_secs(5), api_key)?;
             if r.status >= 400 {
                 return Err(format!("{label} 模型列表 HTTP {}: {}", r.status, r.text()));
@@ -725,7 +736,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                 .take(2_000)
                 .collect::<String>();
             Ok(json!({"messages": json!([
-                {"role": "system", "content": "你是 Review-Gate 的指导者（guide）。只写验收清单，不回答任务本身。输出一个 JSON 对象：{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"可核对的要求\",\"check\":\"拿最终答案一眼可核对的判据\",\"weight\":1}]}。写 3–6 条；每条必须具体，禁止“准确、完整、逻辑清晰”这类空话。不要输出 JSON 以外的文字。"},
+                {"role": "system", "content": "你是 Review-Gate 的指导者（guide）。只写验收清单，不回答任务本身。输出一个 JSON 对象：{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"可核对的要求\",\"check\":\"逐字核对 must_include 是否出现\",\"must_include\":\"必须逐字出现在最终答案中的短语\",\"weight\":1}]}。写 3–6 条；每条必须具体，禁止“准确、完整、逻辑清晰”这类空话。must_include 必须是 1–40 字的字面短语（优先结论句、文件名、命令、专有名词），judge 与 exec 都按它逐字核对；check 必须复述该字面短语，不得只写抽象要求。至少一条 must_include 命中任务的核心结论。不要输出 JSON 以外的文字。"},
                 {"role": "user", "content": format!("[REVIEW-GUIDE]\n任务输入：\n{input}\n\n环境摘要：\n{environment}")}
             ]), "model_visible": true}))
         }
@@ -746,7 +757,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                 .collect::<String>();
             let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
             Ok(json!({"messages": json!([
-                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。默认不通过；只按给定验收清单逐条核对最终答案。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案中的原文证据\"}],\"evidence\":\"总结\"}。evidence 为空一律视为不通过；不要给总分，不要放水。"},
+                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。默认不通过；只按给定验收清单逐条核对最终答案。先逐条抄录 check 与 must_include，再在答案中查找 must_include 原文；找不到就直接 pass=false。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"引用答案中的原文至少 10 字\"}],\"evidence\":\"逐条核对结论，至少 10 字\"}。每条 evidence 必须引用答案原文并至少 10 字；禁止“总结”“通过”“ok”“是”等占位词。顶层 evidence 也至少 10 字。evidence 过短视为 judge 失败，会被重试。不要给总分，不要放水。"},
                 {"role": "user", "content": format!("[REVIEW-JUDGE]\n用户输入：\n{input}\n\n验收清单：\n{}\n\n待审答案：\n{answer}", serde_json::to_string(&rubric).unwrap_or_default())}
             ]), "model_visible": true}))
         }
@@ -767,10 +778,27 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
             }
             if let Some(rubric) = params.get("rubric").and_then(|x| x.as_array()) {
                 for item in rubric {
+                    let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("hard");
+                    let criterion = item.get("criterion").cloned().unwrap_or(json!(""));
+                    let check = item.get("check").cloned().unwrap_or(json!(""));
+                    if let Some(lit) = item
+                        .get("must_include")
+                        .and_then(|x| x.as_str())
+                        .filter(|x| !x.is_empty())
+                    {
+                        if !answer.contains(lit) {
+                            failures.push(json!({
+                                "id": id,
+                                "criterion": criterion,
+                                "check": check,
+                                "evidence": format!("答案未逐字出现必须短语『{lit}』"),
+                            }));
+                            continue;
+                        }
+                    }
                     let Some(hard) = item.get("hard") else {
                         continue;
                     };
-                    let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("hard");
                     let kind = hard.get("kind").and_then(|x| x.as_str()).unwrap_or("");
                     let value = hard.get("value").and_then(|x| x.as_str()).unwrap_or("");
                     let ok = match kind {
@@ -779,9 +807,12 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                         _ => true,
                     };
                     if !ok {
-                        failures.push(
-                            json!({"id": id, "evidence": format!("hardcheck {kind} 未通过")}),
-                        );
+                        failures.push(json!({
+                            "id": id,
+                            "criterion": criterion,
+                            "check": check,
+                            "evidence": format!("hardcheck {kind} 未通过"),
+                        }));
                     }
                 }
             }
@@ -802,6 +833,27 @@ fn json_slice(text: &str) -> &str {
         }
     }
     t
+}
+
+fn quoted_literal(check: &str) -> Option<String> {
+    for (open, close) in [
+        ('『', '』'),
+        ('「', '」'),
+        ('`', '`'),
+        ('“', '”'),
+        ('"', '"'),
+    ] {
+        if let Some(a) = check.find(open) {
+            let rest = &check[a + open.len_utf8()..];
+            if let Some(b) = rest.find(close) {
+                let lit = rest[..b].trim();
+                if !lit.is_empty() {
+                    return Some(lit.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn parse_rubric(text: &str) -> Result<Value, String> {
@@ -831,6 +883,28 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
         if criterion.is_empty() || check.is_empty() {
             return Err(format!("验收项 {} 缺少 criterion/check", i + 1));
         }
+        let must_include = item
+            .get("must_include")
+            .and_then(|x| x.as_str())
+            .map(|x| {
+                x.trim()
+                    .trim_matches(|c| {
+                        matches!(c, '『' | '』' | '「' | '」' | '`' | '"' | '“' | '”')
+                    })
+                    .trim()
+                    .to_string()
+            })
+            .filter(|x| !x.is_empty())
+            .or_else(|| quoted_literal(check));
+        let Some(must_include) = must_include else {
+            return Err(format!(
+                "验收项 {} 的 check 不是字面判据：必须提供 must_include 或在 check 中用『』标出应逐字出现的短语",
+                i + 1
+            ));
+        };
+        if must_include.chars().count() > 40 {
+            return Err(format!("验收项 {} 的 must_include 超过 40 字", i + 1));
+        }
         let id = item
             .get("id")
             .and_then(|x| x.as_str())
@@ -842,6 +916,7 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
             "id": id,
             "criterion": criterion,
             "check": check,
+            "must_include": must_include,
             "weight": weight.clamp(0.1, 10.0),
             "hard": item.get("hard").cloned(),
         }));
@@ -858,6 +933,9 @@ fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
         .flatten()
         .filter_map(|x| x.get("id").and_then(|y| y.as_str()).map(|s| s.to_string()))
         .collect();
+    if expected.is_empty() {
+        return Err("审批结果没有对应验收项".into());
+    }
     let items = v
         .get("items")
         .and_then(|x| x.as_array())
@@ -869,34 +947,60 @@ fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
         let found = items
             .iter()
             .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id.as_str()));
-        let (pass, evidence) = match found {
-            Some(item) => {
-                let pass = item.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
-                let evidence = item
-                    .get("evidence")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                // 空 evidence 一律算不通过，防止审批者用“通过”占位。
-                (pass && !evidence.is_empty(), evidence)
-            }
-            None => (false, String::new()),
+        let Some(item) = found else {
+            return Err(format!("审批结果缺少验收项 {id}"));
         };
+        let pass = item.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
+        let evidence = item
+            .get("evidence")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        // evidence 太短说明 judge 只是在占位（例如“总结”），属 judge 失败，交给上层重试。
+        if evidence.chars().count() < 10 {
+            return Err(format!(
+                "审批项 {id} 的 evidence 过短（少于 10 字）：{evidence:?}"
+            ));
+        }
         if !pass {
             failed.push(Value::String(id.clone()));
         }
-        normalized.push(json!({"id": id, "pass": pass, "evidence": evidence}));
+        let meta = rubric
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id.as_str()));
+        let criterion = meta
+            .and_then(|x| x.get("criterion"))
+            .cloned()
+            .unwrap_or(json!(""));
+        let check = meta
+            .and_then(|x| x.get("check"))
+            .cloned()
+            .unwrap_or(json!(""));
+        normalized.push(json!({
+            "id": id,
+            "pass": pass,
+            "evidence": evidence,
+            "criterion": criterion,
+            "check": check,
+        }));
     }
-    if expected.is_empty() {
-        return Err("审批结果没有对应验收项".into());
+    let summary = v
+        .get("evidence")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if summary.chars().count() < 10 {
+        return Err(format!("审批总结 evidence 过短（少于 10 字）：{summary:?}"));
     }
     let pass = failed.is_empty() && v.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
     Ok(json!({
         "pass": pass,
         "items": normalized,
         "failed": failed,
-        "evidence": v.get("evidence").and_then(|x| x.as_str()).unwrap_or(""),
+        "evidence": summary,
     }))
 }
 
@@ -1137,27 +1241,66 @@ mod tests {
     }
 
     #[test]
-    fn review_rubric_parses_fenced_json_and_rejects_empty_checks() {
-        let ok = parse_rubric("```json\n{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案第一段有结论\"}]}\n```").unwrap();
+    fn review_rubric_requires_literal_must_include() {
+        let ok = parse_rubric("```json\n{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案第一段有『REVIEW-FINAL』\",\"must_include\":\"REVIEW-FINAL\"}]}\n```").unwrap();
         assert_eq!(ok["count"], 1);
         assert_eq!(ok["rubric"][0]["id"], "c1");
+        assert_eq!(ok["rubric"][0]["must_include"], "REVIEW-FINAL");
+        let quoted = parse_rubric(
+            "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案出现『REVIEW-FINAL』\"}]}",
+        )
+        .unwrap();
+        assert_eq!(quoted["rubric"][0]["must_include"], "REVIEW-FINAL");
         let bad = parse_rubric("{\"rubric\":[{\"criterion\":\"只有标题\",\"check\":\"\"}]}");
         assert!(bad.is_err());
+        let vague = parse_rubric(
+            "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"结论完整\",\"check\":\"答案逻辑清晰\"}]}",
+        );
+        assert!(vague.is_err());
     }
 
     #[test]
-    fn review_verdict_empty_evidence_never_passes() {
-        let rubric = json!([{"id":"c1"},{"id":"c2"}]);
-        let empty = parse_verdict(
-            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"有\"}]}",
+    fn review_verdict_short_evidence_is_rejected() {
+        let rubric = json!([
+            {"id":"c1","criterion":"包含结论","check":"答案出现『REVIEW-FINAL』"},
+            {"id":"c2","criterion":"包含文件","check":"答案出现『w1.txt』"}
+        ]);
+        let short = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"总结\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"答案中出现 w1.txt 路径\"}],\"evidence\":\"总结\"}",
+            &rubric,
+        );
+        assert!(short.is_err());
+        let ok = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案第一段出现 REVIEW-FINAL 标记\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"答案写明 workspace/w1.txt 路径\"}],\"evidence\":\"逐条核对通过，答案包含两个必须短语\"}",
             &rubric,
         )
         .unwrap();
-        assert_eq!(empty["pass"], false);
-        assert_eq!(empty["failed"], json!(["c1"]));
-        let ok = parse_verdict(
-            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"a\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"b\"}],\"evidence\":\"ok\"}",
-            &rubric,
+        assert_eq!(ok["pass"], true);
+        assert_eq!(ok["items"][0]["criterion"], "包含结论");
+        assert_eq!(ok["items"][0]["check"], "答案出现『REVIEW-FINAL』");
+    }
+
+    #[test]
+    fn review_hardcheck_requires_literal_must_include() {
+        let rubric = json!([{
+            "id":"c1",
+            "criterion":"包含结论",
+            "check":"答案出现『REVIEW-FINAL』",
+            "must_include":"REVIEW-FINAL"
+        }]);
+        let bad = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"这里只有一段普通总结", "rubric":rubric}),
+        )
+        .unwrap();
+        assert_eq!(bad["pass"], false);
+        assert!(bad["failed"][0]["evidence"]
+            .as_str()
+            .unwrap()
+            .contains("REVIEW-FINAL"));
+        let ok = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"最终答案 REVIEW-FINAL", "rubric":rubric}),
         )
         .unwrap();
         assert_eq!(ok["pass"], true);
@@ -1222,6 +1365,42 @@ mod tests {
         assert!(req.contains("Authorization: Bearer sk-ninfer"), "{req}");
         assert_eq!(v["models"][0], "local");
         assert_eq!(v["auth_configured"], true);
+    }
+
+    #[test]
+    fn ollama_probe_uses_api_tags_and_reads_native_models() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = s.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 62\r\n\r\n{\"models\":[{\"name\":\"qwen3.5:4b\"},{\"name\":\"qwen2.5-coder:7b\"}]}",
+                );
+            }
+        });
+        let io = Arc::new(Io {
+            out: Mutex::new(std::io::stdout()),
+            codec: Codec::MsgPack,
+            cancelled: Mutex::new(HashSet::new()),
+        });
+        let v = provider_http(
+            "ollama",
+            "probe",
+            &json!({"base_url": format!("http://{addr}"), "model": "qwen3.5:4b"}),
+            &io,
+            1,
+        )
+        .unwrap();
+        let req = rx.recv().unwrap();
+        assert!(req.starts_with("GET /api/tags "), "{req}");
+        assert_eq!(v["models"][0], "qwen3.5:4b");
+        assert_eq!(v["models"][1], "qwen2.5-coder:7b");
     }
 
     #[test]

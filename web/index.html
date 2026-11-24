@@ -137,7 +137,7 @@
                 <input id="cfg-review-judge-temp" type="number" min="0" max="0.2" step="0.01" value="0.1">
               </label>
             </div>
-            <span class="form-hint">Guide 只出验收清单，Exec 看不到清单；Judge 逐条核对，evidence 为空算不通过。未通过时带证据重答，达到轮次上限返回最后一版并标记 unapproved。</span>
+            <span class="form-hint">Guide 只出验收清单，Exec 看不到清单；每条必须带字面 must_include，Judge 先做字面核对再引用答案原文（evidence 少于 10 字算 judge 失败并重试）。guide/judge 建议使用 ≥7B 模型；4B 可能无法产出合规 rubric。未通过时带判据与证据重答，达到轮次上限返回最后一版并标记 unapproved。</span>
           </div>
 
           <div class="settings-section">
