@@ -1,6 +1,7 @@
-//! `feather-plugin`：出厂插件多合一二进制（provider / tool）。
+//! `feather-plugin`：出厂插件多合一二进制（provider / tool / loop）。
 //!
-//! 用法：`feather-plugin <role>`，role ∈ {mock, ollama, tool}。
+//! 用法：`feather-plugin <role>`，role ∈ {mock, ollama, llamacpp, ninfer,
+//! lmstudio, vllm, openai, tool, search, review-gate}。
 //! 传输：stdio + 长度前缀 msgpack 帧。所有输出只走 stdout 的帧，日志走 stderr。
 
 use std::collections::{BTreeMap, HashSet};
@@ -112,6 +113,42 @@ fn manifest(role: &str) -> PluginManifest {
             vec!["net:local"],
             "provider",
         ),
+        "llamacpp" => (
+            "provider-llamacpp",
+            vec!["chat", "stream", "tools", "embed"],
+            vec!["net:local"],
+            "provider",
+        ),
+        "ninfer" => (
+            "provider-ninfer",
+            vec!["chat", "stream", "tools", "embed"],
+            vec!["net:local"],
+            "provider",
+        ),
+        "lmstudio" => (
+            "provider-lmstudio",
+            vec!["chat", "stream", "tools", "embed"],
+            vec!["net:local"],
+            "provider",
+        ),
+        "vllm" => (
+            "provider-vllm",
+            vec!["chat", "stream", "tools", "embed"],
+            vec!["net:local"],
+            "provider",
+        ),
+        "openai" => (
+            "provider-openai",
+            vec!["chat", "stream", "tools", "embed"],
+            vec!["net:local"],
+            "provider",
+        ),
+        "review-gate" => (
+            "review-gate",
+            vec!["loop.review-gate", "review.guide", "review.judge"],
+            vec![],
+            "loop",
+        ),
         "tool" => (
             "tool",
             vec!["tool.fs.read", "tool.fs.write", "tool.shell", "tool.ping"],
@@ -149,7 +186,13 @@ fn handle(
     }
     let res = match role {
         "mock" => provider_mock(method, params, io, id),
-        "ollama" => provider_ollama(method, params, io, id),
+        "ollama" => provider_http("ollama", method, params, io, id),
+        "llamacpp" => provider_http("llamacpp", method, params, io, id),
+        "ninfer" => provider_http("ninfer", method, params, io, id),
+        "lmstudio" => provider_http("lmstudio", method, params, io, id),
+        "vllm" => provider_http("vllm", method, params, io, id),
+        "openai" => provider_http("openai", method, params, io, id),
+        "review-gate" => review_gate_plugin(method, params),
         "tool" => tools(method, params),
         "search" => search_plugin(method, params),
         _ => Err(format!("unknown role {role}")),
@@ -196,7 +239,53 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             }
             Ok(json!({"vector": vec, "dim": vec.len(), "model": "mock-embed"}))
         }
-        "chat" => ok_chat_stream(params, io, req, |last_user, last_is_tool| {
+        "chat" => ok_chat_stream(params, io, req, |messages, last_is_tool| {
+            let last_user = messages
+                .iter()
+                .rev()
+                .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+                .unwrap_or("")
+                .to_string();
+            if last_user.contains("[REVIEW-GUIDE]") {
+                return Ok((
+                    json!({"rubric":[
+                        {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案包含字符串 REVIEW-FINAL","weight":1.0}
+                    ]})
+                    .to_string(),
+                    0,
+                ));
+            }
+            if last_user.contains("[REVIEW-JUDGE]") {
+                let answer = last_user
+                    .split_once("待审答案：")
+                    .map(|(_, a)| a)
+                    .unwrap_or("");
+                let pass = answer.contains("REVIEW-FINAL");
+                let evidence = if pass {
+                    "答案包含 REVIEW-FINAL"
+                } else {
+                    "答案未包含 REVIEW-FINAL"
+                };
+                return Ok((
+                    json!({
+                        "pass": pass,
+                        "items": [{"id":"c1","pass":pass,"evidence":evidence}],
+                        "evidence": evidence
+                    })
+                    .to_string(),
+                    0,
+                ));
+            }
+            if messages.iter().any(|m| {
+                m.get("role").and_then(|r| r.as_str()) == Some("system")
+                    && m.get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|c| c.contains("[review_feedback]"))
+                        .unwrap_or(false)
+            }) {
+                return Ok(("REVIEW-FINAL".into(), 0));
+            }
             if last_is_tool {
                 return Ok(("已完成。".into(), 0));
             }
@@ -248,29 +337,19 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
 
 fn ok_chat_stream<F>(params: &Value, io: &Arc<Io>, req: u64, f: F) -> Result<Value, String>
 where
-    F: FnOnce(&str, bool) -> Result<(String, u64), String>,
+    F: FnOnce(&[Value], bool) -> Result<(String, u64), String>,
 {
     let messages = params
         .get("messages")
         .and_then(|m| m.as_array())
         .cloned()
         .unwrap_or_default();
-    let last_user = messages
-        .iter()
-        .rev()
-        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        .and_then(|m| {
-            m.get("content")
-                .and_then(|c| c.as_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_default();
     let last_is_tool = messages
         .last()
         .and_then(|m| m.get("role").and_then(|r| r.as_str()))
         .map(|r| r == "tool")
         .unwrap_or(false);
-    let (text, delay_ms) = f(&last_user, last_is_tool)?;
+    let (text, delay_ms) = f(&messages, last_is_tool)?;
 
     if text == "SPIN" {
         let mut elapsed = 0u64;
@@ -311,27 +390,73 @@ where
 
 // ---------------- ollama / openai 兼容 provider ----------------
 
-fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<Value, String> {
-    let base = params
+fn provider_default_base(kind: &str) -> &'static str {
+    match kind {
+        "ollama" => "http://127.0.0.1:11434",
+        "lmstudio" => "http://127.0.0.1:1234",
+        "vllm" => "http://127.0.0.1:8000",
+        _ => "http://127.0.0.1:8080",
+    }
+}
+
+fn provider_caps(kind: &str) -> Vec<&'static str> {
+    if kind == "ollama" {
+        vec!["chat", "stream", "tools", "embed", "fim"]
+    } else {
+        vec!["chat", "stream", "tools", "embed"]
+    }
+}
+
+/// OpenAI 兼容服务统一挂到 `/v1` 下；Ollama 原生接口仍走 `/api/*`。
+fn ensure_v1(base: &str) -> String {
+    let b = base.trim_end_matches('/');
+    if b.ends_with("/v1") {
+        b.to_string()
+    } else {
+        format!("{b}/v1")
+    }
+}
+
+fn provider_http(
+    kind: &str,
+    method: &str,
+    params: &Value,
+    io: &Arc<Io>,
+    id: u64,
+) -> Result<Value, String> {
+    let raw_base = params
         .get("base_url")
         .and_then(|x| x.as_str())
-        .unwrap_or("http://127.0.0.1:11434")
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .unwrap_or(provider_default_base(kind))
         .trim_end_matches('/')
         .to_string();
+    let openai = kind != "ollama" || raw_base.contains("/v1");
+    let base = if openai {
+        ensure_v1(&raw_base)
+    } else {
+        raw_base.clone()
+    };
+    let api_key = params
+        .get("api_key")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|x| !x.is_empty());
     let model = params
         .get("model")
         .and_then(|m| m.as_str())
         .unwrap_or("qwen2.5:7b");
     let req = params.get("req").and_then(|x| x.as_u64()).unwrap_or(id);
+    let label = kind;
+
     match method {
         "probe" => {
-            let openai = base.contains("/v1");
-            let url = if openai {
-                format!("{base}/models")
-            } else {
-                format!("{base}/api/tags")
-            };
-            let r = net::get_json_timeout(&url, std::time::Duration::from_secs(5))?;
+            let url = format!("{base}/models");
+            let r = net::get_json_timeout_auth(&url, std::time::Duration::from_secs(5), api_key)?;
+            if r.status >= 400 {
+                return Err(format!("{label} 模型列表 HTTP {}: {}", r.status, r.text()));
+            }
             let v: Value = r.json()?;
             let mut models = Vec::new();
             if openai {
@@ -357,37 +482,53 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     }
                 }
             }
+            let caps = provider_caps(kind);
             Ok(json!({
-                "name": "ollama",
-                "capabilities": ["chat", "stream", "tools", "embed", "fim"],
+                "name": label,
+                "capabilities": caps,
                 "base_url": base,
+                "auth_configured": api_key.is_some(),
                 "models": models,
             }))
         }
         "embed" => {
             let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
-            let r = net::post_json(
-                &format!("{base}/api/embed"),
-                &json!({"model": model, "input": text}),
-            )?;
+            let (url, body) = if openai {
+                (
+                    format!("{base}/embeddings"),
+                    json!({"model": model, "input": text}),
+                )
+            } else {
+                (
+                    format!("{base}/api/embed"),
+                    json!({"model": model, "input": text}),
+                )
+            };
+            let r = net::post_json_auth(&url, &body, api_key)?;
+            if r.status >= 400 {
+                return Err(format!("{label} embedding HTTP {}: {}", r.status, r.text()));
+            }
             let v = r.json()?;
-            let arr = v
-                .get("embeddings")
-                .and_then(|e| e.get(0))
-                .cloned()
-                .unwrap_or(Value::Null);
+            let arr = if openai {
+                v.pointer("/data/0/embedding")
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            } else {
+                v.get("embeddings")
+                    .and_then(|e| e.get(0))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            };
             Ok(json!({"vector": arr, "model": model}))
         }
         "chat" => {
             let messages = params.get("messages").cloned().unwrap_or(json!([]));
-            let openai = base.contains("/v1");
             let mut body = json!({"model": model, "messages": messages, "stream": true});
             if let Some(t) = params.get("tools").cloned() {
                 if t.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
                     body["tools"] = t;
                 }
             }
-            // 空响应重试会带 temperature：OpenAI 放顶层，Ollama 放 options。
             if let Some(t) = params.get("temperature").cloned() {
                 if openai {
                     body["temperature"] = t;
@@ -395,16 +536,16 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     body["options"] = json!({"temperature": t});
                 }
             }
-            let mut acc = String::new();
-            let mut native_calls: Vec<Value> = Vec::new();
-            let mut openai_calls: BTreeMap<u64, (String, String)> = BTreeMap::new();
-            let mut upstream_finish = "stop".to_string();
             let url = if openai {
                 format!("{base}/chat/completions")
             } else {
                 format!("{base}/api/chat")
             };
-            net::stream_post_lines(&url, &body, |line| {
+            let mut acc = String::new();
+            let mut native_calls: Vec<Value> = Vec::new();
+            let mut openai_calls: BTreeMap<u64, (String, String)> = BTreeMap::new();
+            let mut upstream_finish = "stop".to_string();
+            let result = net::stream_post_lines_auth(&url, &body, api_key, |line| {
                 if io.is_cancelled(req) {
                     return false;
                 }
@@ -432,8 +573,17 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                 {
                     upstream_finish = r.to_string();
                 }
+                if let Some(e) = v.get("error") {
+                    let msg = e
+                        .get("message")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or_else(|| e.as_str().unwrap_or("provider error"));
+                    io.emit(req, json!({"kind": "error", "message": msg}));
+                    return false;
+                }
                 let delta = if openai {
                     v.pointer("/choices/0/delta/content")
+                        .or_else(|| v.pointer("/choices/0/message/content"))
                         .and_then(|x| x.as_str())
                         .unwrap_or("")
                         .to_string()
@@ -448,38 +598,30 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     io.emit(req, json!({"kind": "delta", "text": delta}));
                 }
                 if openai {
-                    if let Some(calls) = v
-                        .pointer("/choices/0/delta/tool_calls")
-                        .and_then(|x| x.as_array())
-                    {
-                        for c in calls {
-                            let idx = c.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
-                            let e = openai_calls.entry(idx).or_default();
-                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str())
-                            {
-                                if !e.0.ends_with(name) {
-                                    e.0.push_str(name);
-                                }
-                            }
-                            if let Some(args) =
-                                c.pointer("/function/arguments").and_then(|x| x.as_str())
-                            {
-                                e.1.push_str(args);
-                            }
-                        }
-                    }
-                    if let Some(calls) = v
-                        .pointer("/choices/0/message/tool_calls")
-                        .and_then(|x| x.as_array())
-                    {
-                        for c in calls {
-                            if let Some(name) = c.pointer("/function/name").and_then(|x| x.as_str())
-                            {
+                    for pointer in [
+                        "/choices/0/delta/tool_calls",
+                        "/choices/0/message/tool_calls",
+                    ] {
+                        if let Some(calls) = v.pointer(pointer).and_then(|x| x.as_array()) {
+                            for c in calls {
+                                let idx = c.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
+                                let name = c
+                                    .pointer("/function/name")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("");
                                 let args = c
                                     .pointer("/function/arguments")
-                                    .cloned()
-                                    .unwrap_or_else(|| json!({}));
-                                native_calls.push(json!({"name": name, "arguments": args}));
+                                    .map(|x| {
+                                        x.as_str()
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| x.to_string())
+                                    })
+                                    .unwrap_or_default();
+                                let e = openai_calls.entry(idx).or_default();
+                                if !name.is_empty() && !e.0.ends_with(name) {
+                                    e.0.push_str(name);
+                                }
+                                e.1.push_str(&args);
                             }
                         }
                     }
@@ -497,7 +639,11 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
                     }
                 }
                 true
-            })?;
+            });
+            if let Err(e) = result {
+                io.emit(req, json!({"kind": "error", "message": e}));
+                return Err(e);
+            }
             for (_, (name, args)) in openai_calls {
                 if name.is_empty() {
                     continue;
@@ -511,9 +657,11 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
             }
             let calls = featheragent::context::parse::from_value(&Value::Array(native_calls));
             if acc.trim().is_empty() && calls.is_empty() {
-                let msg = "Ollama 返回空响应（content 与 tool_calls 均为空）；已拒绝以 status=ok 静默通过。请检查 base_url/代理/模型是否就绪";
+                let msg = format!(
+                    "{label} 返回空响应（content 与 tool_calls 均为空）；已拒绝以 status=ok 静默通过。请检查 base_url/Key/代理/模型是否就绪"
+                );
                 io.emit(req, json!({"kind": "error", "message": msg}));
-                return Err(msg.to_string());
+                return Err(msg);
             }
             let finish = if calls.is_empty() {
                 if upstream_finish.is_empty() {
@@ -537,15 +685,219 @@ fn provider_ollama(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Resul
             Ok(json!({"text": acc, "finish_reason": finish, "tool_calls": calls_json}))
         }
         "fim" => {
+            if openai {
+                return Err(format!("{label}: OpenAI 兼容端点不支持原生 FIM"));
+            }
             let prompt = params.get("prompt").and_then(|x| x.as_str()).unwrap_or("");
-            let r = net::post_json(
+            let r = net::post_json_auth(
                 &format!("{base}/api/generate"),
                 &json!({"model": model, "prompt": prompt, "stream": false, "raw": true}),
+                api_key,
             )?;
+            if r.status >= 400 {
+                return Err(format!("{label} FIM HTTP {}: {}", r.status, r.text()));
+            }
             Ok(json!({"text": r.json()?.get("response").cloned().unwrap_or(Value::Null)}))
         }
-        _ => Err(format!("ollama: 未知方法 {method}")),
+        _ => Err(format!("{label}: 未知方法 {method}")),
     }
+}
+
+// ---------------- review-gate（guide / exec / judge 三角色协议） ----------------
+
+/// review-gate 不直接调用模型：它把三角色的 prompt 与结构化解析封装成插件方法。
+/// 内核按 guide → exec → judge 顺序各发一次请求，exec 看不到 rubric。
+fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
+    match method {
+        "review.guide" => {
+            let input = params
+                .get("input")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .chars()
+                .take(8_000)
+                .collect::<String>();
+            let environment = params
+                .get("environment")
+                .and_then(|x| x.as_str())
+                .unwrap_or("(未提供环境摘要)")
+                .chars()
+                .take(2_000)
+                .collect::<String>();
+            Ok(json!({"messages": json!([
+                {"role": "system", "content": "你是 Review-Gate 的指导者（guide）。只写验收清单，不回答任务本身。输出一个 JSON 对象：{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"可核对的要求\",\"check\":\"拿最终答案一眼可核对的判据\",\"weight\":1}]}。写 3–6 条；每条必须具体，禁止“准确、完整、逻辑清晰”这类空话。不要输出 JSON 以外的文字。"},
+                {"role": "user", "content": format!("[REVIEW-GUIDE]\n任务输入：\n{input}\n\n环境摘要：\n{environment}")}
+            ]), "model_visible": true}))
+        }
+        "review.judge" => {
+            let input = params
+                .get("input")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .chars()
+                .take(6_000)
+                .collect::<String>();
+            let answer = params
+                .get("answer")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .chars()
+                .take(12_000)
+                .collect::<String>();
+            let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
+            Ok(json!({"messages": json!([
+                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。默认不通过；只按给定验收清单逐条核对最终答案。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案中的原文证据\"}],\"evidence\":\"总结\"}。evidence 为空一律视为不通过；不要给总分，不要放水。"},
+                {"role": "user", "content": format!("[REVIEW-JUDGE]\n用户输入：\n{input}\n\n验收清单：\n{}\n\n待审答案：\n{answer}", serde_json::to_string(&rubric).unwrap_or_default())}
+            ]), "model_visible": true}))
+        }
+        "review.parse_rubric" => {
+            let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
+            parse_rubric(text)
+        }
+        "review.parse_verdict" => {
+            let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
+            let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
+            parse_verdict(text, &rubric)
+        }
+        "review.hardcheck" => {
+            let answer = params.get("answer").and_then(|x| x.as_str()).unwrap_or("");
+            let mut failures = Vec::new();
+            if answer.trim().is_empty() {
+                failures.push(json!({"id":"hard:non_empty","evidence":"答案为空"}));
+            }
+            if let Some(rubric) = params.get("rubric").and_then(|x| x.as_array()) {
+                for item in rubric {
+                    let Some(hard) = item.get("hard") else {
+                        continue;
+                    };
+                    let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("hard");
+                    let kind = hard.get("kind").and_then(|x| x.as_str()).unwrap_or("");
+                    let value = hard.get("value").and_then(|x| x.as_str()).unwrap_or("");
+                    let ok = match kind {
+                        "json" => serde_json::from_str::<Value>(answer).is_ok(),
+                        "contains" => answer.contains(value),
+                        _ => true,
+                    };
+                    if !ok {
+                        failures.push(
+                            json!({"id": id, "evidence": format!("hardcheck {kind} 未通过")}),
+                        );
+                    }
+                }
+            }
+            Ok(json!({"pass": failures.is_empty(), "failed": failures}))
+        }
+        _ => Err(format!("review-gate: 未知方法 {method}")),
+    }
+}
+
+fn json_slice(text: &str) -> &str {
+    let t = text.trim();
+    let t = t.strip_prefix("```json").unwrap_or(t);
+    let t = t.strip_prefix("```").unwrap_or(t);
+    let t = t.strip_suffix("```").unwrap_or(t).trim();
+    if let (Some(a), Some(b)) = (t.find('{'), t.rfind('}')) {
+        if b > a {
+            return &t[a..=b];
+        }
+    }
+    t
+}
+
+fn parse_rubric(text: &str) -> Result<Value, String> {
+    let v: Value = serde_json::from_str(json_slice(text))
+        .map_err(|e| format!("验收清单不是合法 JSON: {e}"))?;
+    let arr = v
+        .get("rubric")
+        .or_else(|| v.get("items"))
+        .and_then(|x| x.as_array())
+        .or_else(|| v.as_array())
+        .ok_or("验收清单缺少 rubric 数组")?;
+    if arr.is_empty() || arr.len() > 12 {
+        return Err(format!("验收清单条数必须在 1–12 之间，实际 {}", arr.len()));
+    }
+    let mut out = Vec::new();
+    for (i, item) in arr.iter().enumerate() {
+        let criterion = item
+            .get("criterion")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim();
+        let check = item
+            .get("check")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim();
+        if criterion.is_empty() || check.is_empty() {
+            return Err(format!("验收项 {} 缺少 criterion/check", i + 1));
+        }
+        let id = item
+            .get("id")
+            .and_then(|x| x.as_str())
+            .filter(|x| !x.trim().is_empty())
+            .map(|x| x.to_string())
+            .unwrap_or_else(|| format!("c{}", i + 1));
+        let weight = item.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0);
+        out.push(json!({
+            "id": id,
+            "criterion": criterion,
+            "check": check,
+            "weight": weight.clamp(0.1, 10.0),
+            "hard": item.get("hard").cloned(),
+        }));
+    }
+    Ok(json!({"rubric": out, "count": out.len()}))
+}
+
+fn parse_verdict(text: &str, rubric: &Value) -> Result<Value, String> {
+    let v: Value = serde_json::from_str(json_slice(text))
+        .map_err(|e| format!("审批结果不是合法 JSON: {e}"))?;
+    let expected: Vec<String> = rubric
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x.get("id").and_then(|y| y.as_str()).map(|s| s.to_string()))
+        .collect();
+    let items = v
+        .get("items")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut normalized = Vec::new();
+    let mut failed = Vec::new();
+    for id in &expected {
+        let found = items
+            .iter()
+            .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id.as_str()));
+        let (pass, evidence) = match found {
+            Some(item) => {
+                let pass = item.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
+                let evidence = item
+                    .get("evidence")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                // 空 evidence 一律算不通过，防止审批者用“通过”占位。
+                (pass && !evidence.is_empty(), evidence)
+            }
+            None => (false, String::new()),
+        };
+        if !pass {
+            failed.push(Value::String(id.clone()));
+        }
+        normalized.push(json!({"id": id, "pass": pass, "evidence": evidence}));
+    }
+    if expected.is_empty() {
+        return Err("审批结果没有对应验收项".into());
+    }
+    let pass = failed.is_empty() && v.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
+    Ok(json!({
+        "pass": pass,
+        "items": normalized,
+        "failed": failed,
+        "evidence": v.get("evidence").and_then(|x| x.as_str()).unwrap_or(""),
+    }))
 }
 
 // ---------------- tools ----------------
@@ -782,6 +1134,106 @@ mod tests {
         assert!(safe_path(&ws, "ok.txt").is_ok());
         assert!(safe_path(&ws, "../outside.txt").is_err());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn review_rubric_parses_fenced_json_and_rejects_empty_checks() {
+        let ok = parse_rubric("```json\n{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"包含结论\",\"check\":\"答案第一段有结论\"}]}\n```").unwrap();
+        assert_eq!(ok["count"], 1);
+        assert_eq!(ok["rubric"][0]["id"], "c1");
+        let bad = parse_rubric("{\"rubric\":[{\"criterion\":\"只有标题\",\"check\":\"\"}]}");
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn review_verdict_empty_evidence_never_passes() {
+        let rubric = json!([{"id":"c1"},{"id":"c2"}]);
+        let empty = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"有\"}]}",
+            &rubric,
+        )
+        .unwrap();
+        assert_eq!(empty["pass"], false);
+        assert_eq!(empty["failed"], json!(["c1"]));
+        let ok = parse_verdict(
+            "{\"pass\":true,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"a\"},{\"id\":\"c2\",\"pass\":true,\"evidence\":\"b\"}],\"evidence\":\"ok\"}",
+            &rubric,
+        )
+        .unwrap();
+        assert_eq!(ok["pass"], true);
+    }
+
+    #[test]
+    fn review_guide_and_judge_prompts_are_role_separated() {
+        let guide =
+            review_gate_plugin("review.guide", &json!({"input":"任务", "environment":"ws"}))
+                .unwrap();
+        let msgs = guide["messages"].as_array().unwrap();
+        assert_eq!(msgs[0]["role"], "system");
+        assert!(msgs[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("[REVIEW-GUIDE]"));
+        let judge = review_gate_plugin(
+            "review.judge",
+            &json!({"input":"任务", "answer":"答案", "rubric":[{"id":"c1"}]}),
+        )
+        .unwrap();
+        let msgs = judge["messages"].as_array().unwrap();
+        assert!(msgs[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("[REVIEW-JUDGE]"));
+        assert!(msgs[1]["content"].as_str().unwrap().contains("待审答案"));
+    }
+
+    #[test]
+    fn ninfer_probe_uses_v1_and_bearer_key() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = s.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 25\r\n\r\n{\"data\":[{\"id\":\"local\"}]}",
+                );
+            }
+        });
+        let io = Arc::new(Io {
+            out: Mutex::new(std::io::stdout()),
+            codec: Codec::MsgPack,
+            cancelled: Mutex::new(HashSet::new()),
+        });
+        let v = provider_http(
+            "ninfer",
+            "probe",
+            &json!({"base_url": format!("http://{addr}"), "api_key": "sk-ninfer"}),
+            &io,
+            1,
+        )
+        .unwrap();
+        let req = rx.recv().unwrap();
+        assert!(req.starts_with("GET /v1/models "), "{req}");
+        assert!(req.contains("Authorization: Bearer sk-ninfer"), "{req}");
+        assert_eq!(v["models"][0], "local");
+        assert_eq!(v["auth_configured"], true);
+    }
+
+    #[test]
+    fn openai_compatible_base_normalization() {
+        assert_eq!(
+            ensure_v1("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080/v1"
+        );
+        assert_eq!(
+            ensure_v1("http://127.0.0.1:8080/v1/"),
+            "http://127.0.0.1:8080/v1"
+        );
     }
 
     fn temp_root(tag: &str) -> PathBuf {

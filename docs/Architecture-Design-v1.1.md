@@ -51,7 +51,7 @@ dsh (MIT, Cordis kernel, `@deepseek-ai/dsh`) already covers plugins, traceabilit
 | Dimension | dsh | FeatherAgent |
 |---|---|---|
 | Runtime | requires Node.js | **zero-dependency single binary** (no Node / Python / JVM) |
-| Kernel size/startup | Node baseline ~50 MB / hundreds of ms | **≤ 8 MB / < 20 ms cold start** |
+| Kernel size/startup | Node baseline ~50 MB / hundreds of ms | **≤ 8 MB / < 20 ms warm start** |
 | Optimization focus | general harness | **context engineering specialized for 1B–14B** |
 
 Three interoperability paths:
@@ -123,7 +123,7 @@ Size techniques: `opt-level="z"`, fat LTO, one codegen unit, `panic=abort`, symb
 | Metric | v1.1 target | Means |
 |---|---|---|
 | Kernel binary | **≤ 8 MB** | §2.3 |
-| Cold start to usable | **< 20 ms** | no SQLite init, no GC warm-up, lazy mmap |
+| Warm start to usable | **< 20 ms** | no SQLite init, no GC warm-up, lazy mmap; real cold spawn is measured separately |
 | Idle RSS | **≤ 15 MB** | no DB buffer pool, arena allocation |
 | Event write (without fsync) | **P95 < 100 µs** | append + group commit (§3.1) |
 | Event dispatch (one hop) | **P50 < 50 µs / P95 < 200 µs** | single-writer multi-reader lock-free queue (§3.2) |

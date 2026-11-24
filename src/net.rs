@@ -48,9 +48,14 @@ fn connect(u: &Url) -> Result<TcpStream, String> {
     Ok(stream)
 }
 
-fn build(host: &str, path: &str, body: &[u8], stream: bool) -> Vec<u8> {
+fn build(host: &str, path: &str, body: &[u8], stream: bool, bearer: Option<&str>) -> Vec<u8> {
+    let auth = bearer
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| format!("Authorization: Bearer {}\r\n", k.trim()))
+        .unwrap_or_default();
     let mut req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccept: {}\r\nConnection: {}\r\n\r\n",
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n{}\r\nContent-Length: {}\r\nAccept: {}\r\nConnection: {}\r\n\r\n",
+        auth,
         body.len(),
         if stream { "text/event-stream" } else { "application/json" },
         if stream { "keep-alive" } else { "close" }
@@ -159,12 +164,25 @@ pub fn get_json(url: &str) -> Result<Response, String> {
 
 /// 模型列表探测等交互式查询必须快速失败，不能占用设置页 5 分钟。
 pub fn get_json_timeout(url: &str, timeout: Duration) -> Result<Response, String> {
+    get_json_timeout_auth(url, timeout, None)
+}
+
+/// 带 Bearer Key 的 GET；Key 为空时等价于匿名请求。
+pub fn get_json_timeout_auth(
+    url: &str,
+    timeout: Duration,
+    bearer: Option<&str>,
+) -> Result<Response, String> {
     let u = parse_url(url)?;
     let mut s = connect(&u)?;
     s.set_read_timeout(Some(timeout)).ok();
+    let auth = bearer
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| format!("Authorization: Bearer {}\r\n", k.trim()))
+        .unwrap_or_default();
     let req = format!(
-        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
-        u.path, u.host, u.port
+        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n{}Connection: close\r\n\r\n",
+        u.path, u.host, u.port, auth
     );
     s.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
@@ -178,6 +196,15 @@ pub fn get_json_timeout(url: &str, timeout: Duration) -> Result<Response, String
 }
 
 pub fn post_json(url: &str, body: &serde_json::Value) -> Result<Response, String> {
+    post_json_auth(url, body, None)
+}
+
+/// 带 Bearer Key 的 POST；Key 为空时等价于匿名请求。
+pub fn post_json_auth(
+    url: &str,
+    body: &serde_json::Value,
+    bearer: Option<&str>,
+) -> Result<Response, String> {
     let u = parse_url(url)?;
     let body = serde_json::to_vec(body).map_err(|e| e.to_string())?;
     let mut s = connect(&u)?;
@@ -186,6 +213,7 @@ pub fn post_json(url: &str, body: &serde_json::Value) -> Result<Response, String
         &u.path,
         &body,
         false,
+        bearer,
     ))
     .map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
@@ -199,13 +227,22 @@ pub fn post_json(url: &str, body: &serde_json::Value) -> Result<Response, String
 }
 
 /// 逐行读取流式响应（NDJSON / SSE 均可），对 chunked 透明。
-pub fn stream_post_lines<F>(
+pub fn stream_post_lines<F>(url: &str, body: &serde_json::Value, on_line: F) -> Result<(), String>
+where
+    F: FnMut(&str) -> bool, // 返回 false 表示停止
+{
+    stream_post_lines_auth(url, body, None, on_line)
+}
+
+/// 带 Bearer Key 的流式 POST；Key 为空时等价于匿名请求。
+pub fn stream_post_lines_auth<F>(
     url: &str,
     body: &serde_json::Value,
+    bearer: Option<&str>,
     mut on_line: F,
 ) -> Result<(), String>
 where
-    F: FnMut(&str) -> bool, // 返回 false 表示停止
+    F: FnMut(&str) -> bool,
 {
     let u = parse_url(url)?;
     let body = serde_json::to_vec(body).map_err(|e| e.to_string())?;
@@ -215,6 +252,7 @@ where
         &u.path,
         &body,
         true,
+        bearer,
     ))
     .map_err(|e| e.to_string())?;
     let mut r = BufReader::new(s);
@@ -340,6 +378,26 @@ mod tests {
         let r = post_json(&url, &serde_json::json!({})).unwrap();
         assert_eq!(r.status, 200);
         assert_eq!(r.json().unwrap()["a"], 1);
+    }
+
+    #[test]
+    fn bearer_key_is_actually_sent() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+                let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+            }
+        });
+        let url = format!("http://{addr}/v1/models");
+        let r = post_json_auth(&url, &serde_json::json!({}), Some("sk-local-test")).unwrap();
+        assert_eq!(r.status, 200);
+        let req = rx.recv().unwrap();
+        assert!(req.contains("Authorization: Bearer sk-local-test"), "{req}");
     }
 
     #[test]

@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.0-rc.1 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.1 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.0-rc.1-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.1-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.0-rc.1 修复 TUI 取消状态拼写与 `web.search` 的 `count` 字符串容错，统一 Linux/Windows 版本与构建门禁，补齐 MIT 许可与公开仓库材料。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.1 关闭 R1：热启动与冷启动 spawn 分开计量；新增 `review-gate` 三角色插件、5 个 OpenAI 兼容本地 provider，以及 Ollama 等 provider 的可选 Bearer API Key。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.0-rc.1\
+D:\FeatherAgent-1.2.1-rc.1\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.0-rc.1\
 ...
 ```
 
-看到 `serve ready: 1.2.0-rc.1` 后再操作。
+看到 `serve ready: 1.2.1-rc.1` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.0-rc.1
+cd D:\FeatherAgent-1.2.1-rc.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -126,24 +126,39 @@ echo "bench exit=$LASTEXITCODE"
 
 预期 `bench` 冲突时打印“检测到内核正在运行（pid N）”且 `exit=2`，不再被脚本吞成 0。
 
+R1 核对（内核停止、Release 包）：
+
+- `metrics.boot_mode` 为 `warm_in_process_same_install_root`；`boot_samples_ms` 有 5 个数；`boot_warmup_discarded_ms` 存在。
+- `gates.boot_lt_100ms` 检查的是**热启动**。
+- `metrics.cold_spawn_ms_p50` 存在，`gates.cold_spawn_lt_250ms` 为 true；冷启动是真实 `serve` 进程，不是进程内数字。
+- 连续跑 3 次 bench，热启动应稳定低于 100 ms，不再出现旧的 130–175 ms 尖峰。
+
 Q1/Q2 小项：
 
 - `/stop` 后 TUI 状态栏应显示 `cancelled`（源码与二进制均已核对；`findstr /C:"cancelled" .\featheragent-tui.exe`）。
 - 模型把 `count` 写成字符串 `"5"` 时，`web.search` 仍返回 5 条；`tool.result.count` 与请求一致。
 - `web.search` 的 schema 声明是 `integer`，字符串容错只发生在内核转发层，不改变对外契约。
 
+v1.2.1 追加核对：
+
+1. 设置页应出现 `provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、`provider-openai`；切换 provider 时，如果 Base URL 为空或仍是某个默认值，应自动填对应默认端口。
+2. 启动本地 OpenAI 兼容服务（llama.cpp `--server` 或 NInfer），选择对应 provider，刷新模型列表并对话，确认回复来自本地服务。
+3. 填写可选 `API Key`，确认本地服务/代理收到 `Authorization: Bearer <key>`；清空后确认不再发送该头。
+4. 用 `provider-mock` 启用“三段校验 review-gate”，发送 `REVIEW_START`。预期出现 `review.guide`、至少一次失败的 `review.verdict`、`review.feedback`、第二次通过的 `review.verdict`，最终答案 `REVIEW-FINAL`，且 `chat.finished.review.approved=true`。
+5. 把 guide/exec/judge 温度设到 0.2–0.5 / 0.6–1.5 / 0.0–0.2 之外，保存必须被拒绝。
+
 ## 7. 已知边界
 
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.0-rc.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.0-rc.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.1-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

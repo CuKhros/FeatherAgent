@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.0-rc.1** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.1** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.0-rc.1","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}

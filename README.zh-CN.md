@@ -9,7 +9,7 @@
 ## 三个卖点
 
 1. **小模型上下文工程** —— 技术差异所在，研发重心（四层压缩、预算器、容错解析、KV Cache 友好前缀）
-2. **极致轻的内核** —— Rust 单二进制，目标 **≤ 8 MB**，空闲 RSS **≤ 15 MB**，冷启动 **< 20 ms**
+2. **极致轻的内核** —— Rust 单二进制，目标 **≤ 8 MB**，空闲 RSS **≤ 15 MB**，热启动 **< 20 ms**
 3. **可移植性** —— 零运行时依赖（无 Node / 无 Python / 无 JVM）；安装根 / 数据目录 / 工作空间三类路径可独立外置
 
 「一切皆插件」是实现手段，不作为卖点宣称。
@@ -25,7 +25,7 @@
    │  ② 插件契约 Plugin Contract（IDL v1，stdio JSON-RPC / MCP 兼容）
 插件进程层：context-engine · storage/index · provider-* · tool-* · bridge-*
    │
-本地推理运行时（外部）：Ollama / llama.cpp / LM Studio / vLLM
+本地推理运行时（外部）：Ollama / llama.cpp / NInfer / LM Studio / vLLM / OpenAI 兼容服务
 ```
 
 四条内核不变式：内核不懂 Agent · 能力皆插件 · 一切可追溯（append-only 事件流）· **内核不持有业务存储**。
@@ -61,7 +61,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.0-rc.1 待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.1 待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -72,7 +72,9 @@
 | 能力 | Linux x64 | Windows x64 | 证据与说明 |
 |---|---|---|---|
 | 内核启动、事件日志、插件 RPC | ✅ 自动化 | ✅ v1.1.9 真机 | Linux `cargo test`；Windows 真机 serve/chat |
-| bench 6 项门禁 | ✅ 6/6 | ✅ 6/6（v1.1.9） | 平台阈值见下表 |
+| bench 7 项门禁 | ✅ 7/7（v1.2.1） | ✅ 6/6（v1.1.9） | v1.2.1 改为热/冷启动分开计量；Windows 7/7 待复测 |
+| `review-gate` 循环插件 | ✅ 集成测试 | ⚠️ 未实测 | guide/exec/judge 重答、事件、WebUI 设置 |
+| 本地 provider + Bearer Key | ✅ mock HTTP 集成 | ⚠️ 未实测 | llama.cpp/NInfer/LM Studio/vLLM/OpenAI 兼容；未接真实服务 |
 | 项目级工作区 / `.featheagent` | ✅ 自动化 | ✅ v1.1.9 真机 | 路径去重、S3 写盘 |
 | TUI 交互 | ✅ PTY | ✅ v1.1.9 真机 | Markdown、`/stop`、`/settings` |
 | WebUI | ✅ 浏览器 | ✅ v1.1.9 真机 | Markdown、图标、WS 空闲复验（Linux） |
@@ -95,7 +97,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 ./target/release/featheragent-webui --root . --app    # WebUI（Chromium --app 独立窗口）
 ```
 
-出厂插件在 `plugins/`（provider-mock / provider-ollama / tool / storage / search）；`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度、上下文参数与工作区；WebUI 顶栏“插件”和 TUI `/plugins` 提供插件安装/启停，设置左侧栏会为每个已登记插件生成页面。模型下拉显示 `provider.models` 返回的全部模型，保存后经 `config.set` 即时应用。`serve` 启动会立即打印 banner 并写 `runtime/ipc/starting` / `ready`，首次启动较慢时 `chat` 会明确提示“内核未就绪（启动中）”。
+出厂插件在 `plugins/`：`provider-mock`、`provider-ollama`、`provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、通用 `provider-openai`、`review-gate`、`tool`、`storage` 与 `search`。`serve` 扫描 `<安装根>/plugins`，默认 `provider-mock`。接真实 Ollama：先 `ollama serve`，再 `serve --provider provider-ollama --model qwen2.5:7b`。Ollama 原生 `/api/*` 与 `/v1` Base 均可；llama.cpp/NInfer/LM Studio/vLLM 走各自 OpenAI 兼容 `/v1` 端点，Base URL 会自动归一化。WebUI 右上角“设置”或 TUI `/settings` 可在线切换 provider、模型、温度、上下文参数、工作区与可选 Bearer API Key；Key 只发给当前 provider，仅存本机 `config.json`；WebUI 顶栏“插件”和 TUI `/plugins` 提供插件安装/启停，设置左侧栏会为每个已登记插件生成页面。模型下拉显示 `provider.models` 返回的全部模型，保存后经 `config.set` 即时应用。`serve` 启动会立即打印 banner 并写 `runtime/ipc/starting` / `ready`，首次启动较慢时 `chat` 会明确提示“内核未就绪（启动中）”。
 
 TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在二进制内附带英文界面资源。内核本身不依赖语言；文档仍保留中英双版。
 
@@ -105,7 +107,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.0-rc.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -117,18 +119,19 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.0-rc.1）
+## 平台门禁差异（v1.2.1-rc.1）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
-| 进程内启动 P50 | < 20 ms | **< 100 ms** | Windows 冷启动含更多系统调用开销 |
+| 热启动（进程内）P50 | < 20 ms | **< 100 ms** | 同一安装根，预热 1 次丢弃 + 5 次样本 |
+| 冷启动 spawn→socket P50 | < 100 ms | **< 250 ms** | 真实 `serve` 子进程；Windows 含 DLL 加载与实时防护 |
 | 事件写入 P95 | < 100 µs | **< 10 ms** | NTFS `FlushFileBuffers` + 实时防护导致一个数量级差异，属环境特性 |
 | 内核体积 | ≤ 8 MB | ≤ 8 MB | 共用 |
 | 空闲 RSS | ≤ 15 MB | ≤ 15 MB | 共用 |
 | 上下文组装 P95 | < 30 ms | < 30 ms | 共用 |
 | RPC P95 | < 1 ms | < 1 ms | 共用 |
 
-`bench --json` 会返回 `platform`、`boot_limit_ms`、`write_limit_us`，不会把 Windows 固定标红。
+`bench --json` 会返回 `platform`、`boot_mode`、`boot_samples_ms`、`cold_spawn_ms_p50`、`boot_limit_ms`、`cold_spawn_limit_ms` 与 `write_limit_us`，不会把 Windows 固定标红。
 
 ## 参与与许可
 
@@ -145,6 +148,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.1 变更说明](docs/v1.2.1-rc.1-变更说明.zh-CN.md)** —— R1 热/冷启动拆分、review-gate、本地 provider、API Key 与测试
 - **[v1.2.0-rc.1 变更说明](docs/v1.2.0-rc.1-变更说明.zh-CN.md)** —— Q1/Q2、双平台版本/构建对齐、MIT 与公开仓库材料、平台矩阵
 - **[v1.1.9 Windows 修复对照](docs/v1.1.9-Windows修复说明.zh-CN.md)** —— P1 路径双重嵌套、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索
 - **[v1.1.8 Windows 修复对照](docs/v1.1.8-Windows修复说明.zh-CN.md)** —— 项目级工作区与每项目 `.featheagent`、TUI 设置侧栏、紧急停止/引导/压缩、联网搜索，以及 v1.1.7 复测 N1/N2/N3/N4/N6/N7
@@ -159,7 +163,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 状态
 
-`v1.2.0-rc.1` 是公开仓库候选版：修复 v1.1.9 真机复测的 Q1/Q2 小项，统一 Linux/Windows 的版本源、`--locked` 构建与 PE 版本资源，补齐 MIT LICENSE、SECURITY、CONTRIBUTING、CODE_OF_CONDUCT、CHANGELOG、本地 CI 脚本与 CODEOWNERS。核心能力沿用 v1.1.9：项目级工作区路径去重、`/stop` 状态、TUI/WebUI Markdown、羽毛图标、零 Key 本地联网搜索（默认 `search_provider=local`，DeepSeek 保留为可选计费后端）。Linux 自动化测试 **86/86** 通过（新增 `json_u64` 字符串计数容错用例；另有 1 个需公网的集成用例单独跑通）。
+`v1.2.1-rc.1` 关闭 v1.2.0-rc.1 真机复测的 R1，加入 `review-gate` 三角色插件，并扩展本地模型兼容。Linux 自动化 **95/95** 通过，另有 1 个需公网用例单独运行（58 lib、7 plugin、2 kernel、3 TUI、3 WebUI、2 golden、20 integration）。Linux Release 二进制 2.295 MiB；连续 3 次 bench 热启动 1.23–1.26 ms、冷启动 spawn 4.2–5.6 ms，全门禁通过。`fmt` 与 `clippy -D warnings` 通过。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.0-rc.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；Q1/Q2、Markdown、图标、本地搜索、项目路径与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。本轮未实测项见上表。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进。v1.2.1-rc.1 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；新的 R1 热/冷口径、review-gate UI/事件、provider API Key 字段、本地 provider 与高 DPI/中文渲染仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。本轮未实测项见上表。
 

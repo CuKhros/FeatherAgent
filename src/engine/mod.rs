@@ -37,6 +37,10 @@ pub struct Config {
     #[serde(default = "default_temperature")]
     pub temperature: f64,
     pub base_url: String,
+    /// 可选 Bearer Key；本地 Ollama / llama.cpp / NInfer 通常留空。
+    /// 设置页可直接填写，请求时只发给当前 provider，不写入日志。
+    #[serde(default)]
+    pub provider_api_key: String,
     pub max_turns: u32,
     /// `always | interval | never`
     pub sync: String,
@@ -62,6 +66,98 @@ pub struct Config {
     /// 单次搜索返回条数。
     #[serde(default = "default_search_count")]
     pub search_count: u32,
+    /// 三段校验 loop 插件名；默认 `review-gate`。
+    #[serde(default = "default_review_plugin")]
+    pub review_gate_plugin: String,
+    /// 三段校验（guide → exec → judge）；默认关闭。
+    #[serde(default)]
+    pub review_gate: ReviewGateConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewRoleConfig {
+    /// 空表示跟随当前全局 model。
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub temperature: f64,
+}
+
+impl Default for ReviewRoleConfig {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            temperature: 0.7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewGateConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_review_max_rounds")]
+    pub max_rounds: u32,
+    #[serde(default = "default_guide_role")]
+    pub guide: ReviewRoleConfig,
+    #[serde(default = "default_exec_role")]
+    pub exec: ReviewRoleConfig,
+    #[serde(default = "default_judge_role")]
+    pub judge: ReviewRoleConfig,
+    /// 当前仅支持 return_last_with_flag。
+    #[serde(default = "default_review_on_exhausted")]
+    pub on_exhausted: String,
+}
+
+impl Default for ReviewGateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_rounds: default_review_max_rounds(),
+            guide: default_guide_role(),
+            exec: default_exec_role(),
+            judge: default_judge_role(),
+            on_exhausted: default_review_on_exhausted(),
+        }
+    }
+}
+
+impl ReviewRoleConfig {
+    pub fn effective_model(&self, global: &str) -> String {
+        if self.model.trim().is_empty() {
+            global.to_string()
+        } else {
+            self.model.trim().to_string()
+        }
+    }
+}
+
+fn default_review_plugin() -> String {
+    "review-gate".into()
+}
+fn default_review_max_rounds() -> u32 {
+    2
+}
+fn default_review_on_exhausted() -> String {
+    "return_last_with_flag".into()
+}
+fn default_guide_role() -> ReviewRoleConfig {
+    ReviewRoleConfig {
+        model: String::new(),
+        temperature: 0.3,
+    }
+}
+fn default_exec_role() -> ReviewRoleConfig {
+    ReviewRoleConfig {
+        model: String::new(),
+        temperature: 0.7,
+    }
+}
+fn default_judge_role() -> ReviewRoleConfig {
+    ReviewRoleConfig {
+        model: String::new(),
+        temperature: 0.1,
+    }
 }
 
 impl Default for Config {
@@ -73,6 +169,7 @@ impl Default for Config {
             model: "qwen2.5:7b".into(),
             temperature: 0.7,
             base_url: "http://127.0.0.1:11434".into(),
+            provider_api_key: String::new(),
             max_turns: 6,
             sync: "interval".into(),
             strict_temp: true,
@@ -86,6 +183,8 @@ impl Default for Config {
             search_base_url: default_search_base_url(),
             search_api_key_env: default_search_key_env(),
             search_count: default_search_count(),
+            review_gate_plugin: default_review_plugin(),
+            review_gate: ReviewGateConfig::default(),
         }
     }
 }
@@ -678,7 +777,10 @@ impl Kernel {
         let cfg = self.cfg.read().clone();
         let mut items = Vec::new();
         if let Ok(p) = self.plugins.get(provider) {
-            if let Ok(res) = p.call("embed", json!({"text": text})) {
+            if let Ok(res) = p.call(
+                "embed",
+                json!({"text": text, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
+            ) {
                 if let Some(v) = res.get("vector").and_then(|v| v.as_array()) {
                     let vector: Vec<f32> = v
                         .iter()
@@ -776,7 +878,7 @@ impl Kernel {
 
     /// 一次完整的 Agent 回合（§13）。
     pub fn run_turn(self: &Arc<Self>, session: &Arc<Session>, text: String) -> Result<(), String> {
-        let cfg = self.cfg.read().clone();
+        let mut cfg = self.cfg.read().clone();
         *session.state.write() = SessionState::Assembling;
         *session.error.write() = None;
 
@@ -785,6 +887,33 @@ impl Kernel {
             EventKind::UserMessage,
             json!({"text": text, "ts": crate::proto::types::now_wall_ns()}),
         );
+
+        let rg = cfg.review_gate.clone();
+        let review_plugin = cfg.review_gate_plugin.clone();
+        let mut review_rubric: Option<Value> = None;
+        let mut review_round = 0u32;
+        let mut review_approved = false;
+        let mut review_degraded = false;
+        let mut exec_temperature = if rg.enabled {
+            cfg.model = rg.exec.effective_model(&cfg.model);
+            cfg.temperature = rg.exec.temperature;
+            Some(rg.exec.temperature)
+        } else {
+            None
+        };
+        if rg.enabled {
+            match self.review_prepare(session, &cfg, &rg, &review_plugin, &text) {
+                Ok(rubric) => review_rubric = Some(rubric),
+                Err(e) => {
+                    review_degraded = true;
+                    self.emit(
+                        &session.id,
+                        EventKind::ReviewFinished,
+                        json!({"status": "degraded", "rounds": 0, "reason": e}),
+                    );
+                }
+            }
+        }
 
         // V4：向量召回写入（embed 能力可用时）
         self.index_user_text(session, &text, &cfg);
@@ -852,7 +981,8 @@ impl Kernel {
 
             // ---- 模型 ----
             *session.state.write() = SessionState::Generating;
-            let mut model_res = self.run_model(session, &cfg, &assembled.messages, None);
+            let mut model_res =
+                self.run_model(session, &cfg, &assembled.messages, exec_temperature);
             if let Err(e) = &model_res {
                 // 空响应通常是采样抖动：换一点温度重试一次，仍空则硬失败。
                 if e.contains("空响应")
@@ -928,6 +1058,87 @@ impl Kernel {
                 reply.tool_calls.clone()
             };
             if calls.is_empty() {
+                if rg.enabled && !review_degraded {
+                    if let Some(rubric) = review_rubric.clone() {
+                        match self.review_judge(
+                            session,
+                            &cfg,
+                            &rg,
+                            ReviewJudgeInput {
+                                input: &text,
+                                answer: &reply.text,
+                                rubric: &rubric,
+                            },
+                        ) {
+                            Ok(verdict) => {
+                                let pass = verdict
+                                    .get("pass")
+                                    .and_then(|x| x.as_bool())
+                                    .unwrap_or(false);
+                                let failed =
+                                    verdict.get("failed").cloned().unwrap_or_else(|| json!([]));
+                                self.emit(
+                                    &session.id,
+                                    EventKind::ReviewVerdict,
+                                    json!({
+                                        "round": review_round + 1,
+                                        "pass": pass,
+                                        "failed": failed,
+                                        "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
+                                    }),
+                                );
+                                if pass {
+                                    review_approved = true;
+                                    self.emit(
+                                        &session.id,
+                                        EventKind::ReviewFinished,
+                                        json!({"status": "approved", "rounds": review_round + 1, "failed": []}),
+                                    );
+                                    break;
+                                }
+                                if review_round < rg.max_rounds {
+                                    review_round += 1;
+                                    let next = (exec_temperature.unwrap_or(rg.exec.temperature)
+                                        + 0.15)
+                                        .min(1.5);
+                                    exec_temperature = Some(next);
+                                    let feedback = review_feedback_text(&verdict);
+                                    self.emit(
+                                        &session.id,
+                                        EventKind::ReviewFeedback,
+                                        json!({
+                                            "round": review_round,
+                                            "failed": failed,
+                                            "text": feedback,
+                                            "next_temperature": next,
+                                        }),
+                                    );
+                                    continue;
+                                }
+                                self.emit(
+                                    &session.id,
+                                    EventKind::ReviewFinished,
+                                    json!({
+                                        "status": "unapproved",
+                                        "rounds": review_round + 1,
+                                        "failed": failed,
+                                        "flag": "未经批准：已达最大重试轮次，返回最后一版",
+                                    }),
+                                );
+                                break;
+                            }
+                            Err(e) => {
+                                review_degraded = true;
+                                self.emit(
+                                    &session.id,
+                                    EventKind::ReviewFinished,
+                                    json!({"status": "degraded", "rounds": review_round + 1, "reason": e}),
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
                 break;
             }
             *session.state.write() = SessionState::ToolExecuting;
@@ -1048,7 +1259,19 @@ impl Kernel {
         self.emit(
             &session.id,
             EventKind::ChatFinished,
-            json!({"status": last_status}),
+            json!({
+                "status": last_status,
+                "review": if rg.enabled {
+                    json!({
+                        "enabled": true,
+                        "approved": review_approved,
+                        "rounds": review_round + if review_approved || !review_degraded { 1 } else { 0 },
+                        "degraded": review_degraded,
+                    })
+                } else {
+                    json!({"enabled": false})
+                },
+            }),
         );
         self.append_worklog(session, last_status);
         Ok(())
@@ -1233,6 +1456,7 @@ impl Kernel {
                     "tools": [],
                     "stream": true,
                     "base_url": cfg.base_url,
+                    "api_key": cfg.provider_api_key,
                     "temperature": 0.2,
                 }),
             )
@@ -1281,7 +1505,10 @@ impl Kernel {
         let Ok(p) = self.plugins.get(&cfg.provider_plugin) else {
             return;
         };
-        let Ok(res) = p.call("embed", json!({"text": text})) else {
+        let Ok(res) = p.call(
+            "embed",
+            json!({"text": text, "base_url": cfg.base_url, "api_key": cfg.provider_api_key}),
+        ) else {
             return;
         };
         let Some(v) = res.get("vector").and_then(|x| x.as_array()) else {
@@ -1308,6 +1535,205 @@ impl Kernel {
         }
     }
 
+    fn review_environment(&self, session: &Arc<Session>) -> String {
+        let ws = self
+            .workspace_path(&session.workspace.read())
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "(未知)".into());
+        let tools: Vec<String> = self
+            .available_tools(&session.locked_tools)
+            .iter()
+            .filter_map(|x| {
+                x.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+        format!(
+            "项目工作区: {ws}\n可用工具: {}\n平台: {} {}",
+            if tools.is_empty() {
+                "(无)".to_string()
+            } else {
+                tools.join(", ")
+            },
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+    }
+
+    fn review_model_call(
+        &self,
+        session: &Arc<Session>,
+        cfg: &Config,
+        model: &str,
+        temperature: f64,
+        messages: Value,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        let proc = self
+            .plugins
+            .get(&cfg.provider_plugin)
+            .map_err(|e| e.to_string())?;
+        let (req, rx) = proc
+            .start_stream(
+                "chat",
+                json!({
+                    "model": model,
+                    "messages": messages,
+                    "tools": [],
+                    "stream": true,
+                    "base_url": cfg.base_url,
+                    "api_key": cfg.provider_api_key,
+                    "temperature": temperature,
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+        *session.active_req.lock() = Some((cfg.provider_plugin.clone(), req));
+        let mut acc = String::new();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if session.interrupt.load(Ordering::SeqCst) != 0
+                || session.cancel.load(Ordering::SeqCst)
+            {
+                proc.cancel(req);
+                proc.finish_stream(req);
+                *session.active_req.lock() = None;
+                return Err("三段校验被用户停止".into());
+            }
+            if Instant::now() > deadline {
+                proc.cancel(req);
+                proc.finish_stream(req);
+                *session.active_req.lock() = None;
+                return Err("三段校验模型调用超时".into());
+            }
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(v) => {
+                    let p = v.get("params").cloned().unwrap_or(Value::Null);
+                    match p.get("kind").and_then(|x| x.as_str()).unwrap_or("") {
+                        "delta" => {
+                            if let Some(t) = p.get("text").and_then(|x| x.as_str()) {
+                                acc.push_str(t);
+                            }
+                        }
+                        "done" => break,
+                        "error" => {
+                            proc.finish_stream(req);
+                            *session.active_req.lock() = None;
+                            return Err(p
+                                .get("message")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("provider error")
+                                .to_string());
+                        }
+                        _ => {}
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    proc.finish_stream(req);
+                    *session.active_req.lock() = None;
+                    return Err("三段校验 provider 崩溃".into());
+                }
+            }
+        }
+        proc.finish_stream(req);
+        *session.active_req.lock() = None;
+        if acc.trim().is_empty() {
+            return Err("三段校验模型返回空响应".into());
+        }
+        Ok(acc)
+    }
+
+    fn review_prepare(
+        &self,
+        session: &Arc<Session>,
+        cfg: &Config,
+        rg: &ReviewGateConfig,
+        plugin: &str,
+        input: &str,
+    ) -> Result<Value, String> {
+        let gate = self.plugins.get(plugin).map_err(|e| e.to_string())?;
+        let prompt = gate
+            .call(
+                "review.guide",
+                json!({"input": input, "environment": self.review_environment(session)}),
+            )
+            .map_err(|e| e.to_string())?;
+        let messages = prompt
+            .get("messages")
+            .cloned()
+            .ok_or("review.guide 未返回 messages")?;
+        let model = rg.guide.effective_model(&cfg.model);
+        let raw = self.review_model_call(
+            session,
+            cfg,
+            &model,
+            rg.guide.temperature,
+            messages,
+            Duration::from_secs(180),
+        )?;
+        let parsed = gate
+            .call("review.parse_rubric", json!({"text": raw}))
+            .map_err(|e| e.to_string())?;
+        let count = parsed.get("count").and_then(|x| x.as_u64()).unwrap_or(0);
+        self.emit(
+            &session.id,
+            EventKind::ReviewGuide,
+            json!({
+                "count": count,
+                "model": model,
+                "temperature": rg.guide.temperature,
+                "tokens_approx": raw.chars().count() / 4,
+            }),
+        );
+        Ok(parsed.get("rubric").cloned().unwrap_or(json!([])))
+    }
+
+    fn review_judge(
+        &self,
+        session: &Arc<Session>,
+        cfg: &Config,
+        rg: &ReviewGateConfig,
+        req: ReviewJudgeInput<'_>,
+    ) -> Result<Value, String> {
+        let gate = self
+            .plugins
+            .get(&cfg.review_gate_plugin)
+            .map_err(|e| e.to_string())?;
+        let prompt = gate
+            .call(
+                "review.judge",
+                json!({"input": req.input, "answer": req.answer, "rubric": req.rubric}),
+            )
+            .map_err(|e| e.to_string())?;
+        let messages = prompt
+            .get("messages")
+            .cloned()
+            .ok_or("review.judge 未返回 messages")?;
+        let model = rg.judge.effective_model(&cfg.model);
+        let raw = self.review_model_call(
+            session,
+            cfg,
+            &model,
+            rg.judge.temperature,
+            messages,
+            Duration::from_secs(180),
+        )?;
+        let verdict = gate
+            .call(
+                "review.parse_verdict",
+                json!({"text": raw, "rubric": req.rubric}),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(json!({
+            "pass": verdict.get("pass").cloned().unwrap_or(json!(false)),
+            "items": verdict.get("items").cloned().unwrap_or(json!([])),
+            "failed": verdict.get("failed").cloned().unwrap_or(json!([])),
+            "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
+            "model": model,
+        }))
+    }
+
     fn run_model(
         self: &Arc<Self>,
         session: &Arc<Session>,
@@ -1326,6 +1752,7 @@ impl Kernel {
             "tools": tools,
             "stream": true,
             "base_url": cfg.base_url,
+            "api_key": cfg.provider_api_key,
             "temperature": cfg.temperature,
         });
         if let Some(t) = temperature {
@@ -1848,7 +2275,91 @@ fn validate_config(cfg: &Config, plugins: &PluginHost) -> Result<(), String> {
     if !(1..=20).contains(&cfg.search_count) {
         return Err("search_count 必须在 1–20 之间".into());
     }
+    if !cfg.review_gate_plugin.trim().is_empty()
+        && !plugins
+            .specs()
+            .iter()
+            .any(|s| s.name == cfg.review_gate_plugin)
+    {
+        return Err(format!(
+            "review-gate 插件未安装: {}",
+            cfg.review_gate_plugin
+        ));
+    }
+    let rg = &cfg.review_gate;
+    if rg.enabled {
+        if !(1..=5).contains(&rg.max_rounds) {
+            return Err("review_gate.max_rounds 必须在 1–5 之间".into());
+        }
+        if !(0.2..=2.0).contains(&rg.guide.temperature) {
+            return Err("review_gate.guide.temperature 必须在 0.2–2.0 之间".into());
+        }
+        if !(0.6..=2.0).contains(&rg.exec.temperature) {
+            return Err("review_gate.exec.temperature 必须在 0.6–2.0 之间".into());
+        }
+        if !(0.0..=0.2).contains(&rg.judge.temperature) {
+            return Err("review_gate.judge.temperature 必须在 0.0–0.2 之间".into());
+        }
+        if rg.guide.temperature > 0.5 {
+            return Err("review_gate.guide.temperature 超出允许区间 [0.2, 0.5]".into());
+        }
+        if rg.exec.temperature > 1.5 {
+            return Err("review_gate.exec.temperature 超出允许区间 [0.6, 1.5]".into());
+        }
+        if rg.on_exhausted != "return_last_with_flag" {
+            return Err("review_gate.on_exhausted 只支持 return_last_with_flag".into());
+        }
+    }
     Ok(())
+}
+
+struct ReviewJudgeInput<'a> {
+    input: &'a str,
+    answer: &'a str,
+    rubric: &'a Value,
+}
+
+fn review_feedback_text(verdict: &Value) -> String {
+    let failed = verdict
+        .get("failed")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let items = verdict
+        .get("items")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut lines =
+        vec!["上一版未通过三段校验。请只修正下列未通过项，保留已通过内容：".to_string()];
+    let mut used = 0usize;
+    for f in &failed {
+        let id = f.as_str().unwrap_or("");
+        if let Some(item) = items
+            .iter()
+            .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id))
+        {
+            let evidence = item.get("evidence").and_then(|x| x.as_str()).unwrap_or("");
+            lines.push(format!(
+                "- {id}: {}",
+                if evidence.is_empty() {
+                    "无证据（按不通过处理）"
+                } else {
+                    evidence
+                }
+            ));
+            used += 1;
+        }
+    }
+    if used == 0 {
+        if let Some(e) = verdict.get("evidence").and_then(|x| x.as_str()) {
+            if !e.trim().is_empty() {
+                lines.push(format!("- {e}"));
+            }
+        }
+    }
+    lines.push("直接给出修订后的最终答案，不要解释校验过程。".into());
+    lines.join("\n")
 }
 
 fn merge_json(base: Value, patch: Value) -> Value {

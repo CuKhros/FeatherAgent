@@ -31,6 +31,7 @@ struct SettingsState {
     provider: String,
     base_url: String,
     model: String,
+    api_key: String,
     temperature: String,
     context_window: String,
     max_turns: String,
@@ -47,7 +48,26 @@ struct SettingsState {
     detail: bool,
 }
 
-const SETTINGS_FIELDS: usize = 10;
+const SETTINGS_FIELDS: usize = 11;
+
+fn default_provider_base(provider: &str) -> &'static str {
+    match provider {
+        "provider-ollama" => "http://127.0.0.1:11434",
+        "provider-lmstudio" => "http://127.0.0.1:1234",
+        "provider-vllm" => "http://127.0.0.1:8000",
+        _ => "http://127.0.0.1:8080",
+    }
+}
+
+fn is_default_provider_base(base: &str) -> bool {
+    [
+        "http://127.0.0.1:11434",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:1234",
+        "http://127.0.0.1:8000",
+    ]
+    .contains(&base)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
@@ -432,6 +452,11 @@ impl App {
                 .unwrap_or("http://127.0.0.1:11434")
                 .to_string(),
             model,
+            api_key: cfg
+                .get("provider_api_key")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             temperature: format!(
                 "{:.2}",
                 cfg.get("temperature")
@@ -584,13 +609,18 @@ impl App {
     }
 
     fn refresh_settings_models(&mut self, prefer_first: bool) {
-        let (provider, base_url, model) = match &self.settings {
-            Some(s) => (s.provider.clone(), s.base_url.clone(), s.model.clone()),
+        let (provider, base_url, model, api_key) = match &self.settings {
+            Some(s) => (
+                s.provider.clone(),
+                s.base_url.clone(),
+                s.model.clone(),
+                s.api_key.clone(),
+            ),
             None => return,
         };
         let (models, hint) = match self.conn.client.call(
             "provider.models",
-            json!({"provider": provider, "base_url": base_url, "model": model}),
+            json!({"provider": provider, "base_url": base_url, "model": model, "api_key": api_key}),
         ) {
             Ok(v) => {
                 let models: Vec<String> = v
@@ -623,6 +653,7 @@ impl App {
             provider,
             base_url,
             model,
+            api_key,
             temperature,
             context_window,
             max_turns,
@@ -633,6 +664,7 @@ impl App {
                 s.provider.clone(),
                 s.base_url.trim().to_string(),
                 s.model.trim().to_string(),
+                s.api_key.trim().to_string(),
                 s.temperature.trim().parse::<f64>(),
                 s.context_window.trim().parse::<u64>(),
                 s.max_turns.trim().parse::<u64>(),
@@ -665,6 +697,7 @@ impl App {
             "provider_plugin": provider,
             "base_url": base_url,
             "model": model,
+            "provider_api_key": api_key,
             "temperature": temperature,
             "context_window": context_window,
             "max_turns": max_turns,
@@ -765,6 +798,16 @@ impl App {
             Some(s) => s.field,
             None => return,
         };
+        if mods.contains(KeyModifiers::CONTROL)
+            && matches!(code, KeyCode::Char('u') | KeyCode::Char('U'))
+            && field == 3
+        {
+            if let Some(s) = &mut self.settings {
+                s.api_key.clear();
+                s.status = "API Key 已清空；Ctrl+S 保存后生效".into();
+            }
+            return;
+        }
         match code {
             KeyCode::Esc => {
                 if let Some(s) = &mut self.settings {
@@ -773,7 +816,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                if field == 9 {
+                if field == 10 {
                     self.settings = None;
                 } else {
                     self.save_settings();
@@ -808,6 +851,11 @@ impl App {
                             let n = s.providers.len() as i32;
                             s.provider_idx = ((s.provider_idx as i32 + dir + n) % n) as usize;
                             s.provider = s.providers[s.provider_idx].clone();
+                            if s.base_url.trim().is_empty()
+                                || is_default_provider_base(s.base_url.trim())
+                            {
+                                s.base_url = default_provider_base(&s.provider).to_string();
+                            }
                             refresh = true;
                         }
                         2 if !s.models.is_empty() => {
@@ -815,17 +863,17 @@ impl App {
                             s.model_idx = ((s.model_idx as i32 + dir + n) % n) as usize;
                             s.model = s.models[s.model_idx].clone();
                         }
-                        3 => {
+                        4 => {
                             let v = s.temperature.parse::<f64>().unwrap_or(0.7);
                             s.temperature =
                                 format!("{:.2}", (v + dir as f64 * 0.05).clamp(0.0, 2.0));
                         }
-                        4 => {
+                        5 => {
                             let v = s.context_window.parse::<u64>().unwrap_or(8192) as i64;
                             s.context_window =
                                 (v + dir as i64 * 256).clamp(512, 131072).to_string();
                         }
-                        5 => {
+                        6 => {
                             let v = s.max_turns.parse::<i64>().unwrap_or(6);
                             s.max_turns = (v + dir as i64).clamp(1, 32).to_string();
                         }
@@ -841,10 +889,11 @@ impl App {
                     let target = match field {
                         1 => Some(&mut s.base_url),
                         2 => Some(&mut s.model),
-                        3 => Some(&mut s.temperature),
-                        4 => Some(&mut s.context_window),
-                        5 => Some(&mut s.max_turns),
-                        6 => Some(&mut s.workspace_root),
+                        3 => Some(&mut s.api_key),
+                        4 => Some(&mut s.temperature),
+                        5 => Some(&mut s.context_window),
+                        6 => Some(&mut s.max_turns),
+                        7 => Some(&mut s.workspace_root),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -852,7 +901,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(' ') if field == 7 => {
+            KeyCode::Char(' ') if field == 8 => {
                 if let Some(s) = &mut self.settings {
                     s.auto_allow_safe = !s.auto_allow_safe;
                 }
@@ -862,10 +911,11 @@ impl App {
                     let target = match field {
                         1 => Some(&mut s.base_url),
                         2 => Some(&mut s.model),
-                        3 => Some(&mut s.temperature),
-                        4 => Some(&mut s.context_window),
-                        5 => Some(&mut s.max_turns),
-                        6 => Some(&mut s.workspace_root),
+                        3 => Some(&mut s.api_key),
+                        4 => Some(&mut s.temperature),
+                        5 => Some(&mut s.context_window),
+                        6 => Some(&mut s.max_turns),
+                        7 => Some(&mut s.workspace_root),
                         _ => None,
                     };
                     if let Some(t) = target {
@@ -2085,6 +2135,16 @@ fn draw_settings(f: &mut Frame, app: &App) {
             ("Provider", s.provider.clone()),
             ("Base URL", s.base_url.clone()),
             ("Model", s.model.clone()),
+            (
+                "API Key",
+                if s.api_key.is_empty() {
+                    "(未设置；本地服务通常可留空)".into()
+                } else if s.field == 3 && !s.nav_focus {
+                    format!("已填写 {} 字符（Ctrl+U 清空）", s.api_key.chars().count())
+                } else {
+                    "••••••••".into()
+                },
+            ),
             ("Temperature", format!("{}（0.00–2.00）", s.temperature)),
             ("Context window", format!("{} tokens", s.context_window)),
             ("Max turns", s.max_turns.clone()),

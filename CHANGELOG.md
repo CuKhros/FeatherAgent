@@ -1,8 +1,8 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.0-rc.1` is the public-repository candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.1` is the current public release candidate and does not replace a stable release.
 
-## [Unreleased]
+## [1.2.1-rc.1] - 2026-11-24
 
 ### Added
 
@@ -10,12 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - TUI and WebUI are **Chinese-only**. The `--lang` switch and the English UI asset set were removed in a follow-up; the kernel stays language-neutral.
 - WebUI package documentation includes both the English test guide and the Chinese edition.
 - The Windows executable icon and the WebUI favicon now use the transparent-background feather icon. `logo-tile.png` remains the opaque tile for Apple touch icons.
+- `review-gate` loop plugin: guide → exec → judge, structured rubric/verdict, evidence-required approval, 1–5 revision rounds, review events, and WebUI settings.
+- Local provider plugins: `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, and generic `provider-openai`, all OpenAI-compatible.
+- Optional Bearer API key for all providers, including Ollama native and OpenAI-compatible paths; TUI and WebUI fields store it locally.
+
+### Fixed
+
+- R1 startup gate: warm boot now uses one install root with one discarded warm-up and five samples; cold spawn is measured separately with its own gate. This removes the Windows plugin-registration/AV spikes from the 100 ms warm line.
 
 ### Changed
 
 - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, architecture, verification report, Wire Format, Windows test guide, and v1.2.0-rc.1 change note are English by default.
 - Historical Windows retest notes remain Chinese-only and are renamed with `.zh-CN.md`.
-- No version bump: this UI-language revert stays under `1.2.0-rc.1`.
+- Bench schema now exposes `boot_mode`, `boot_samples_ms`, `boot_warmup_discarded_ms`, `cold_spawn_mode`, `cold_spawn_ms_p50`, and platform-specific cold gates. `spawn_to_socket_ms_min` remains as a compatibility alias.
 
 ## [1.2.0-rc.1] - 2026-11-23
 

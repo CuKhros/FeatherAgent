@@ -3,6 +3,15 @@
 
 (() => {
   const $ = (s) => document.querySelector(s);
+  const PROVIDER_DEFAULT_BASE = {
+    "provider-ollama": "http://127.0.0.1:11434",
+    "provider-llamacpp": "http://127.0.0.1:8080",
+    "provider-ninfer": "http://127.0.0.1:8080",
+    "provider-lmstudio": "http://127.0.0.1:1234",
+    "provider-vllm": "http://127.0.0.1:8000",
+    "provider-openai": "http://127.0.0.1:8080",
+  };
+  const DEFAULT_BASE_SET = new Set(Object.values(PROVIDER_DEFAULT_BASE));
 
   let token = "";
   {
@@ -407,6 +416,16 @@
       case "tool.error": addMessage("tool", `${p.name || "?"} 业务错误: ${p.error || ""}`); break;
       case "tool.failed": addMessage("tool", `${p.name || "?"} 插件失败: ${p.error || ""}`); break;
       case "tool.degraded": addMessage("system", `工具熔断：${p.name || "?"}（连续 ${p.failures || 3} 次技术失败）`); break;
+      case "review.guide": addMessage("system", `三段校验：已生成 ${p.count || 0} 条验收项`); break;
+      case "review.verdict":
+        addMessage("system", p.pass
+          ? `三段校验第 ${p.round || 1} 轮：通过`
+          : `三段校验第 ${p.round || 1} 轮：未通过（${(p.failed || []).join(", ")}）`);
+        break;
+      case "review.finished":
+        if (p.status === "degraded") addMessage("system", `三段校验降级：${p.reason || "无法完成"}，已返回最后一版`);
+        else if (p.status === "unapproved") addMessage("system", "三段校验未批准：已达修订上限，返回最后一版（unapproved）");
+        break;
       case "config.changed": addMessage("system", "内核配置已更新"); break;
       case "permission.denied": addMessage("system", "拒绝：" + (p.reason || "")); break;
       case "plugin.degraded": addMessage("system", "插件降级（连续失败 3 次）"); break;
@@ -477,9 +496,10 @@
     const provider = $("#cfg-provider").value;
     const baseUrl = ($("#cfg-base-url").value || "").trim();
     const model = ($("#cfg-model").value || "").trim();
+    const apiKey = ($("#cfg-provider-key")?.value || "").trim();
     $("#cfg-models-hint").textContent = "正在读取模型列表…";
     try {
-      const v = await rpc("provider.models", { provider, base_url: baseUrl, model }, 45000);
+      const v = await rpc("provider.models", { provider, base_url: baseUrl, model, api_key: apiKey }, 45000);
       cfgModels = [...new Set(Array.isArray(v.models) ? v.models : [])].sort();
       renderModelList();
       if (v.error) {
@@ -679,6 +699,7 @@
       }
       sel.value = cfg.provider_plugin || "provider-mock";
       $("#cfg-base-url").value = cfg.base_url || "http://127.0.0.1:11434";
+      $("#cfg-provider-key").value = cfg.provider_api_key || "";
       $("#cfg-model").value = cfg.model || "qwen2.5:7b";
       syncModelSelect();
       $("#cfg-temperature").value = String(cfg.temperature ?? 0.7);
@@ -690,6 +711,15 @@
       $("#cfg-search-base-url").value = cfg.search_base_url || "https://api.deepseek.com";
       $("#cfg-search-key-env").value = cfg.search_api_key_env || "DEEPSEEK_API_KEY";
       $("#cfg-search-count").value = String(cfg.search_count ?? 5);
+      const rg = cfg.review_gate || {};
+      $("#cfg-review-enabled").checked = !!rg.enabled;
+      $("#cfg-review-max-rounds").value = String(rg.max_rounds ?? 2);
+      $("#cfg-review-guide-model").value = (rg.guide && rg.guide.model) || "";
+      $("#cfg-review-guide-temp").value = String((rg.guide && rg.guide.temperature) ?? 0.3);
+      $("#cfg-review-exec-model").value = (rg.exec && rg.exec.model) || "";
+      $("#cfg-review-exec-temp").value = String((rg.exec && rg.exec.temperature) ?? 0.7);
+      $("#cfg-review-judge-model").value = (rg.judge && rg.judge.model) || "";
+      $("#cfg-review-judge-temp").value = String((rg.judge && rg.judge.temperature) ?? 0.1);
       try {
         const st = await rpc("search.status");
         if (st.provider === "local") {
@@ -744,11 +774,27 @@
       setSettingsStatus("温度必须在 0.00–2.00 之间", "err");
       return;
     }
+    const reviewEnabled = $("#cfg-review-enabled").checked;
+    const reviewRounds = Number($("#cfg-review-max-rounds").value || 2);
+    const guideTemp = Number($("#cfg-review-guide-temp").value || 0.3);
+    const execTemp = Number($("#cfg-review-exec-temp").value || 0.7);
+    const judgeTemp = Number($("#cfg-review-judge-temp").value || 0.1);
+    if (reviewEnabled) {
+      if (!Number.isInteger(reviewRounds) || reviewRounds < 1 || reviewRounds > 5) {
+        setSettingsStatus("三段校验轮次必须在 1–5 之间", "err");
+        return;
+      }
+      if (guideTemp < 0.2 || guideTemp > 0.5 || execTemp < 0.6 || execTemp > 1.5 || judgeTemp < 0 || judgeTemp > 0.2) {
+        setSettingsStatus("三段校验温度越界：guide 0.2–0.5 / exec 0.6–1.5 / judge 0.0–0.2", "err");
+        return;
+      }
+    }
     setSettingsStatus("正在提交给内核…", "warn");
     try {
       const v = await rpc("config.set", { patch: {
         provider_plugin: $("#cfg-provider").value,
         base_url: baseUrl,
+        provider_api_key: ($("#cfg-provider-key").value || "").trim(),
         model,
         temperature,
         context_window: contextWindow,
@@ -759,6 +805,14 @@
         search_base_url: ($("#cfg-search-base-url").value || "").trim(),
         search_api_key_env: ($("#cfg-search-key-env").value || "").trim(),
         search_count: Number($("#cfg-search-count").value || 5),
+        review_gate: {
+          enabled: reviewEnabled,
+          max_rounds: reviewRounds,
+          guide: { model: ($("#cfg-review-guide-model").value || "").trim(), temperature: guideTemp },
+          exec: { model: ($("#cfg-review-exec-model").value || "").trim(), temperature: execTemp },
+          judge: { model: ($("#cfg-review-judge-model").value || "").trim(), temperature: judgeTemp },
+          on_exhausted: "return_last_with_flag",
+        },
       }});
       cfg = v.config || cfg;
       setSettingsStatus("已保存并应用，下一轮推理使用新配置", "ok");
@@ -834,7 +888,14 @@
     for (const b of document.querySelectorAll(".settings-nav .nav-item[data-view]")) {
       b.onclick = () => showSettingsView(b.dataset.view);
     }
-    $("#cfg-provider").onchange = refreshModels;
+    $("#cfg-provider").onchange = () => {
+      const next = $("#cfg-provider").value;
+      const cur = ($("#cfg-base-url").value || "").trim();
+      if ((!cur || DEFAULT_BASE_SET.has(cur)) && PROVIDER_DEFAULT_BASE[next]) {
+        $("#cfg-base-url").value = PROVIDER_DEFAULT_BASE[next];
+      }
+      refreshModels();
+    };
     $("#cfg-base-url").onchange = refreshModels;
     $("#cfg-temperature").oninput = syncTemperature;
     $("#cfg-model-select").onchange = () => {

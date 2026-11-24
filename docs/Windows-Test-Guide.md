@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.0-rc.1 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.1 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.0-rc.1-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.1-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.0-rc.1 fixes TUI cancellation spelling and `web.search` numeric-string tolerance, aligns Linux/Windows version and build gates, and adds MIT licensing and public-repository materials. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.1 closes R1 by splitting warm boot from cold spawn, adds the `review-gate` three-role plugin, five OpenAI-compatible local providers, and an optional Bearer API key for Ollama and other providers. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.0-rc.1\
+D:\FeatherAgent-1.2.1-rc.1\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.0-rc.1`, then continue.
+Wait for `serve ready: 1.2.1-rc.1`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.0-rc.1
+cd D:\FeatherAgent-1.2.1-rc.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -128,24 +128,39 @@ echo "bench exit=$LASTEXITCODE"
 
 Expected: bench conflict prints "kernel already running (pid N)" and `exit=2`, not a swallowed 0.
 
+R1 checks (kernel stopped, release build):
+
+- `metrics.boot_mode` is `warm_in_process_same_install_root`; `boot_samples_ms` has 5 numbers; `boot_warmup_discarded_ms` is present.
+- `gates.boot_lt_100ms` is true for **warm** startup.
+- `metrics.cold_spawn_ms_p50` is present and `gates.cold_spawn_lt_250ms` is true. Cold spawn is real `serve` process startup, not the in-process number.
+- Run bench 3 times; the warm result should stay under 100 ms without the 130–175 ms outliers from the old gate.
+
 Q1/Q2 checks:
 
 - After `/stop`, the TUI status bar shows `cancelled` (source and binary verified; `findstr /C:"cancelled" .\featheragent-tui.exe`).
 - When the model sends `count` as `"5"`, `web.search` still returns 5 results; `tool.result.count` matches the request.
 - `web.search` schema remains `integer`; string tolerance happens only in the kernel forwarding layer and does not change the external contract.
 
+v1.2.1 additional checks:
+
+1. Settings shows `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, and `provider-openai`; changing provider fills the corresponding default base URL unless a custom URL is already present.
+2. Start a local OpenAI-compatible server (llama.cpp `--server` or NInfer). Pick the matching provider, click the model-list refresh, chat, and confirm the reply comes from the local server.
+3. Fill the optional `API Key` field; confirm the local server/proxy receives `Authorization: Bearer <key>`. Clear it and confirm the header is absent.
+4. Enable `三段校验 review-gate` with `provider-mock`; send `REVIEW_START`. Expect `review.guide`, at least one failing `review.verdict`, `review.feedback`, a second `review.verdict` that passes, and final answer `REVIEW-FINAL` with `chat.finished.review.approved=true`.
+5. Set guide/exec/judge temperatures outside 0.2–0.5 / 0.6–1.5 / 0.0–0.2; saving must be rejected.
+
 ## 7. Known boundaries
 
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.0-rc.1 did not run Wine; passing Wine does not equal passing Windows.
+- v1.2.1-rc.1 did not run Wine; passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.0-rc.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.1-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

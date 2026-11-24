@@ -464,6 +464,14 @@ fn events_to_messages(events: &[Event]) -> Vec<Message> {
                     out.push(Message::new("assistant", t));
                 }
             }
+            EventKind::ReviewFeedback => {
+                let text = e
+                    .payload
+                    .get("text")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("请修正上一版答案未通过的验收项。");
+                out.push(Message::new("system", format!("[review_feedback]\n{text}")));
+            }
             EventKind::ToolCall => {
                 let name = e
                     .payload

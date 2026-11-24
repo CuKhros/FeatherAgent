@@ -695,20 +695,22 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let size_bytes = std::fs::metadata(&exe).map(|m| m.len()).unwrap_or(0);
 
     if !json_only {
-        eprintln!("bench[2/6] 进程内启动 / RSS");
+        eprintln!("bench[2/6] 热启动（同一安装根，1 次预热 + 5 次中位） / RSS");
     }
-    // 2) 进程内启动到 socket 可连接
+    // 2) 热启动到 socket 可连接：同一安装根，先预热一次丢弃，避免把
+    // Windows 首次登记内置插件/杀毒扫描计入稳态启动。冷启动另见第 3 项。
+    let boot_dir = dir.join("boot-warm");
+    let paths = Paths::resolve(
+        &exe,
+        &Overrides {
+            install_root: Some(boot_dir.clone()),
+            ..Default::default()
+        },
+    );
     let mut boot_ms = Vec::new();
+    let mut boot_warmup_ms = 0.0;
     let mut rss_kb = 0u64;
-    for i in 0..3 {
-        let bdir = dir.join(format!("boot{i}"));
-        let paths = Paths::resolve(
-            &exe,
-            &Overrides {
-                install_root: Some(bdir.clone()),
-                ..Default::default()
-            },
-        );
+    for i in 0..6 {
         let cfg = Config::default();
         let t0 = Instant::now();
         let k = Kernel::new(paths.clone(), cfg, true)?;
@@ -725,14 +727,16 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
             })
         };
         server::wait_ready(&socket, Duration::from_secs(10)).map_err(|e| e.to_string())?;
-        boot_ms.push(t0.elapsed().as_secs_f64() * 1000.0);
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
         if i == 0 {
+            boot_warmup_ms = ms;
             rss_kb = read_rss_kb(std::process::id());
+        } else {
+            boot_ms.push(ms);
         }
         srv.stop();
         let _ = handle.join();
         k.stop();
-        let _ = std::fs::remove_dir_all(&bdir);
     }
 
     if !json_only {
@@ -866,7 +870,13 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let m = serde_json::json!({
         "binary_bytes": size_bytes,
         "binary_mb": size_bytes as f64 / 1_048_576.0,
+        "boot_mode": "warm_in_process_same_install_root",
+        "boot_warmup_discarded_ms": boot_warmup_ms,
+        "boot_samples_ms": boot_ms,
         "boot_ms_p50": percentile(&boot_ms, 0.5),
+        "cold_spawn_mode": "real_process_spawn",
+        "cold_spawn_ms_p50": percentile(&spawn_ms, 0.5),
+        "cold_spawn_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
         "spawn_to_socket_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
         "idle_rss_kb": rss_kb,
         "event_write_p50_us": percentile(&lat, 0.5),
@@ -879,11 +889,17 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let windows = cfg!(windows);
     let platform = if windows { "windows" } else { "linux" };
     let boot_limit = if windows { 100.0 } else { 20.0 };
+    let cold_spawn_limit = if windows { 250.0 } else { 100.0 };
     let write_limit = if windows { 10_000.0 } else { 100.0 };
     let boot_key = if windows {
         "boot_lt_100ms"
     } else {
         "boot_lt_20ms"
+    };
+    let cold_key = if windows {
+        "cold_spawn_lt_250ms"
+    } else {
+        "cold_spawn_lt_100ms"
     };
     let write_key = if windows {
         "write_p95_lt_10ms"
@@ -896,13 +912,20 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "rss_le_15mb": rss_kb <= 15 * 1024,
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
+        "boot_mode": "warm_in_process_same_install_root",
         "boot_limit_ms": boot_limit,
+        "cold_spawn_mode": "real_process_spawn",
+        "cold_spawn_limit_ms": cold_spawn_limit,
         "write_limit_us": write_limit,
     });
     if let Some(o) = gates.as_object_mut() {
         o.insert(
             boot_key.into(),
             serde_json::json!(percentile(&boot_ms, 0.5) < boot_limit),
+        );
+        o.insert(
+            cold_key.into(),
+            serde_json::json!(percentile(&spawn_ms, 0.5) < cold_spawn_limit),
         );
         o.insert(
             write_key.into(),
@@ -921,12 +944,15 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
             size_bytes as f64 / 1_048_576.0
         );
         println!(
-            "  进程内启动 P50   {:.2} ms   (< {:.0} ms)",
+            "  热启动 P50       {:.2} ms   (< {:.0} ms；预热 {:.2} ms 已丢弃)",
             percentile(&boot_ms, 0.5),
-            boot_limit
+            boot_limit,
+            boot_warmup_ms
         );
         println!(
-            "  spawn→socket    {:.2} ms",
+            "  冷启动 spawn P50 {:.2} ms   (< {:.0} ms；min {:.2} ms)",
+            percentile(&spawn_ms, 0.5),
+            cold_spawn_limit,
             if spawn_ms.is_empty() {
                 0.0
             } else {

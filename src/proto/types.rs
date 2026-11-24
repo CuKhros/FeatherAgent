@@ -36,6 +36,10 @@ pub enum EventKind {
     ChatFinished,
     ModelRetry,
     ContextCompacted,
+    ReviewGuide,
+    ReviewVerdict,
+    ReviewFinished,
+    ReviewFeedback,
 }
 
 impl EventKind {
@@ -66,6 +70,10 @@ impl EventKind {
             ChatFinished => 20,
             ModelRetry => 21,
             ContextCompacted => 24,
+            ReviewGuide => 25,
+            ReviewVerdict => 26,
+            ReviewFinished => 27,
+            ReviewFeedback => 28,
         }
     }
 
@@ -96,6 +104,10 @@ impl EventKind {
             20 => ChatFinished,
             21 => ModelRetry,
             24 => ContextCompacted,
+            25 => ReviewGuide,
+            26 => ReviewVerdict,
+            27 => ReviewFinished,
+            28 => ReviewFeedback,
             _ => return None,
         })
     }
@@ -127,6 +139,10 @@ impl EventKind {
             ChatFinished => "chat.finished",
             ModelRetry => "model.retry",
             ContextCompacted => "context.compacted",
+            ReviewGuide => "review.guide",
+            ReviewVerdict => "review.verdict",
+            ReviewFinished => "review.finished",
+            ReviewFeedback => "review.feedback",
         }
     }
 
@@ -158,6 +174,10 @@ impl EventKind {
             "chat.finished" => ChatFinished,
             "model.retry" => ModelRetry,
             "context.compacted" => ContextCompacted,
+            "review.guide" => ReviewGuide,
+            "review.verdict" => ReviewVerdict,
+            "review.finished" => ReviewFinished,
+            "review.feedback" => ReviewFeedback,
             _ => return None,
         })
     }
@@ -187,6 +207,10 @@ impl EventKind {
         Self::ChatFinished,
         Self::ModelRetry,
         Self::ContextCompacted,
+        Self::ReviewGuide,
+        Self::ReviewVerdict,
+        Self::ReviewFinished,
+        Self::ReviewFeedback,
     ];
 }
 

@@ -745,7 +745,20 @@ fn dispatch(
                     json!({"provider": provider, "models": [], "error": "provider 插件未安装"}),
                 );
             };
-            match p.call("probe", json!({"base_url": base_url, "model": model})) {
+            let api_key = params
+                .get("api_key")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    cfg.get("provider_api_key")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_default();
+            match p.call(
+                "probe",
+                json!({"base_url": base_url, "model": model, "api_key": api_key}),
+            ) {
                 Ok(v) => {
                     let mut models: Vec<String> = Vec::new();
                     for m in v

@@ -1,8 +1,8 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.0-rc.1` 是公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.1` 是当前公开仓库候选版，尚未替代稳定版。
 
-## [Unreleased]
+## [1.2.1-rc.1] - 2026-11-24
 
 ### Added
 
@@ -10,12 +10,19 @@
 - TUI 与 WebUI 只保留中文界面；已移除 `--lang` 切换与英文界面资源，内核保持语言无关。
 - Windows 包同时包含英文测试指南与中文版 `START-HERE.zh-CN.md`。
 - Windows 可执行文件图标与 WebUI favicon 改用透明底羽毛图标；`logo-tile.png` 仍作为 Apple touch icon 的不透明底图。
+- `review-gate` 循环插件：guide → exec → judge，结构化验收清单/审批结果、必须有 evidence 才通过、1–5 轮修订、review 事件与 WebUI 设置。
+- 本地 provider 插件：`provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm` 与通用 `provider-openai`，均走 OpenAI 兼容协议。
+- 所有 provider 支持可选 Bearer Key，含 Ollama 原生与 OpenAI 兼容路径；TUI/WebUI 可填写，仅存本机。
+
+### Fixed
+
+- R1 启动门禁：热启动改为同一安装根、预热 1 次丢弃、再取 5 次中位；真实 spawn 冷启动单独计量并单设门禁。Windows 插件登记/杀毒尖峰不再干扰 100 ms 热启动线。
 
 ### Changed
 
 - `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、架构设计、验证报告、Wire Format、Windows 测试指南与 v1.2.0-rc.1 变更说明默认英文。
 - 历史 Windows 复测记录仅保留中文，文件名统一加 `.zh-CN.md`。
-- 本次界面回退不推进版本号，仍为 `1.2.0-rc.1`。
+- bench 字段新增 `boot_mode`、`boot_samples_ms`、`boot_warmup_discarded_ms`、`cold_spawn_mode`、`cold_spawn_ms_p50` 与分平台冷启动门禁；`spawn_to_socket_ms_min` 保留为兼容别名。
 
 ## [1.2.0-rc.1] - 2026-11-23
 

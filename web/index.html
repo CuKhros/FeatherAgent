@@ -86,6 +86,10 @@
               <label>Base URL
                 <input id="cfg-base-url" placeholder="http://127.0.0.1:11434" autocomplete="off">
               </label>
+              <label>API Key（可选）
+                <input id="cfg-provider-key" type="password" placeholder="留空则不发送 Authorization" autocomplete="off">
+                <span class="form-hint">仅保存在本机 config.json，只发给当前 provider；Ollama / llama.cpp / NInfer 通常留空。</span>
+              </label>
             </div>
           </div>
 
@@ -103,6 +107,37 @@
                 <input id="cfg-temperature" type="range" min="0" max="2" step="0.05" value="0.7">
               </label>
             </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">三段校验 review-gate（可选）</div>
+            <label class="check-row">
+              <input id="cfg-review-enabled" type="checkbox"> 启用 guide → exec → judge（默认关闭）
+            </label>
+            <div class="settings-grid">
+              <label>最大修订轮次（1–5）
+                <input id="cfg-review-max-rounds" type="number" min="1" max="5" step="1" value="2">
+              </label>
+              <label>Guide 模型（留空跟随当前）
+                <input id="cfg-review-guide-model" placeholder="留空 = 当前模型" autocomplete="off">
+              </label>
+              <label>Guide 温度（0.2–0.5）
+                <input id="cfg-review-guide-temp" type="number" min="0.2" max="0.5" step="0.05" value="0.3">
+              </label>
+              <label>Exec 模型（留空跟随当前）
+                <input id="cfg-review-exec-model" placeholder="留空 = 当前模型" autocomplete="off">
+              </label>
+              <label>Exec 温度（0.6–1.5）
+                <input id="cfg-review-exec-temp" type="number" min="0.6" max="1.5" step="0.05" value="0.7">
+              </label>
+              <label>Judge 模型（留空跟随当前）
+                <input id="cfg-review-judge-model" placeholder="留空 = 当前模型" autocomplete="off">
+              </label>
+              <label>Judge 温度（0.0–0.2）
+                <input id="cfg-review-judge-temp" type="number" min="0" max="0.2" step="0.01" value="0.1">
+              </label>
+            </div>
+            <span class="form-hint">Guide 只出验收清单，Exec 看不到清单；Judge 逐条核对，evidence 为空算不通过。未通过时带证据重答，达到轮次上限返回最后一版并标记 unapproved。</span>
           </div>
 
           <div class="settings-section">

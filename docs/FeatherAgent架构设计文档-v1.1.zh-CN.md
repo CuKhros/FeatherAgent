@@ -56,7 +56,7 @@ dsh（MIT、Cordis 内核、`@deepseek-ai/dsh`）已覆盖插件化、轨迹追�
 | 维度 | dsh | FeatherAgent |
 |---|---|---|
 | 运行时 | 需 Node.js | **零依赖单二进制**（无 Node / 无 Python / 无 JVM） |
-| 内核体积/启动 | Node 基线 ~50 MB / 数百 ms | **≤ 8 MB / < 20 ms 冷启动** |
+| 内核体积/启动 | Node 基线 ~50 MB / 数百 ms | **≤ 8 MB / < 20 ms 热启动** |
 | 优化重心 | 通用 Harness | **1B~14B 专用**上下文工程 |
 
 **互操作三条路径**（非各玩各的）：
@@ -185,7 +185,7 @@ Go 保留为**可回退项**（§2.5 的可逆性设计使其代价可控）。
 | 指标 | v1.0 目标 | **v1.1 目标** | 手段 |
 |---|---|---|---|
 | 内核二进制 | ~30 MB | **≤ 8 MB** | §2.3 体积手法 |
-| 冷启动到可用 | 未定义 | **< 20 ms** | 无 SQLite 初始化、无 GC 预热、mmap 懒加载 |
+| 热启动到可用 | 未定义 | **< 20 ms** | 无 SQLite 初始化、无 GC 预热、mmap 懒加载；真实 spawn 冷启动单独计量 |
 | 空闲 RSS | 未定义 | **≤ 15 MB** | 无 DB 缓冲池、arena 分配 |
 | 事件写入（不含 fsync） | P95 < 5 ms | **P95 < 100 µs** | 追加写 + 组提交（§3.1） |
 | 事件分发（单跳） | P95 < 1 ms | **P50 < 50 µs / P95 < 200 µs** | 单写多读无锁队列（§3.2） |
@@ -582,14 +582,14 @@ plugin.list / enable / disable / install
 | 指标 | 门禁 |
 |---|---|
 | 二进制体积 | ≤ 8 MB（>10 MB 失败） |
-| 冷启动 | < 20 ms |
+| 热启动 | < 20 ms |
 | 空闲 RSS | ≤ 15 MB |
 | 事件写入 P95 | < 100 µs |
 | 上下文组装 P95 | < 30 ms |
 
 > 全部用 `criterion` 基准 + 固定硬件 runner，回归 >10% 即失败。
 
-> **Windows 例外（v1.1.4 起）**：NTFS `FlushFileBuffers` + 实时防护使事件写入天然慢一个数量级，Windows 门禁为启动 P50 **< 100 ms**、事件写 P95 **< 10 ms**；Linux 仍为 20 ms / 100 µs。`bench --json` 返回 `platform` 与对应限值，不把 Windows 固定标红。
+> **启动口径（v1.2.1 起）**：`boot_ms_p50` 是**热启动**——同一安装根、预热 1 次丢弃、再取 5 次中位；`cold_spawn_ms_p50` 是真实 spawn `serve` 子进程到 socket 的**冷启动**，单独设限。Windows 热启动 P50 **< 100 ms**、冷 spawn P50 **< 250 ms**、事件写 P95 **< 10 ms**；Linux 分别为 20 ms、100 ms、100 µs。`bench --json` 返回 `platform`、`boot_mode`、`cold_spawn_mode` 与对应限值，不把 Windows 固定标红。
 
 ---
 
@@ -784,7 +784,7 @@ storage 插件（SQLite+FTS+向量三层）→ tool 系列 → MCP 双向 → �
 | GUI 形态 | Wails + WebView2 | **Web + 浏览器 `--app`**（原生壳可选） |
 | 分发产物 | 1 个（内核+GUI） | **3 个**（core / gui / plugins） |
 | 路线图 | 6 个月估算 | **阶段 + 门禁，无工期** |
-| 冷启动 | 未定义 | **< 20 ms** |
+| 热启动 | 未定义 | **< 20 ms** |
 | 事件写入 P95 | < 5 ms | **< 100 µs** |
 
 ## 附录 B：参考资料

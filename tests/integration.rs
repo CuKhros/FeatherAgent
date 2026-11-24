@@ -5,7 +5,10 @@
 //! - Phase 2：100 轮长会话预算稳定（demo 用 mock provider，S3 真实模型数字另测）
 //! - Phase 3：工具执行、协作式权限门、取消传播、fork/replay、存储索引
 
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -163,6 +166,245 @@ fn last_model_text(seen: &[Value]) -> String {
         })
         .next_back()
         .unwrap_or_default()
+}
+
+struct MockOpenAi {
+    base: String,
+    requests: Arc<std::sync::Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl MockOpenAi {
+    fn new() -> Self {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        l.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let reqs = requests.clone();
+        let stop2 = stop.clone();
+        let handle = thread::spawn(move || {
+            while !stop2.load(Ordering::SeqCst) {
+                match l.accept() {
+                    Ok((mut s, _)) => {
+                        s.set_read_timeout(Some(Duration::from_secs(2))).ok();
+                        let (head, body) = read_http_request(&mut s);
+                        reqs.lock().unwrap().push(format!("{head}\n{body}"));
+                        let path = head.split_whitespace().nth(1).unwrap_or("");
+                        let (ty, resp) = if path.starts_with("/v1/models") {
+                            (
+                                "application/json",
+                                "{\"data\":[{\"id\":\"local-test\"}]}".to_string(),
+                            )
+                        } else if path.starts_with("/v1/embeddings") {
+                            (
+                                "application/json",
+                                "{\"data\":[{\"embedding\":[1.0,0.0]}]}".to_string(),
+                            )
+                        } else if path.starts_with("/api/chat") {
+                            (
+                                "application/x-ndjson",
+                                "{\"message\":{\"content\":\"OLLAMA-OK\"},\"done\":true}\n"
+                                    .to_string(),
+                            )
+                        } else if path.starts_with("/api/embed") {
+                            (
+                                "application/json",
+                                "{\"embeddings\":[[1.0,0.0]]}".to_string(),
+                            )
+                        } else if path.starts_with("/api/tags") {
+                            (
+                                "application/json",
+                                "{\"models\":[{\"name\":\"local-test\"}]}".to_string(),
+                            )
+                        } else {
+                            (
+                                "text/event-stream",
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"LOCAL-OK\"}}]}\n\ndata: [DONE]\n\n".to_string(),
+                            )
+                        };
+                        let (headers, body) = if path.starts_with("/api/chat") {
+                            (
+                                "Transfer-Encoding: chunked".to_string(),
+                                format!("{:x}\r\n{}\r\n0\r\n\r\n", resp.len(), resp),
+                            )
+                        } else {
+                            (format!("Content-Length: {}", resp.len()), resp)
+                        };
+                        let out = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\n{headers}\r\nConnection: close\r\n\r\n{body}"
+                        );
+                        let _ = s.write_all(out.as_bytes());
+                        let _ = s.flush();
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            base,
+            requests,
+            stop,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for MockOpenAi {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+fn read_http_request(s: &mut std::net::TcpStream) -> (String, String) {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    loop {
+        let n = s.read(&mut tmp).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let pos = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..pos]).to_string();
+    let mut body = if pos + 4 <= buf.len() {
+        buf[pos + 4..].to_vec()
+    } else {
+        Vec::new()
+    };
+    let len = head
+        .lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            if k.eq_ignore_ascii_case("content-length") {
+                v.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    while body.len() < len {
+        let n = s.read(&mut tmp).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&tmp[..n]);
+    }
+    (head, String::from_utf8_lossy(&body).to_string())
+}
+
+#[test]
+fn llama_cpp_and_ninfer_openai_chat_use_api_key() {
+    for provider in ["provider-llamacpp", "provider-ninfer"] {
+        let mock = MockOpenAi::new();
+        let base = mock.base.clone();
+        let (_h, conn) = start(provider, move |cfg| {
+            cfg.provider_plugin = provider.to_string();
+            cfg.base_url = base;
+            cfg.provider_api_key = "sk-local-test".into();
+            cfg.max_turns = 2;
+        });
+        conn.client
+            .call("session.create", json!({"id": "slocal"}))
+            .unwrap();
+        let seen = send_and_wait(&conn, "slocal", "hello local", Duration::from_secs(20));
+        assert_eq!(last_model_text(&seen), "LOCAL-OK", "{provider}");
+        let reqs = mock.requests.lock().unwrap();
+        assert!(
+            reqs.iter()
+                .any(|r| r.starts_with("POST /v1/chat/completions ")
+                    && r.to_ascii_lowercase()
+                        .contains("authorization: bearer sk-local-test")),
+            "{provider} 未带 Key 调用 /v1/chat/completions: {:?}",
+            reqs.iter().take(2).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn ollama_native_chat_uses_api_key() {
+    let mock = MockOpenAi::new();
+    let base = mock.base.clone();
+    let (_h, conn) = start("ollamakey", move |cfg| {
+        cfg.provider_plugin = "provider-ollama".into();
+        cfg.base_url = base;
+        cfg.provider_api_key = "sk-ollama".into();
+        cfg.max_turns = 2;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sollamakey"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "sollamakey", "hello ollama", Duration::from_secs(20));
+    assert_eq!(last_model_text(&seen), "OLLAMA-OK");
+    let reqs = mock.requests.lock().unwrap();
+    assert!(
+        reqs.iter().any(|r| r.starts_with("POST /api/chat ")
+            && r.to_ascii_lowercase()
+                .contains("authorization: bearer sk-ollama")),
+        "Ollama native 未带 Key: {:?}",
+        reqs.iter().take(2).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn review_gate_three_roles_retry_and_approve() {
+    let (_h, conn) = start("review", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+        cfg.review_gate.guide.temperature = 0.3;
+        cfg.review_gate.exec.temperature = 0.7;
+        cfg.review_gate.judge.temperature = 0.1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sreview"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "sreview", "REVIEW_START", Duration::from_secs(20));
+    assert_eq!(last_model_text(&seen), "REVIEW-FINAL");
+    let kinds: Vec<&str> = seen
+        .iter()
+        .filter_map(|v| v.pointer("/params/kind").and_then(|k| k.as_str()))
+        .collect();
+    assert!(
+        kinds.contains(&"review.guide"),
+        "缺少 review.guide: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"review.verdict"),
+        "缺少 review.verdict: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"review.feedback"),
+        "缺少 review.feedback: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"review.finished"),
+        "缺少 review.finished: {kinds:?}"
+    );
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("chat.finished"))
+        .unwrap();
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/approved")
+            .and_then(|x| x.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/rounds")
+            .and_then(|x| x.as_u64()),
+        Some(2)
+    );
 }
 
 #[test]

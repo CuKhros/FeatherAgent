@@ -1,8 +1,24 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.0-rc.1)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.1)
 
-> Date: 2026-11-23 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.0-rc.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
+
+## v1.2.1-rc.1 summary (current candidate)
+
+This round closes R1 from the v1.2.0-rc.1 real-hardware retest and adds two requested capabilities: the `review-gate` three-role loop plugin and OpenAI-compatible local providers with an Ollama API key.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| R1 | Warm boot = same install root, one discarded warm-up, five samples; cold `serve` spawn measured separately with its own budget; new `cold_spawn_ms_p50` | Three release benches: warm 1.23–1.26 ms, cold 4.2–5.6 ms, all gates true |
+| `review-gate` | New loop plugin with guide → exec → judge, structured rubric/verdict, evidence required, 1–5 revisions, review events, WebUI settings | Plugin parser tests; integration retry/fail/pass with `provider-mock`; exact event sequence |
+| Local providers | `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, `provider-openai`; OpenAI `/v1` normalization | NInfer probe + llama.cpp/NInfer streaming tests |
+| API key | `provider_api_key` in config, TUI/WebUI field, `Authorization: Bearer` on native Ollama and OpenAI paths | HTTP header unit test + Ollama `/api/chat` integration + NInfer/llama.cpp chat integration |
+| Version | `1.2.1-rc.1` across Cargo, lock, 11 plugin manifests, WebUI placeholder | `scripts/version-check.sh` |
+
+Linux passes **95/95** (58 lib, 7 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 20 integration); the one network-dependent `local_web_search_tool_via_kernel` passes separately. `fmt` and `clippy -D warnings` pass. The release kernel is 2,406,664 B (2.295 MiB); idle RSS 3,456 KiB; `binary_le_8mb`, `rss_le_15mb`, `assemble_p95_lt_30ms`, `rpc_p95_lt_1ms`, warm and cold gates all pass.
+
+Not verified: v1.2.1-rc.1 Windows real hardware (R1 warm/cold, review-gate UI/events, provider key fields, local provider chat), TUI PTY regression for the new API-key field, two-turn in-turn steer, full two-turn `/compact`, real DeepSeek billing, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64.
 
 ## v1.2.0-rc.1 summary (public-repository candidate)
 
@@ -128,11 +144,11 @@ NEW-K fixed; TUI session/chat modes, CJK cursor alignment, external workspace, p
 
 ## 3. Test matrix
 
-### 3.1 Unit tests (57 in v1.2)
+### 3.1 Unit tests (58 in v1.2.1)
 
-`cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net, util.
+`cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net (Bearer headers), util, provider HTTP/Ollama JSON and review-gate parsers.
 
-### 3.2 Integration tests (17, `tests/integration.rs`)
+### 3.2 Integration tests (20, `tests/integration.rs`)
 
 Real kernel + plugin subprocesses over UDS:
 
@@ -150,6 +166,10 @@ Real kernel + plugin subprocesses over UDS:
 | `wasm_and_log_unit_paths_smoke` | `system.info` version/contract/gate mode |
 | `s2_thousand_truncations` | 1000 random truncations |
 | plus project workspace, worklog, stop/steer/compact, Windows path validation, `ContextCompacted` codec | v1.1.6–v1.1.9 additions |
+| `review_gate_three_roles_retry_and_approve` | guide → failing judge → feedback → retry → passing judge; four review events and final `approved=true` |
+| `llama_cpp_and_ninfer_openai_chat_use_api_key` | both providers probe `/v1/models`, stream chat, send Bearer |
+| `ollama_native_chat_uses_api_key` | native `/api/chat` with `Authorization: Bearer` over chunked NDJSON |
+| `ninfer_probe_uses_v1_and_bearer_key` | base URL without `/v1` is normalized; probe carries the key |
 
 ### 3.3 Golden trace
 
@@ -161,17 +181,17 @@ Real kernel + plugin subprocesses over UDS:
 
 Command: `./target/release/featheragent bench --json`
 
-| Metric | Gate | Measured | Result |
+| Metric | Gate (Linux) | v1.2.1-rc.1 measured (3 runs) | Result |
 |---|---|---|---|
-| Kernel binary | ≤ 8 MiB | **972,760 B (0.93 MiB)** at v1.1.1; current release still under 8 MiB | ✅ |
-| Cold start (in-process → socket connectable) P50 | < 20 ms | **1.34 ms** | ✅ |
-| Spawn → socket minimum | reference | **3.00 ms** | — |
-| Idle RSS | ≤ 15 MiB | **2,688 KiB (2.63 MiB)** | ✅ |
-| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.54 / 3.40 µs** | ✅ |
-| Context assembly P95 (no summary model) | < 30 ms | **0.122 ms** | ✅ |
-| RPC round-trip P95 | < 1 ms | **0.047 ms** | ✅ |
+| Kernel binary | ≤ 8 MiB | **2,406,664 B (2.295 MiB)** | ✅ |
+| Warm boot P50 (`boot_ms_p50`) | < 20 ms | **1.228 / 1.246 / 1.259 ms** | ✅ |
+| Cold spawn P50 (`cold_spawn_ms_p50`) | < 100 ms | **5.575 / 4.437 / 4.234 ms** | ✅ |
+| Idle RSS | ≤ 15 MiB | **3,456 KiB (3.375 MiB)** | ✅ |
+| Event write P50 / P95 (no fsync) | P95 < 100 µs | **2.604 / 2.985 µs** (run 3) | ✅ |
+| Context assembly P95 (no summary model) | < 30 ms | **0.134 ms** (run 3) | ✅ |
+| RPC round-trip P95 | < 1 ms | **0.046 ms** (run 3) | ✅ |
 
-> Event dispatch P95 < 200 µs has no standalone number; the bus and write share the in-process path, so no independent benchmark exists. No speculative value is filled in.
+> Warm boot uses the same install root, one discarded warm-up, then five samples; cold spawn is a real `serve` child process measured to socket readiness. Event dispatch P95 < 200 µs has no standalone number; the bus and write share the in-process path, so no independent benchmark exists.
 
 ### 4.1 Windows x64 cross-compile and Wine smoke
 
@@ -216,7 +236,16 @@ Security checks:
 
 ### 6.3 Packages
 
-`scripts/package.sh --skip-build` produces three artifacts and asserts kernel ≤ 8 MiB. Current v1.2.0-rc.1 hashes are recorded in the release manifest and adjacent `.sha256` files.
+`scripts/package.sh --skip-build` produces three Linux artifacts and asserts kernel ≤ 8 MiB. Windows x64 is a separate PE zip.
+
+| Artifact | Content |
+|---|---|
+| `featheragent-core-1.2.1-rc.1-linux-x64.tar.gz` | kernel, TUI, WebUI launcher, `feather-plugin`, `feather-storage`, 11 plugin manifests, docs, README |
+| `featheragent-webui-1.2.1-rc.1-linux-x64.tar.gz` | WebUI launcher, `web/`, favicon, docs |
+| `featheragent-plugins-1.2.1-rc.1-linux-x64.tar.gz` | 11 plugin manifests |
+| `FeatherAgent-1.2.1-rc.1-windows-x64.zip` | five PE exes, 11 plugin manifests, docs, icon; kernel exe 2,173,440 B |
+
+The adjacent `.sha256` files and GitHub Release assets carry the final hashes; they are generated after the documentation freeze, so they are not duplicated here. The release kernel is 2,406,664 B (2.295 MiB); `sha256sum -c` and `unzip -t` pass before upload.
 
 ## 7. Real defects found and fixed
 
