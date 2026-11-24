@@ -2,7 +2,7 @@
 name = "featheragent"
 version = "1.2.1-rc.3.1"
 edition = "2021"
-description = "FeatherAgent（轻羽）：让其他 Agent 把重复繁琐的工作外包给 1B~14B 本地小模型的上下文引擎 + 极轻量可移植 Agent 内核"
+description = "FeatherAgent（轻羽）：把机械重复的步骤交给同机 1B~14B 小模型执行——上下文引擎 + 极轻量可移植 Agent 内核，供上层 Agent 调度"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/CuKhros/FeatherAgent"

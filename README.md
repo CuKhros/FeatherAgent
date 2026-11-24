@@ -5,7 +5,7 @@
 
 A context engine for **1B–14B local models**, plus a **tiny, zero-runtime-dependency** portable agent kernel.
 
-**Why it exists:** so that other agents can outsource repetitive, tedious work to a local small model. A larger orchestrator hands the boring, high-volume, low-risk steps to a 1B–14B model running on the same machine — no cloud round trip, no per-token bill, no context the big model has to carry.
+**Why it exists:** to take the repetitive, mechanical parts of an agent's work off the orchestrator's hands. The orchestrator keeps the steps that need judgment and hands the high-volume, low-risk chores to a 1B–14B model on the same machine — no cloud round trip, no per-token bill, no context the frontier model has to carry.
 
 > English is the primary documentation language. Chinese editions use the `.zh-CN.md` suffix, e.g. [README.zh-CN.md](README.zh-CN.md).
 
