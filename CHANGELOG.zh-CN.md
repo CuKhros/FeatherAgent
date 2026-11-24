@@ -1,6 +1,16 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.1` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.2` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.2] - 2026-11-24
+
+### 修复
+- J1：`min_points` 不再单独判死一轮。`count_points` 增加中文分号分段、加粗小标题与空行段落识别（取最大值，上限 12）；计数不足改为软判据，引擎打 `review.warn` 并把机器计数提示交给 judge，由 judge 按答案原文裁决。
+- J2：review feedback 不再用裸 `c1:` 前缀（exec 会把它抄进答案）。改为 `〔1〕`/`〔2〕` 自然序号，并明确禁止把序号或 `c1/c2` 编号写进答案。
+- `featheragent-tui version` / `featheragent-webui version` 改为打印 `FeatherAgent TUI` / `FeatherAgent WebUI`（二进制名不变）。
+
+### 新增
+- `bench --json` 的 `metrics.env` 增加环境指纹：采集时间、CPU 数、负载、总/可用内存与 uptime（平台支持时），人类可读输出加一行。门禁阈值不变。
 
 ## [1.2.1-rc.3.1] - 2026-11-24
 

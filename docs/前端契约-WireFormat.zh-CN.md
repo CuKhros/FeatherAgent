@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.3.1**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.3.2**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.1","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.2","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -337,6 +337,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 ```
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.3.2：没有新增消息或字段。`review.hardcheck`（插件内部，不是 wire）对 `min_points` 不足改为返回 `soft` 数组；引擎打 `review.warn`（`text` 以“min_points 机器计数不足，交 judge 复核”开头），并给 judge 输入追加机器计数提示，由 judge 按答案裁决，不再硬拒绝。`review.feedback.text` 改用 `〔1〕`/`〔2〕` 标注未通过项，不再出现裸 `c1:`；事件 payload（`round`/`failed`/`text`/`next_temperature`）不变。
 - 1.2.1-rc.3.1：`review.guide`（25）、`review.verdict`（26）、`review.finished`（27）、`review.feedback`（28）之后新增 `review.warn`（29，payload `{text, model, attempts, retry?}`）。warn 只表示“用较弱判据评估”或“这次判据被拒并重试”，不表示门禁失败；只有描述项判据会走 judge-only 并告警，完全产不出判据仍以 `degraded` 收尾。`review.guide` payload 的 `attempts` 标明是第几次产出的判据；`review.guide` 插件调用新增可选 `feedback` 参数，用于回注上一轮校验错误。
 - 1.2.1-rc.2.1：review-gate 启用且回合正常结束时，`chat.finished.status` 为 `ok`（approved）、`unapproved`（达到轮次上限仍未通过）或 `degraded`（guide/judge 连续两次失败）。payload 的 `review.status` 同步为 `approved|unapproved|degraded`；`review.verdict.items[]` 除 `evidence` 外新增 `criterion` 与 `check`。客户端不得再假设 `ok` 一定代表“已评审通过”。
 

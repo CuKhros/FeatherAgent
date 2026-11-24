@@ -502,6 +502,40 @@ fn review_gate_reinjects_schema_error_and_falls_back_to_judge_only() {
 }
 
 #[test]
+fn review_gate_min_points_soft_falls_back_to_judge() {
+    let (_h, conn) = start("review-minpoints", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "smp"}))
+        .unwrap();
+    // 答案命中 must_include，但只有一段：机器计数 1/2，min_points 必须降级给 judge 而不是判死。
+    let seen = send_and_wait(&conn, "smp", "REVIEW_MINPOINTS", Duration::from_secs(20));
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("min_points 机器计数不足"))
+                    .unwrap_or(false)
+        }),
+        "min_points 不足应留下 review.warn: {seen:?}"
+    );
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.finished"))
+        .expect("应有 review.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "judge 复核通过后应 approved: {finished:?}"
+    );
+}
+
+#[test]
 fn review_gate_three_roles_retry_and_approve() {
     let (_h, conn) = start("review", |cfg| {
         cfg.review_gate.enabled = true;

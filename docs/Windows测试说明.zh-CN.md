@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.1 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.2 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.1-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.2-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.1 先修 rc.3 真机暴露的“真实 7B guide 全量 degraded”：guide 现在拿到明确的 JSON schema，校验错误会回注进重试，只有描述项的判据改为 judge-only 评估并打 `review.warn`，不再整轮降级。插件设置新增由 `provider.models` 填充的模型下拉（仍可手动输入），TUI 插件页任意字段 Enter 保存，两端权限申请显示完整命令，产品显示名统一为 **FeatherAgent**（二进制与路径不变）。rc.3 把插件设置改成声明式——插件在 `plugin.json` 里写清 schema，内核通过 `plugin.settings` 原样转述，TUI 与 WebUI 通用渲染，装新插件不用改前端。同时修掉 rc.2.1 复测的 H1–H4：判据为 2–5 条短语（`must_include` ≤20 字、至少一条非子串判据）、judge 前硬校验覆盖字面/禁词/要点数/glob、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”、S3 t5/t6 强制只调用一次工具。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.2 修 rc.3.1 复测的 J1–J3：`min_points` 改为软判据交 judge 复核（同时放宽中文要点计数并打 `review.warn`），review feedback 不再用会被抄进答案的裸 `c1:`，`bench --json` 增加 `metrics.env` 环境指纹。它也延续 v1.2.1-rc.3.1 的修复：rc.3 真机暴露的“真实 7B guide 全量 degraded”：guide 现在拿到明确的 JSON schema，校验错误会回注进重试，只有描述项的判据改为 judge-only 评估并打 `review.warn`，不再整轮降级。插件设置新增由 `provider.models` 填充的模型下拉（仍可手动输入），TUI 插件页任意字段 Enter 保存，两端权限申请显示完整命令，产品显示名统一为 **FeatherAgent**（二进制与路径不变）。rc.3 把插件设置改成声明式——插件在 `plugin.json` 里写清 schema，内核通过 `plugin.settings` 原样转述，TUI 与 WebUI 通用渲染，装新插件不用改前端。同时修掉 rc.2.1 复测的 H1–H4：判据为 2–5 条短语（`must_include` ≤20 字、至少一条非子串判据）、judge 前硬校验覆盖字面/禁词/要点数/glob、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”、S3 t5/t6 强制只调用一次工具。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.1\
+D:\FeatherAgent-1.2.1-rc.3.2\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3.1\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.1` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.2` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.1
+cd D:\FeatherAgent-1.2.1-rc.3.2
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -174,6 +174,13 @@ v1.2.1-rc.3.1 回归核对：
 6. **S3 t6 只调一次。** 跑 `tools/s3_batch.py`：t6 必须只调一次读工具，随后解释失败，不得再补 `tool.shell` / `tool.ping`。
 7. **H3 可构造入口。** 不需要模型配合：用 `provider-mock` 执行 `featheragent chat --text 'TOOL:{"name":"tool.fs","arguments":{"path":"a.txt"}}'`，应得到含 `未知工具 tool.fs` 与可用清单的 `tool.error`。
 
+v1.2.1-rc.3.2 回归核对：
+
+1. **J1：`min_points` 变软。** 用 7B guide 让 exec 输出结构化答案，把三个要点写成一段里用 `；` 分隔，或用 `**加粗小标题**`。回合不得再以“只有 1 个要点”硬拒绝；若机器计数仍不足，必须出现 `review.warn`“min_points 机器计数不足，交 judge 复核”，由 judge 按答案实际内容裁决。
+2. **J2：答案里不再出现 rubric 编号。** 构造一次失败（例如判据 `min_points:2`、答案只有一行）：`review.feedback.text` 必须用 `〔1〕` 序号，不能出现 `- c1:`；修订后的答案不得带 `c1/c2/c3` 小标题。
+3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
+4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
+
 v1.2.1 追加核对：
 
 1. 设置页应出现 `provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、`provider-openai`；切换 provider 时，如果 Base URL 为空或仍是某个默认值，应自动填对应默认端口。
@@ -187,13 +194,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.1 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.1 与 v1.2.1-rc.3.2 均未跑 Wine；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.2-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

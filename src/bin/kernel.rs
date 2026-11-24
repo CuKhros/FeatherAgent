@@ -896,9 +896,11 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     k.stop();
     let _ = std::fs::remove_dir_all(&dir);
 
+    let fingerprint = env_fingerprint();
     let m = serde_json::json!({
         "binary_bytes": size_bytes,
         "binary_mb": size_bytes as f64 / 1_048_576.0,
+        "env": fingerprint.clone(),
         "boot_mode": "warm_in_process_same_install_root",
         "boot_warmup_discarded_ms": boot_warmup_ms,
         "boot_samples_ms": boot_ms,
@@ -968,6 +970,24 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         );
     } else {
         println!("FeatherAgent 内核实测（{}）", featheragent::VERSION);
+        let load1 = fingerprint
+            .get("loadavg_1m")
+            .and_then(|x| x.as_f64())
+            .map(|x| format!("{x:.2}"))
+            .unwrap_or_else(|| "n/a".into());
+        let avail = fingerprint
+            .get("mem_available_kb")
+            .and_then(|x| x.as_u64())
+            .map(|x| format!("{:.0} MiB", x as f64 / 1024.0))
+            .unwrap_or_else(|| "n/a".into());
+        let cpu = fingerprint
+            .get("cpu_count")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        println!(
+            "  环境指纹        cpu={}  load1={}  可用内存={}  （跨时段对比前先看此快照）",
+            cpu, load1, avail
+        );
         println!(
             "  二进制体积      {:.2} MiB   (≤ 8 MiB)",
             size_bytes as f64 / 1_048_576.0
@@ -1008,6 +1028,69 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         let _ = std::io::stdout().flush();
     }
     Ok(())
+}
+
+/// J3：bench 数字必须带环境指纹，否则跨时段/跨机器无法比较。
+/// Linux 取 /proc 的负载、可用内存与 uptime；Windows 取 GlobalMemoryStatusEx 与 GetTickCount64。
+fn env_fingerprint() -> serde_json::Value {
+    let mut obj = serde_json::json!({
+        "captured_at_unix_ms": featheragent::util::now_ms() as u64,
+        "cpu_count": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
+    });
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/loadavg") {
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.len() >= 3 {
+                obj["loadavg_1m"] = serde_json::json!(parts[0].parse::<f64>().unwrap_or(-1.0));
+                obj["loadavg_5m"] = serde_json::json!(parts[1].parse::<f64>().unwrap_or(-1.0));
+                obj["loadavg_15m"] = serde_json::json!(parts[2].parse::<f64>().unwrap_or(-1.0));
+            }
+        }
+        if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
+            let mut total = 0u64;
+            let mut avail = 0u64;
+            for line in s.lines() {
+                if let Some(v) = line.strip_prefix("MemTotal:") {
+                    total = v
+                        .split_whitespace()
+                        .next()
+                        .and_then(|x| x.parse().ok())
+                        .unwrap_or(0);
+                } else if let Some(v) = line.strip_prefix("MemAvailable:") {
+                    avail = v
+                        .split_whitespace()
+                        .next()
+                        .and_then(|x| x.parse().ok())
+                        .unwrap_or(0);
+                }
+            }
+            obj["mem_total_kb"] = serde_json::json!(total);
+            obj["mem_available_kb"] = serde_json::json!(avail);
+        }
+        if let Ok(s) = std::fs::read_to_string("/proc/uptime") {
+            if let Some(v) = s.split_whitespace().next() {
+                obj["uptime_s"] = serde_json::json!(v.parse::<f64>().unwrap_or(-1.0) as u64);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{
+            GetTickCount64, GlobalMemoryStatusEx, MEMORYSTATUSEX,
+        };
+        unsafe {
+            let mut ms: MEMORYSTATUSEX = std::mem::zeroed();
+            ms.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+            if GlobalMemoryStatusEx(&mut ms) != 0 {
+                obj["mem_total_kb"] = serde_json::json!(ms.ullTotalPhys / 1024);
+                obj["mem_available_kb"] = serde_json::json!(ms.ullAvailPhys / 1024);
+                obj["mem_load_pct"] = serde_json::json!(ms.dwMemoryLoad);
+            }
+            obj["uptime_s"] = serde_json::json!(GetTickCount64() / 1000);
+        }
+    }
+    obj
 }
 
 #[cfg(windows)]

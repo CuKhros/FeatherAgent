@@ -1,10 +1,26 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.1)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.2)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.1 summary (current candidate)
+## v1.2.1-rc.3.2 summary (current candidate)
+
+The rc.3.1 real-hardware retest confirmed that the review gate now works: with real 7B models it approved **1/3** and rejected **2/3**, the guide succeeded on the first attempt (`attempts:1`), description-only rubrics fell back to judge-only with `review.warn`, answers were 252-character structured text written by the exec, and judge evidence was a verbatim window of the answer. It also exposed three new issues (J1–J3): `min_points` false kills from counting only list markers, rubric ids `c1/c2/c3` copied into answers because feedback used bare `c1:` labels, and bench numbers that could not be compared across runs because the host had drifted into a degraded state.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| J1 `min_points` false kill | `count_points` takes the max of list/numbered markers, bold sub-headings, `；`-separated clauses (≥6 characters) and blank-line paragraphs, capped at 12; `review.hardcheck` returns a `soft` item instead of failing; the engine emits `review.warn` and appends `[机器计数提示]` to the judge input | Unit `count_points_recognizes_chinese_inline_enumeration`, `min_points_is_soft_and_defers_to_judge`; integration `review_gate_min_points_soft_falls_back_to_judge` (warn + judge approval) |
+| J2 ids in answers | `review_feedback_text` labels items `〔1〕`/`〔2〕`, never `- c1:`, and ends with an explicit “do not write these numbers into the answer” line | Unit `review_feedback_uses_prose_labels_and_forbids_ids_in_answer` |
+| J3 bench comparability | `bench --json` adds `metrics.env` (captured time, CPU count, load average, total/available memory, uptime); human output prints a fingerprint line | Three release runs show `env` with `cpu_count:2`, `loadavg_1m:0.86`, `mem_available_kb:3,364,164–3,364,504`, `uptime_s:991`; all gates true |
+| Display name | TUI/WebUI `version` subcommands print `FeatherAgent TUI` / `FeatherAgent WebUI` | CLI checks; binary names unchanged |
+
+Linux has **116 tests: 115 passed, 1 ignored by default** (62 lib, 16 plugin, 0 storage, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 27 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Release bench (3 consecutive runs): kernel **2,495,424 B (2.380 MiB)**; warm **1.178 / 1.186 / 1.181 ms**; cold **3.519 / 3.544 / 2.531 ms**; RSS max **3,584 KiB**; write P95 **2.593 / 2.584 / 2.594 µs**; assemble P95 **0.120 / 0.124 / 0.141 ms**; RPC P95 **0.063 / 0.051 / 0.050 ms**; all gates true.
+
+Not verified: v1.2.1-rc.3.2 Windows real hardware (J1 soft fallback with real 7B, J2 over several rounds, J3 values on Windows, the TUI/WebUI version strings, plus the rc.3.1 items still pending: live-Ollama model dropdowns, ConPTY Enter-save, Windows Terminal permission popup, S3 t6 single call), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run. Bench numbers above are from this VM at the recorded `metrics.env`; they are not a Windows baseline.
+
+## v1.2.1-rc.3.1 summary (historical, released)
+
 
 The rc.3 real-hardware retest confirmed the mechanics (include / not_include / answer-verbatim evidence / two-round approval under mock, bench 7/7) but found that a real 7B guide made 4/4 runs `degraded`: the rubric only carried `criterion`/`check`, and both retries resent the identical prompt (I2). It also asked for four UX changes: model fields should be picked from the local model service, TUI Enter should save from any field, permission prompts should show the complete command on both front ends, and the product should display as **FeatherAgent**.
 

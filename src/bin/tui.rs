@@ -184,7 +184,7 @@ fn main() {
         return;
     }
     if args.has("version") {
-        println!("featheragent-tui {}", env!("CARGO_PKG_VERSION"));
+        println!("FeatherAgent TUI {}", env!("CARGO_PKG_VERSION"));
         return;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-tui"));

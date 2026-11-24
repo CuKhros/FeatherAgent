@@ -1919,10 +1919,46 @@ impl Kernel {
                 "source": "hardcheck",
             }));
         }
+        // rc.3.1 复测 J1：min_points 是形态判据，中文答案的分号/加粗小标题常被漏数。
+        // 硬检查不再直接判死，而是把“机器计数不足”作为提示交给 judge 复核。
+        let soft = hard
+            .get("soft")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut judge_input = req.input.to_string();
+        if !soft.is_empty() {
+            let mut notes = Vec::new();
+            for item in &soft {
+                let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("?");
+                let criterion = item.get("criterion").and_then(|x| x.as_str()).unwrap_or("");
+                let points = item.get("points").and_then(|x| x.as_u64()).unwrap_or(0);
+                let need = item.get("need").and_then(|x| x.as_u64()).unwrap_or(0);
+                notes.push(format!(
+                    "〔{id}〕{criterion}（机器计数 {points}/{need} 个要点）"
+                ));
+            }
+            self.emit(
+                &session.id,
+                EventKind::ReviewWarn,
+                json!({
+                    "text": format!(
+                        "min_points 机器计数不足，交 judge 复核：{}",
+                        notes.join("；")
+                    ),
+                    "model": rg.judge.effective_model(&cfg.model),
+                    "items": soft.iter().filter_map(|x| x.get("id").cloned()).collect::<Vec<_>>(),
+                }),
+            );
+            judge_input.push_str(&format!(
+                "\n\n[机器计数提示] 下列形态判据的确定性计数不足，但中文常把要点写在分号或加粗小标题里。请按答案实际内容逐条复核，不要只按列表符号判断：\n{}",
+                notes.join("\n")
+            ));
+        }
         let prompt = gate
             .call(
                 "review.judge",
-                json!({"input": req.input, "answer": req.answer, "rubric": req.rubric}),
+                json!({"input": judge_input, "answer": req.answer, "rubric": req.rubric}),
             )
             .map_err(|e| e.to_string())?;
         let messages = prompt
@@ -2651,9 +2687,12 @@ fn review_feedback_text(verdict: &Value) -> String {
             let evidence = item.get("evidence").and_then(|x| x.as_str()).unwrap_or("");
             let criterion = item.get("criterion").and_then(|x| x.as_str()).unwrap_or("");
             let check = item.get("check").and_then(|x| x.as_str()).unwrap_or("");
-            let mut line = format!("- {id}:");
+            // J2：以前这里用“- c1:”这种裸 id 前缀，模型会把 c1/c2 当成答案里
+            // 必须出现的小标题抄进去。改用自然语言序号，并在末尾明确禁止编号入文。
+            let idx = used + 1;
+            let mut line = format!("〔{idx}〕");
             if !criterion.is_empty() {
-                line.push_str(&format!(" 判据=「{criterion}」"));
+                line.push_str(&format!("判据=「{criterion}」"));
             }
             if !check.is_empty() {
                 line.push_str(&format!("；核对={check}"));
@@ -2677,6 +2716,10 @@ fn review_feedback_text(verdict: &Value) -> String {
             }
         }
     }
+    lines.push(
+        "注意：上面的〔1〕〔2〕只是给你看的序号，不要把它们写进答案正文，也不要用 c1/c2 这类编号当小标题。"
+            .into(),
+    );
     lines.push("直接给出修订后的最终答案，不要解释校验过程。".into());
     lines.join("\n")
 }
@@ -2738,6 +2781,26 @@ pub fn plugin_ready(k: &Kernel, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_feedback_uses_prose_labels_and_forbids_ids_in_answer() {
+        let verdict = serde_json::json!({
+            "failed": ["c1"],
+            "items": [{
+                "id": "c1",
+                "criterion": "至少两个要点",
+                "check": "分号或列表分点",
+                "evidence": "答案只有一段"
+            }]
+        });
+        let text = review_feedback_text(&verdict);
+        assert!(!text.contains("- c1:"), "不应再用裸 cN 前缀: {text}");
+        assert!(text.contains("〔1〕"), "应有自然语言序号: {text}");
+        assert!(
+            text.contains("不要把它们写进答案正文"),
+            "必须明确禁止把编号抄进答案: {text}"
+        );
+    }
 
     #[test]
     fn workspace_names_are_portable_on_windows() {

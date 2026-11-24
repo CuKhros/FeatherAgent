@@ -49,7 +49,7 @@ fn main() {
         return;
     }
     if args.has("version") {
-        println!("featheragent-webui {}", env!("CARGO_PKG_VERSION"));
+        println!("FeatherAgent WebUI {}", env!("CARGO_PKG_VERSION"));
         return;
     }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("featheragent-webui"));

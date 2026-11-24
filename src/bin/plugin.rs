@@ -274,6 +274,16 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                         0,
                     ));
                 }
+                if last_user.contains("REVIEW_MINPOINTS") {
+                    return Ok((
+                        json!({"rubric":[
+                            {"id":"c1","criterion":"答案命中标记","check":"出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL"},
+                            {"id":"c2","criterion":"至少两个要点","check":"用分号或列表分点","min_points":2}
+                        ]})
+                        .to_string(),
+                        0,
+                    ));
+                }
                 return Ok((
                     json!({"rubric":[
                         {"id":"c1","criterion":"最终答案命中 REVIEW-FINAL 标记","check":"答案出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL","weight":1.0},
@@ -360,6 +370,10 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             }
             if last_user.contains("SPIN") {
                 return Ok(("SPIN".into(), 100));
+            }
+            if last_user.contains("REVIEW_MINPOINTS") {
+                // J1 回归：命中 must_include，但只有一段、没有分号/列表，机器计数 1 < 2。
+                return Ok(("REVIEW-FINAL".into(), 0));
             }
             let short: String = last_user.chars().take(60).collect();
             Ok((format!("echo: {short}"), 0))
@@ -809,6 +823,9 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
         "review.hardcheck" => {
             let answer = params.get("answer").and_then(|x| x.as_str()).unwrap_or("");
             let mut failures = Vec::new();
+            // min_points 是“形态判据”：中文答案常用分号/加粗小标题行内枚举，
+            // 纯计数容易误杀。这里把它降级为软判据，交给 judge 复核，不直接判死。
+            let mut soft = Vec::new();
             if answer.trim().is_empty() {
                 failures.push(json!({"id":"hard:non_empty","evidence":"答案为空"}));
             }
@@ -853,7 +870,15 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                     if let Some(n) = item.get("min_points").and_then(|x| x.as_u64()) {
                         let got = count_points(answer) as u64;
                         if got < n {
-                            fail(format!("答案只有 {got} 个要点，至少需要 {n} 个"));
+                            soft.push(json!({
+                                "id": id,
+                                "criterion": criterion,
+                                "check": check,
+                                "kind": "min_points",
+                                "points": got,
+                                "need": n,
+                                "evidence": format!("机器计数 {got} 个要点，判据要求至少 {n} 个；请按答案实际内容复核"),
+                            }));
                             continue;
                         }
                     }
@@ -877,7 +902,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                     }
                 }
             }
-            Ok(json!({"pass": failures.is_empty(), "failed": failures}))
+            Ok(json!({"pass": failures.is_empty(), "failed": failures, "soft": soft}))
         }
         _ => Err(format!("review-gate: 未知方法 {method}")),
     }
@@ -947,23 +972,42 @@ fn glob_one(pat: &str, text: &str) -> bool {
 
 /// 统计答案里的要点数：markdown 列表、数字编号、中文顿号编号都算。
 fn count_points(answer: &str) -> usize {
-    answer
-        .lines()
-        .map(|l| l.trim_start())
-        .filter(|l| {
-            if ["- ", "* ", "+ ", "• ", "· ", "-\t"]
-                .iter()
-                .any(|p| l.starts_with(p))
-            {
-                return true;
-            }
-            let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
-            digits > 0
-                && l[digits..]
-                    .trim_start()
-                    .starts_with(['.', '、', '．', ')', '）'])
-        })
-        .count()
+    // 要点识别要和中文答案的真实形态对齐：
+    // 1) 行首列表标记（- * + • · 数字编号）；2) 行首加粗小标题；3) 分号分段；4) 空行分段。
+    // 取四种口径的最大值，宁可宽松也不误杀；min_points 失败已降级为软判据交 judge 复核。
+    let mut markered = 0usize;
+    for line in answer.lines() {
+        let l = line.trim_start();
+        if ["- ", "* ", "+ ", "• ", "· ", "-\t"]
+            .iter()
+            .any(|p| l.starts_with(p))
+        {
+            markered += 1;
+            continue;
+        }
+        let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits > 0
+            && l[digits..]
+                .trim_start()
+                .starts_with(['.', '、', '．', ')', '）'])
+        {
+            markered += 1;
+            continue;
+        }
+        // `**小标题**：内容` 这种行也很常见，算一个要点。
+        if l.starts_with("**") && l[2..].contains("**") {
+            markered += 1;
+        }
+    }
+    let clauses = answer
+        .split(['；', ';'])
+        .filter(|s| s.trim().chars().filter(|c| !c.is_whitespace()).count() >= 6)
+        .count();
+    let paras = answer
+        .split("\n\n")
+        .filter(|b| b.trim().chars().count() >= 12)
+        .count();
+    markered.max(clauses).max(paras).min(12)
 }
 
 /// 判据不能是整句：含句末标点或以句号结尾会让门禁退化成“抄指导者的句子”。
@@ -1774,6 +1818,35 @@ mod tests {
         assert_eq!(count_points("- a\n* b\n1. c\n2、d\n普通一行"), 4);
         assert!(sentence_like("操作系统是管理系统。"));
         assert!(!sentence_like("REVIEW-FINAL"));
+    }
+
+    #[test]
+    fn count_points_recognizes_chinese_inline_enumeration() {
+        // J1 真机样本：一段里用分号并列三点，旧实现只数出行首列表标记 → 误判 1 个。
+        let answer = "操作系统是系统级软件，负责协调硬件与软件资源；它通过进程调度、内存管理和中断处理实现多任务；它还提供文件系统等用户接口。";
+        assert!(count_points(answer) >= 3, "分号枚举应算出至少 3 个要点");
+        let bold = "**第一点**：资源管理\n**第二点**：接口抽象";
+        assert_eq!(count_points(bold), 2);
+        assert_eq!(count_points("只有一句话。"), 1);
+    }
+
+    #[test]
+    fn min_points_is_soft_and_defers_to_judge() {
+        let rubric = json!([
+            {"id":"c1","criterion":"命中标记","check":"出现『REVIEW-FINAL』","must_include":"REVIEW-FINAL"},
+            {"id":"c2","criterion":"至少两个要点","check":"分点作答","min_points":2}
+        ]);
+        let v = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"REVIEW-FINAL", "rubric":rubric}),
+        )
+        .unwrap();
+        assert_eq!(v["pass"], true, "min_points 不足不应硬判死: {v}");
+        assert_eq!(v["failed"].as_array().unwrap().len(), 0);
+        let soft = v["soft"].as_array().unwrap();
+        assert_eq!(soft.len(), 1);
+        assert_eq!(soft[0]["id"], "c2");
+        assert_eq!(soft[0]["need"], 2);
     }
 
     #[test]

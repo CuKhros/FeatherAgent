@@ -1,6 +1,16 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.1` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.2` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.2] - 2026-11-24
+
+### Fixed
+- J1: `min_points` no longer kills a round by itself. `count_points` now also recognises Chinese semicolon-separated clauses, bold sub-headings and blank-line paragraphs (taking the maximum, capped at 12); a shortfall is returned as a soft item, the engine emits `review.warn` and passes a machine-count note to the judge, which decides from the answer itself.
+- J2: review feedback no longer uses bare `c1:` prefixes that the exec model copied into its answer. Items are labelled `〔1〕`/`〔2〕` and the prompt explicitly forbids writing those numbers or `c1/c2`-style ids into the answer.
+- `featheragent-tui version` / `featheragent-webui version` now print `FeatherAgent TUI` / `FeatherAgent WebUI` (binary names unchanged).
+
+### Added
+- Bench environment fingerprint in `bench --json` under `metrics.env`: capture time, CPU count, load average, total/available memory and uptime where the platform exposes them, plus one human-readable line. Gates are unchanged.
 
 ## [1.2.1-rc.3.1] - 2026-11-24
 
