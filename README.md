@@ -5,6 +5,8 @@
 
 A context engine for **1B–14B local models**, plus a **tiny, zero-runtime-dependency** portable agent kernel.
 
+> **Built primarily by an AI agent.** The code, tests, documentation and release flow are mainly produced and maintained by an autonomous agent; human involvement focuses on direction, acceptance and real-hardware verification.
+
 **Why it exists:** to take the repetitive, mechanical parts of an agent's work off the orchestrator's hands. The orchestrator keeps the steps that need judgment and hands the high-volume, low-risk chores to a 1B–14B model on the same machine — no cloud round trip, no per-token bill, no context the frontier model has to carry.
 
 > English is the primary documentation language. Chinese editions use the `.zh-CN.md` suffix, e.g. [README.zh-CN.md](README.zh-CN.md).
