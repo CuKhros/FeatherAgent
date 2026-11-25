@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.3.4 待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 5 exe 单 zip | **已实测**（v1.1.9 真机；v1.2.1-rc.3.5 待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -111,7 +111,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.3.4-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.3.5-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 先看命令表
@@ -123,7 +123,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 5 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.3.4）
+## 平台门禁差异（v1.2.1-rc.3.5）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -152,6 +152,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.3.5 变更说明](docs/v1.2.1-rc.3.5-变更说明.zh-CN.md)** —— 占位符元判据自动丢弃、主观判据降级为 advisory 且不进 judge、数组 `must_include`、S3 t6 工具调用提示强化（[English](docs/v1.2.1-rc.3.5-Changes.md)）
 - **[v1.2.1-rc.3.4 变更说明](docs/v1.2.1-rc.3.4-变更说明.zh-CN.md)** —— guide schema 占位符与校验（不再抄 `REVIEW-FINAL`）、feedback 不回显字面短语、Guide/Judge 生成物落盘到 `data/review-artifacts`（[English](docs/v1.2.1-rc.3.4-Changes.md)）
 - **[v1.2.1-rc.3.3 变更说明](docs/v1.2.1-rc.3.3-变更说明.zh-CN.md)** —— 判据分流（字面/禁词/计数/正则归 hardcheck，只有描述型进 judge）、正则判据、缺项回注、串行 majority 投票、热启动 P90 与样本数、内存压力可信度注记（[English](docs/v1.2.1-rc.3.3-Changes.md)）
 - **[v1.2.1-rc.3.2 变更说明](docs/v1.2.1-rc.3.2-变更说明.zh-CN.md)** —— `min_points` 降级为软判据（`review.warn` + judge 复核）、中文分号/加粗小标题要点计数、feedback 改 `〔1〕` 序号不再带裸 `c1:`、bench `metrics.env` 环境指纹
@@ -174,7 +175,7 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 ## 状态
 
-`v1.2.1-rc.3.4` 修复 rc.3.3 真机复测的两条 review-gate 问题。guide 提示词里不再有可抄的示例值：schema 取值位全部是尖括号占位符，`REVIEW-FINAL` 已删除；rubric 解析拒绝占位文本，以及用户任务里没出现的 mock 标记（L1）。`must_include` 缺失时，feedback 不再重复字面短语，exec 没有可以贴到答案末尾的标签（L2）。guide 与 judge 的每次模型调用都在解析前落到 `<data>/review-artifacts/<session>/`，`review.guide` 与 `review.verdict` 会给出文件路径。
+`v1.2.1-rc.3.5` 修复 rc.3.4 真机复测的 M1/M3。guide 不再把占位符示例当成任务内容：`GUIDE_SYSTEM` 改用 `__FILL_*__` 形态，只讨论占位符/示例的条目会被丢弃并打 `review.warn`，真实条目保留；`must_include` 接受 `["SYN","ACK"]` 这类数组，并要求每个短语都出现（M1）。「简洁明了」这类主观判据标记为 advisory，不进入 hardcheck 与 judge；整份清单完全没有可执行判据时，重试用尽后直接失败，不再因为条目非空而放行（M3）。S3 t6 提示词明确要求先调用一次 `tool.fs.read` 再回答（M4）。rc.3.4 已完成判据真实化、feedback 不回显字面短语，并把每次 guide/judge 输出落到 `data/review-artifacts/<session>/`。
 
 `v1.2.1-rc.3.2` 修掉 rc.3.1 真机复测的三条问题，不动架构：`min_points` 不再硬拒绝，而是作为软判据交 judge 复核（同时放宽中文要点计数并打 `review.warn`）；review feedback 用 `〔1〕` 序号，替代会被 exec 抄进答案的裸 `c1:`；`bench --json` 增加 `metrics.env` 环境指纹，便于跨时段对比数字。
 
@@ -182,6 +183,6 @@ TUI 与 WebUI 只提供中文界面，不再提供 `--lang` 切换，也不在�
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **118 个测试：117 通过、1 个默认 ignored**（62 lib、17 plugin、2 kernel、3 TUI、3 WebUI、2 golden、29 integration）；ignored 的需公网用例单独运行通过。`fmt` 与 `clippy -D warnings` 通过。设置页两端都实测：TUI 用 PTY（review-gate 页出现“本地模型 1 个；←/→ 选择”，值字段 Enter 保存后 `config.json` 的 `max_rounds` 由 2 变 3）；WebUI 走 WebSocket 复测桥层（`plugin.settings` 返回三个 `options_source:"models"` 的模型字段，`tool.shell` 确认请求带 `arguments` 与 `$ echo hi` 的 preview，拒绝成功）。
+Linux 自动化共 **125 个测试：124 通过、1 个默认 ignored**（62 lib、22 plugin、2 kernel、3 TUI、3 WebUI、2 golden、31 integration）；ignored 的需公网用例单独运行通过。`fmt` 与 `clippy -D warnings` 通过。设置页两端都实测：TUI 用 PTY（review-gate 页出现“本地模型 1 个；←/→ 选择”，值字段 Enter 保存后 `config.json` 的 `max_rounds` 由 2 变 3）；WebUI 走 WebSocket 复测桥层（`plugin.settings` 返回三个 `options_source:"models"` 的模型字段，`tool.shell` 确认请求带 `arguments` 与 `$ echo hi` 的 preview，拒绝成功）。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.3.2 复测确认 provider body、温度拒绝、banner、R1 门禁与 review-gate 机制。rc.3.3 复测确认 K1/K3/K4 与分流设计（0 degraded，hardcheck 裁决在答案后 0.01 s 落地），但 0/3 通过是假信号：guide 把 schema 示例抄成判据，要求出现夹具词 `REVIEW-FINAL`，c1 永远不可能满足。本候选版修复该问题（L1），feedback 不再回显短语（L2），并记录 guide/judge 生成物以便核查。v1.2.1-rc.3.4 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；L1/L2 与此前遗留仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.3.4 复测确认 provider body、温度拒绝、banner、R1 门禁、review-gate 分流、判据真实化、生成物与无泄漏 feedback。rc.3.4 复测通过 2/5、degraded 1/5：a2 的 guide 持续写关于 `<...>` 占位符的判据，三次原样重试后降级（M1）；a1 的「简洁明了」让 judge 三轮摇摆成 unapproved（M3）。本候选版硬化 guide 示例、丢弃元判据、把主观项降为 advisory，并支持数组 `must_include`；S3 t6 也加了硬性工具调用提示。v1.2.1-rc.3.5 的 Windows 包来自交叉编译，自动化测试只在 Linux 跑；M1/M3/M4 与此前遗留仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。

@@ -1,6 +1,22 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.4` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.5` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.5] - 2026-11-25
+
+### 修复
+- M1：guide 不再把占位符示例写成判据。`GUIDE_SYSTEM` 改用 `__FILL_*__` 形态，禁止在判据里讨论占位符/模板；`review.parse_rubric` 丢弃自我指涉的占位条目、保留真实条目。a2 的 rubric 现在保留 c1/c3、丢弃 c2、打 `review.warn`，整轮不再 degraded。
+- M1：`must_include` 接受字符串数组（`["SYN","ACK"]`），hardcheck 逐项要求全部出现，不再静默退化为描述型。
+- M3：主观描述判据（简洁、清晰、排版好看等）标记为 `advisory`，不进入 hardcheck 与 judge，并打 `review.warn`。内核在重试用尽后仍没有可执行判据时直接失败，不再因为条目非空就放行。
+- M4：S3 t6 提示词明确要求先调用一次 `tool.fs.read`，禁止不调工具凭猜测回答。
+
+### 新增
+- `review.parse_rubric` 输出 `advisory` id 列表；`review.warn` 报告被丢弃的占位条目与主观降级。
+- 测试：占位元判据清洗、主观 advisory、数组 `must_include`，以及集成 `review_gate_drops_placeholder_meta_item_and_approves`、`review_gate_subjective_criterion_is_advisory`。
+
+### 变更
+- `GUIDE_SYSTEM` 规则 8/9：示例只示范字段名；禁止主观判据，改用可计数检查。
+- 没有改动 wire 消息、契约、provider、storage、tool 或插件设置。
 
 ## [1.2.1-rc.3.4] - 2026-11-25
 

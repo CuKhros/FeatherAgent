@@ -1,6 +1,22 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.4` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.5` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.5] - 2026-11-25
+
+### Fixed
+- M1: the guide no longer turns placeholder examples into criteria. `GUIDE_SYSTEM` uses `__FILL_*__` tokens, forbids discussing placeholders/templates inside a criterion, and `review.parse_rubric` drops self-referential placeholder items while keeping real ones. The a2 rubric now keeps `c1`/`c3`, drops `c2`, emits `review.warn`, and no longer degrades the round.
+- M1: `must_include` accepts a string array (`["SYN","ACK"]`) and hardcheck requires every phrase instead of treating the item as description-only.
+- M3: subjective description items (concise, clear, well-formatted, …) are marked `advisory` and excluded from both hardcheck and judge, with a `review.warn` note. The kernel also rejects a rubric that has no executable criterion at all after retries, instead of accepting it because it is non-empty.
+- M4: the S3 t6 prompt now explicitly requires one `tool.fs.read` call and forbids answering from guesswork.
+
+### Added
+- `review.parse_rubric` returns `advisory` ids; `review.warn` reports dropped placeholder items and subjective downgrades.
+- Tests: placeholder-meta stripping, subjective advisory marking, array `must_include`, plus integration `review_gate_drops_placeholder_meta_item_and_approves` and `review_gate_subjective_criterion_is_advisory`.
+
+### Changed
+- `GUIDE_SYSTEM` rules 8/9: examples only show field names, and subjective criteria are disallowed in favour of countable checks.
+- No wire message, contract, provider, storage, tool or plugin setting changed.
 
 ## [1.2.1-rc.3.4] - 2026-11-25
 

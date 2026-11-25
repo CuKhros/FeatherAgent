@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.4 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.3.5 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.3.4-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.3.5-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.3.4 fixes the two review-gate findings from the rc.3.3 retest. L1: the guide prompt has no copyable example values (`<...>` placeholders only), and the rubric parser rejects placeholders plus `REVIEW-FINAL` / `REVIEW-START` when they are absent from the user task. L2: a missing `must_include` no longer echoes the literal phrase, so the exec model cannot paste a label into the answer. Guide and judge model calls are recorded under `data/review-artifacts/<session>/`. It also carries the rc.3.2 retest findings K1–K4: K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.3.5 fixes M1/M3 from the rc.3.4 retest and strengthens M4. M1: the guide prompt now uses `__FILL_*__` tokens instead of `<...>`, forbids criteria that discuss placeholders/examples, and the parser drops self-referential meta items while keeping real ones; `must_include` also accepts arrays such as `["SYN","ACK"]` and requires every phrase. An a2-style rubric must keep `c1`/`c3`, drop `c2` with `review.warn`, and reach a verdict instead of `degraded`. M3: subjective items (“concise and clear”, “well-formatted”) are marked advisory and excluded from hardcheck and judge; a rubric with no executable criterion at all is rejected after retries. M4: S3 t6 now explicitly requires one `tool.fs.read` call and forbids answering from guesswork. It also carries the rc.3.2 retest findings K1–K4: K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.4\
+D:\FeatherAgent-1.2.1-rc.3.5\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.3.4`, then continue.
+Wait for `serve ready: 1.2.1-rc.3.5`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.4
+cd D:\FeatherAgent-1.2.1-rc.3.5
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -183,7 +183,16 @@ v1.2.1-rc.3.2 regression checks:
 3. **J3: bench fingerprint.** `featheragent.exe bench --json` must include `metrics.env` with `cpu_count`, `mem_total_kb`, `mem_available_kb`, `mem_load_pct` and `uptime_s`; the human-readable run must print one “环境指纹” line. Record it next to every bench number.
 4. **Display name.** `featheragent.exe version`, `featheragent-tui.exe version`, `featheragent-webui.exe version` must print `FeatherAgent …` (TUI/WebUI included), while binary names remain lowercase.
 
-v1.2.1-rc.3.4 regression checks:
+v1.2.1-rc.3.5 regression checks:
+
+**M1/M3/M4 first:**
+
+1. **M1: placeholder meta item is dropped, not retried forever.** Use a real 7B and a TCP-handshake task. If the guide writes a criterion such as “forbid the placeholder from the example” or puts `<...>` / `__FILL_*__` into `must_not_include`, `review.warn` must report `已丢弃占位符/示例判据`, the remaining real items must still be evaluated, and the round must not end `degraded`.
+2. **M1: array `must_include`.** A rubric item with `must_include:["SYN","ACK"]` must be accepted and settled by `review.hardcheck`; an answer missing `ACK` must fail it, not silently pass as a description item.
+3. **M3: subjective item is advisory.** For a task whose guide emits “判断答案是否简洁明了”, `review.warn` must say `主观判据`, the item must not appear in `review.verdict` item ids, and `review.verdict.votes` must be 0 when no other description item exists. The round must not swing solely because of that item.
+4. **M4: t6 always calls the tool.** Run S3 t6 several times: it must call `tool.fs.read` once, report the missing file, and not answer from guesswork.
+
+**Carried over from rc.3.4:**
 
 1. **L1: guide writes task criteria, not schema text.** Use a real 7B and the plain task `用三句话说明什么是操作系统` (no `REVIEW_*` token). `review.guide` must succeed; the rubric must not contain `这项检查什么`, `怎么核对`, `REVIEW-FINAL`, or a literal `<...>`. The round must not fail every time on `c1`.
 2. **L1: artifacts.** After that round, `data\review-artifacts\<session>\` must contain `*-guide-a*.json` and, if the judge ran, `*-judge-v*-a*.json`. Each file must be valid JSON with `role` guide/judge, `raw`, and `parse_error`. `review.guide.artifact` and `review.verdict.artifacts` must point at these files.
@@ -209,13 +218,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.3.4 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.3.5 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.4-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.5-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

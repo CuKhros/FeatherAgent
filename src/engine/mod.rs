@@ -1914,6 +1914,23 @@ impl Kernel {
                         .get("hard_items")
                         .and_then(|x| x.as_u64())
                         .unwrap_or(0);
+                    let judge_only_count = parsed
+                        .get("judge_only")
+                        .and_then(|x| x.as_array())
+                        .map(|x| x.len() as u64)
+                        .unwrap_or(0);
+                    // M3：只有主观/空描述条目时不算可执行判据；重试用尽也不能放行。
+                    if hard_items == 0 && judge_only_count == 0 {
+                        last = "整份清单没有可执行判据：只有主观评价或空描述，必须补一条可计数/可核对的判据".into();
+                        if attempt < REVIEW_GUIDE_ATTEMPTS {
+                            self.emit(
+                                &session.id,
+                                EventKind::ReviewWarn,
+                                json!({"text": format!("第 {attempt} 次判据不合格：{last}"), "model": model, "attempts": attempt, "retry": true, "artifact": artifact.clone().unwrap_or_default()}),
+                            );
+                        }
+                        continue;
+                    }
                     // 一条硬判据都没有时先带错误回注重试；重试用尽后仍然接受，
                     // 由 judge 逐条评估并打 review.warn，而不是整轮 degraded。
                     if hard_items == 0 && attempt < REVIEW_GUIDE_ATTEMPTS {

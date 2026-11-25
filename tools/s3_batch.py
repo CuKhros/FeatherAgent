@@ -76,7 +76,7 @@ TASKS = [
     ("t5-multi", "必须先调用 tool.fs.read 工具读取 workspace/s3-probe.txt，再用一句话总结它的内容。禁止不调用工具直接回答。", "read", "FEATHER"),
     # rc.3 复测 I3：只写“不要重试”时模型仍会补调一个别的工具（如 tool.shell/ping）；
     # 这里把“本轮只允许一次工具调用”讲死，并点名禁止常见的替代工具。
-    ("t6-missing", "请调用 tool.fs.read 读取 workspace/no-such-file-xyz.txt，然后说明结果。本轮只允许一次工具调用：不要调用第二个工具，不要调用 tool.shell、tool.ping 或任何其他工具；如果读取失败，直接说明失败原因，不要重试、不要换路径。", "read", "不存在", True),
+    ("t6-missing", "必须先调用 tool.fs.read 一次，读取 workspace/no-such-file-xyz.txt，然后说明结果；禁止不调用工具直接凭猜测回答。本轮只允许一次工具调用：不要调用第二个工具，不要调用 tool.shell、tool.ping 或任何其他工具；如果读取失败，直接说明失败原因，不要重试、不要换路径。", "read", "不存在", True),
 ]
 
 print(f"项目工作区: {WORKSPACE}")

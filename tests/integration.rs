@@ -419,6 +419,90 @@ fn ollama_native_chat_without_key_still_sends_body() {
 }
 
 #[test]
+fn review_gate_drops_placeholder_meta_item_and_approves() {
+    let (_h, conn) = start("review-m1", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sm1"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "sm1", "REVIEW_M1", Duration::from_secs(20));
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("ok"),
+        "{seen:?}"
+    );
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("已丢弃") && t.contains("c2"))
+                    .unwrap_or(false)
+        }),
+        "应留下丢弃占位符判据的 warn: {seen:?}"
+    );
+}
+
+#[test]
+fn review_gate_subjective_criterion_is_advisory() {
+    let (_h, conn) = start("review-subj", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "ssubj"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "ssubj", "REVIEW_SUBJ", Duration::from_secs(20));
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("主观判据"))
+                    .unwrap_or(false)
+        }),
+        "主观判据应降级为 warn: {seen:?}"
+    );
+    let verdict = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.verdict"))
+        .expect("应有 review.verdict");
+    assert_eq!(
+        verdict
+            .pointer("/params/payload/votes")
+            .and_then(|x| x.as_u64()),
+        Some(0),
+        "主观判据不应调用 judge: {verdict:?}"
+    );
+}
+
+#[test]
 fn review_gate_unapproved_is_reflected_in_chat_status() {
     let (_h, conn) = start("reviewbad", |cfg| {
         cfg.review_gate.enabled = true;
@@ -687,7 +771,7 @@ fn review_gate_three_roles_retry_and_approve() {
                 .map(|a| !a.is_empty())
                 .unwrap_or(false)
         })
-        .expect("应有带 judge 生成物的 review.verdict");
+        .unwrap_or_else(|| panic!("应有带 judge 生成物的 review.verdict: {seen:?}"));
     let artifacts = verdict_event
         .pointer("/params/payload/artifacts")
         .and_then(|x| x.as_array())

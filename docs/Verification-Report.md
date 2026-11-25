@@ -1,10 +1,24 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.4)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.5)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.4` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.5` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.4 summary (current candidate)
+## v1.2.1-rc.3.5 summary (current candidate)
+
+The rc.3.4 retest met all three checklist items: criteria became task-specific (4 of 5 tasks had real criteria, 2 approved), artifacts matched the event paths, and feedback did not leak the literal phrase. Real 7B data: a1 operating-system unapproved (3 rounds), a2 TCP handshake **degraded** (guide rejected 3 times), a3 memory leak approved, a4 TCP handshake approved, a5 “ban the word system” unapproved (self-contradictory). Approval 2/5, degraded 1/5. The remaining defects were rubric-quality issues, so this candidate targets M1/M3 and hardens the S3 t6 prompt (M4).
+
+| Item | Treatment | Verification |
+|---|---|---|
+| M1 guide treats `<...>` as task content | `GUIDE_SYSTEM` uses `__FILL_*__`; rules 8/9 forbid discussing placeholders/templates and subjective criteria; `rubric_placeholder` rejects `__FILL*__` and `{{ }}`; `placeholder_meta` only matches concrete meta phrases plus an action word; `strip_placeholder_meta_items` drops self-referential items and keeps real ones, warning through `review.warn`; an all-placeholder rubric is an explicit parse error; array `must_include` (`["SYN","ACK"]`) is accepted and every phrase is required | Units `review_rubric_drops_placeholder_meta_item_and_keeps_task_items` (c1/c3 survive, c2 dropped, `hard_items=2`), `review_rubric_accepts_array_must_include_and_hardcheck_requires_all`; integration `review_gate_drops_placeholder_meta_item_and_approves` (`approved` + warn contains `已丢弃` and `c2`) |
+| M3 subjective criterion makes the judge swing | Subjective description items are marked `advisory`, excluded from hardcheck and judge, and warned; `review.parse_rubric` returns `advisory` ids; if `hard_items==0 && judge_only==0`, the kernel retries and then fails instead of accepting an uncheckable rubric | Unit `review_rubric_marks_subjective_item_advisory` (`hard_items=1`, `advisory=true`, empty `judge_only`); integration `review_gate_subjective_criterion_is_advisory` (`approved`, warn contains `主观判据`, `review.verdict.votes=0`) |
+| M4 S3 t6 skips the tool | t6 prompt now starts with “must call `tool.fs.read` once” and forbids answering from guesswork, keeping the one-call limit | Prompt change only; this VM has no Ollama service, so the live 4B behaviour is not measured here |
+
+Linux has **125 tests: 124 passed, 1 ignored by default** (62 lib, 22 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 31 integration); the ignored network test needs public network. `fmt` and `clippy --locked --all-targets` pass. Release bench (3 consecutive runs): kernel **2,521,800 B (2.405 MiB)**; warm **1.288 / 1.312 / 1.260 ms** (P90 1.259 / 1.293 / 1.255 ms, 5 samples); cold **5.582 / 5.530 / 5.630 ms**; RSS max **1,920 KiB**; write P95 **13.819 / 14.973 / 13.472 µs**; assemble P95 **0.162 / 0.198 / 0.133 ms**; RPC P95 **0.056 / 0.068 / 0.069 ms**; all gates true; `env.mem_load_pct` 18, `reliability:high`.
+
+Not verified: v1.2.1-rc.3.5 Windows real hardware (M1 drop-and-continue on a live 7B, M3 advisory exclusion, S3 t6 repeated tool call, plus the rc.3.4 artifact/feedback and K1/K3/K4 rechecks, live-Ollama dropdowns, ConPTY Enter-save and Windows Terminal permission popup), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run. Bench numbers are from this VM and are not a Windows baseline.
+
+## v1.2.1-rc.3.4 summary (historical, released)
 
 The rc.3.3 real-hardware retest verified K1/K3/K4: criterion routing and short-circuit ran as designed, three runs produced **0 degraded**, and a hardcheck failure emitted `review.verdict` 0.01 s after the answer, proving no judge call. Approval was still **0/3**, but the cause was the guide copying the kernel JSON schema: `criterion:"这项检查什么"`, `check:"怎么核对"`, `must_include:"REVIEW-FINAL"`. `REVIEW-FINAL` is a mock fixture word absent from the real task, so `c1` could never pass. This candidate fixes that (L1), removes the literal phrase from feedback (L2), and records guide/judge model outputs.
 

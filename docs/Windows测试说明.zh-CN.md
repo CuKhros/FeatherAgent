@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.4 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.5 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.4-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.5-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.4 修 rc.3.3 复测的两条 review-gate 问题。L1：guide 提示词不再有可抄的示例值（只用 `<...>` 占位符），rubric 解析拒绝占位符，以及用户任务里没出现的 `REVIEW-FINAL` / `REVIEW-START`。L2：`must_include` 缺失时不再回显字面短语，exec 不能靠贴标签过检。guide 与 judge 的模型调用都记录到 `data/review-artifacts/<session>/`。它同时延续 rc.3.2 复测的 K1–K4：K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.5 修复 rc.3.4 复测的 M1/M3，并强化 M4。M1：guide 提示词改用 `__FILL_*__` 形态，禁止判据讨论占位符/示例；解析器丢弃自我指涉的元判据、保留真实条目；`must_include` 接受 `["SYN","ACK"]` 这类数组并要求每个短语都出现。a2 形态的 rubric 必须保留 c1/c3、丢弃 c2 并打 `review.warn`，最终给出裁决而不是 degraded。M3：「简洁明了」「排版好看」这类主观项标记 advisory，不进入 hardcheck 与 judge；整份清单没有可执行判据时，重试用尽后直接失败。M4：S3 t6 明确要求先调用一次 `tool.fs.read`，禁止凭猜测回答。它同时延续 rc.3.2 复测的 K1–K4：K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.4\
+D:\FeatherAgent-1.2.1-rc.3.5\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3.4\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.4` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.5` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.4
+cd D:\FeatherAgent-1.2.1-rc.3.5
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -181,7 +181,7 @@ v1.2.1-rc.3.2 回归核对：
 3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
 4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
 
-v1.2.1-rc.3.4 回归核对：
+v1.2.1-rc.3.5 回归核对：
 
 1. **L1：guide 写任务判据，不抄 schema。** 用真实 7B，输入普通任务 `用三句话说明什么是操作系统`（不含 `REVIEW_*` 令牌）。`review.guide` 必须成功；rubric 不得出现 `这项检查什么`、`怎么核对`、`REVIEW-FINAL` 或字面 `<...>`。回合不得每次都挂在 `c1`。
 2. **L1：生成物。** 该回合结束后，`data\review-artifacts\<session>\` 下应有 `*-guide-a*.json`，若跑了 judge 还应有 `*-judge-v*-a*.json`。每个文件必须是合法 JSON，含 `role`（guide/judge）、`raw`、`parse_error`；`review.guide.artifact` 与 `review.verdict.artifacts` 必须指向这些文件。
@@ -207,13 +207,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.4 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.5 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.5-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。
