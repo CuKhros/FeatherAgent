@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.3.5** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.3.6** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.5","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.6","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -336,6 +336,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 ```
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.3.6: no new wire message, frame, endpoint, or error code. Bench JSON adds `boot_percentiles_consistent` (P50 ≤ P90 from the same sorted samples) and `gates.metrics_consistent`; both are additive. `review.warn` may now report a fixture item dropped because its `must_not_include` contained `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}`. `must_include` is interpreted as whitespace/punctuation-separated terms during hardcheck; prompt text changed, not the wire contract. The English `-en` binaries use the same protocol.
 - 1.2.1-rc.3.5: no new wire message, frame, endpoint, or error code. `review.parse_rubric` adds `advisory` (ids of subjective items excluded from hardcheck and judge); `review.warn` may report dropped placeholder/example items (`已丢弃占位符/示例判据 …`) and subjective downgrades. `must_include` accepts a string array and hardcheck requires every phrase. A rubric with no executable criterion after retries now fails `review_prepare` instead of proceeding. `GUIDE_SYSTEM` placeholder tokens changed to `__FILL_*__`; this affects prompt text only, not the wire contract.
 - 1.2.1-rc.3.4: no new wire message, frame, endpoint, or error code. `review.guide` payload adds `artifact` (path or empty string when writing failed). `review.verdict` adds `attempts` (judge model calls), `votes` (completed votes, 2 when the third is skipped by early stop) and `artifacts` (judge artifact paths). Guide and judge rollouts are written under `<data>/review-artifacts/<session>/` before parsing; this is best-effort and never fails the gate. Rubric parsing now also receives the user input, so `criterion` / `check` / `must_include` / `must_not_include` placeholders and `REVIEW-FINAL` / `REVIEW-START` tokens absent from the task are rejected. No setting field changed.
 - 1.2.1-rc.3.3: no new wire message or field. `review.hardcheck` / `review.judge` are plugin-internal: hard/negative/count/glob/regex criteria are settled by hardcheck, only description items reach the judge, and the judge evidence rule is unchanged for those items. `review.warn` text changes for soft `min_points` (“按软判据接受…”) and for unevaluated description items. `plugins/review-gate/plugin.json` declares five additional settings (routing, pattern engine, votes, aggregation, early stop) relayed by `plugin.settings`; `judge.votes` accepts only 1 or 3. Bench JSON adds `boot_ms_p90`, `boot_sample_count`, `env.reliability` and an optional `env.note`. No frame, endpoint, or error code changed.

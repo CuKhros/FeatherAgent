@@ -1124,27 +1124,63 @@ impl Kernel {
 
             // ---- 模型 ----
             *session.state.write() = SessionState::Generating;
-            let mut model_res =
-                self.run_model(session, &cfg, &assembled.messages, exec_temperature);
-            if let Err(e) = &model_res {
-                // 空响应通常是采样抖动：换一点温度重试一次，仍空则硬失败。
-                if e.contains("空响应")
-                    && session.interrupt.load(Ordering::SeqCst) == 0
-                    && !session.cancel.load(Ordering::SeqCst)
-                {
-                    self.emit(
-                        &session.id,
-                        EventKind::ModelRetry,
-                        json!({"attempt": 1, "reason": "empty", "temperature": 0.7}),
-                    );
-                    model_res = self.run_model(session, &cfg, &assembled.messages, Some(0.7));
-                }
-            }
-            if let Err(e) = &model_res {
-                // §4.5：插件崩溃 → 重启后重试一次
-                if e.contains("崩溃") {
-                    let _ = self.plugins.restart(&cfg.provider_plugin);
-                    model_res = self.run_model(session, &cfg, &assembled.messages, None);
+            let model_res;
+            let mut retry_messages = assembled.messages.clone();
+            let mut empty_retries = 0u32;
+            let mut format_retries = 0u32;
+            let mut crash_retried = false;
+            let mut retry_temperature = exec_temperature;
+            loop {
+                match self.run_model(session, &cfg, &retry_messages, retry_temperature) {
+                    Ok(r) => {
+                        model_res = Ok(r);
+                        break;
+                    }
+                    Err(e)
+                        if e.contains("空响应")
+                            && empty_retries < 2
+                            && session.interrupt.load(Ordering::SeqCst) == 0
+                            && !session.cancel.load(Ordering::SeqCst) =>
+                    {
+                        empty_retries += 1;
+                        let t = 0.7 + 0.05 * (empty_retries - 1) as f64;
+                        self.emit(
+                            &session.id,
+                            EventKind::ModelRetry,
+                            json!({"attempt": empty_retries, "reason": "empty", "temperature": t}),
+                        );
+                        retry_messages = assembled.messages.clone();
+                        retry_temperature = Some(t);
+                    }
+                    Err(e)
+                        if is_tool_format_error(&e)
+                            && format_retries < 2
+                            && session.interrupt.load(Ordering::SeqCst) == 0
+                            && !session.cancel.load(Ordering::SeqCst) =>
+                    {
+                        format_retries += 1;
+                        self.emit(
+                            &session.id,
+                            EventKind::ModelRetry,
+                            json!({"attempt": format_retries, "reason": "tool_format"}),
+                        );
+                        retry_messages = assembled.messages.clone();
+                        retry_messages.push(crate::context::Message::new(
+                            "system",
+                            tool_format_correction(),
+                        ));
+                        retry_temperature = None;
+                    }
+                    Err(e) if e.contains("崩溃") && !crash_retried => {
+                        crash_retried = true;
+                        let _ = self.plugins.restart(&cfg.provider_plugin);
+                        retry_messages = assembled.messages.clone();
+                        retry_temperature = None;
+                    }
+                    Err(e) => {
+                        model_res = Err(e);
+                        break;
+                    }
                 }
             }
             let reply = match model_res {
@@ -3166,6 +3202,17 @@ pub fn plugin_ready(k: &Kernel, name: &str) -> bool {
         .any(|(n, st, _)| n == name && *st == PluginState::Ready)
 }
 
+fn is_tool_format_error(e: &str) -> bool {
+    e.contains("XML syntax error")
+        || (e.contains("element ") && e.contains(" closed by ") && e.contains("parameter"))
+        || (e.contains("tool call")
+            && (e.contains("format") || e.contains("格式") || e.contains("invalid")))
+}
+
+fn tool_format_correction() -> &'static str {
+    "[tool-call format correction] 上一次工具调用格式无效。请只输出标准 JSON tool_calls（name/arguments），不要输出 XML 或自定义标签。"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3216,5 +3263,13 @@ mod tests {
         std::fs::write(&worklog, "custom log").unwrap();
         prepare_agent_home(&ws).unwrap();
         assert_eq!(std::fs::read_to_string(&worklog).unwrap(), "custom log");
+    }
+    #[test]
+    fn tool_format_error_detector_covers_ollama_and_json_errors() {
+        assert!(is_tool_format_error(
+            "XML syntax error on line 3: element broken closed by parameter"
+        ));
+        assert!(is_tool_format_error("invalid tool call format"));
+        assert!(!is_tool_format_error("ollama 返回空响应"));
     }
 }

@@ -51,7 +51,7 @@ impl Io {
     }
 }
 
-fn main() {
+pub(crate) fn main() {
     let role = std::env::args().nth(1).unwrap_or_else(|| "mock".into());
     let codec = if std::env::var("FEATHER_CODEC").ok().as_deref() == Some("json") {
         Codec::Json
@@ -961,10 +961,11 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                             .collect(),
                         _ => Vec::new(),
                     };
-                    if let Some(_missing) = musts
-                        .iter()
-                        .find(|lit| !lit.is_empty() && !answer.contains(lit.as_str()))
-                    {
+                    if musts.iter().any(|lit| {
+                        include_terms(lit)
+                            .iter()
+                            .any(|term| !answer.contains(term.as_str()))
+                    }) {
                         // L2：feedback 会把 evidence 原样交给 exec。若这里回显字面短语，
                         // 模型会直接把该短语贴到答案末尾“补标签”，内容却没有改善。
                         // 只说明“缺一项必须覆盖的要求”，不给出字面值。
@@ -1242,7 +1243,7 @@ const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你�
 1. 写 1–5 条判据，每条都要针对下面的“任务输入”，不要复用示例的领域或文字。
 2. criterion 和 check 只是给人看的说明，不参与判定；真正的判据只能写在 must_include / must_not_include / min_points / pattern / regex 这五个键上。
 3. 整份清单至少有一条判据用到这五个硬键中的任意一个，否则整份清单作废。
-4. must_include 只能是任务输入里或任务领域内必须出现的短语、文件名、命令、术语，不超过 20 字；禁止整句，禁止以句号结尾，禁止把答案原句当判据。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
+4. must_include 只能写任务里必须出现的专有名词、术语、文件名、命令或固定写法，2–12 字；禁止写概念性描述或句子，禁止含“和/与/及/或/是/的”等连接词。概念要求（如“说明作用”“解释过程”）不要用 must_include，写在 criterion/check 交给 judge。例如 must_include 用 “SYN”“ACK”“操作系统”“进程调度”，不要写“管理计算机硬件和资源”。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
 5. 至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或；或 regex 引擎下的正则）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。
 5b. 至少留一条“描述型”判据：只写 criterion/check，不写任何硬键，交给 judge 评估。描述型不要超过 2 条。
 6. 判据必须是任务本身可验证的事实（结论关键词、文件名、命令、路径、格式），不要评价“逻辑清晰”“内容完整”这类无法核对的话。
@@ -1269,7 +1270,8 @@ fn guide_user_prompt(input: &str, environment: &str, feedback: &str) -> String {
 const RUBRIC_MIN_ITEMS: usize = 1;
 const RUBRIC_MAX_ITEMS: usize = 5;
 /// 单条字面判据上限：超过就是“把答案写进判据”。
-const MUST_INCLUDE_MAX_CHARS: usize = 20;
+const MUST_INCLUDE_MAX_CHARS: usize = 12;
+const MUST_NOT_INCLUDE_MAX_CHARS: usize = 20;
 const PATTERN_MAX_CHARS: usize = 120;
 /// 正则判据上限：太长的正则会拖慢 hardcheck，也不好审。
 const REGEX_MAX_CHARS: usize = 200;
@@ -1286,6 +1288,38 @@ fn literal_list(v: &Value) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// 概念性连接词/系词：must_include 是术语判据，不应写自然语言描述。
+fn include_connective(t: &str) -> Option<char> {
+    t.chars()
+        .find(|c| matches!(c, '和' | '与' | '及' | '或' | '是' | '的' | '了'))
+}
+
+/// 把 `must_include` 拆成需要同时出现的词项：空白、中文顿号/逗号/分号；
+/// 不含路径点号时也拆 `/`，这样 “Windows/Linux” 不会要求整串连续出现。
+/// 这不是汉语分词，只做轻量词项匹配，避免“硬件与软件资源”这类措辞差异误杀。
+fn include_terms(phrase: &str) -> Vec<String> {
+    let mut split = phrase.to_string();
+    if !phrase.contains('.') {
+        split = split.replace('/', "\u{0}");
+    }
+    split
+        .split(|c: char| c.is_whitespace() || matches!(c, '、' | '，' | ',' | '；' | ';' | '\u{0}'))
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+/// `must_not_include` 里的 fixture 词/占位符：整条判据自我指涉，直接丢弃。
+fn fixture_not_include(t: &str) -> bool {
+    let t = t.trim();
+    t == "REVIEW-FINAL"
+        || t == "REVIEW-START"
+        || t.contains("<...>")
+        || t.contains("__FILL")
+        || t.contains("{{")
+        || t.contains("}}")
 }
 
 /// 兼容旧调用：没有任务输入时只做结构校验，不检查短语来源。
@@ -1389,8 +1423,13 @@ fn strip_placeholder_meta_items(text: &str) -> (String, Vec<String>, bool) {
         let criterion = item.get("criterion").and_then(|x| x.as_str()).unwrap_or("");
         let check = item.get("check").and_then(|x| x.as_str()).unwrap_or("");
         // 空 criterion/check 是结构错误，必须交给正式解析报错，不能静默丢弃。
-        let junk = (!criterion.trim().is_empty()
-            && (rubric_placeholder(criterion) || placeholder_meta(criterion)))
+        let fixture_not = item
+            .get("must_not_include")
+            .map(|v| literal_list(v).iter().any(|b| fixture_not_include(b)))
+            .unwrap_or(false);
+        let junk = fixture_not
+            || (!criterion.trim().is_empty()
+                && (rubric_placeholder(criterion) || placeholder_meta(criterion)))
             || (!check.trim().is_empty() && (rubric_placeholder(check) || placeholder_meta(check)));
         if junk {
             dropped.push(format!("{id}（{criterion}）"));
@@ -1530,6 +1569,19 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
                     i + 1
                 ));
             }
+            let n_chars = lit.chars().count();
+            if n_chars < 2 {
+                return Err(format!(
+                    "验收项 {} 的 must_include『{lit}』只有 {n_chars} 字：术语判据至少 2 字",
+                    i + 1
+                ));
+            }
+            if let Some(c) = include_connective(lit) {
+                return Err(format!(
+                    "验收项 {} 的 must_include『{lit}』含连接词『{c}』：这是概念性描述，不是术语。术语判据只写专有名词/固定写法；概念要求请写在 criterion/check 交给 judge",
+                    i + 1
+                ));
+            }
             // L1：REVIEW-FINAL/REVIEW-START 是 mock 夹具的测试标记，7B 容易从示例里抄来。
             // 用户任务里明确出现时才允许；否则正常答案永远无法满足。
             // 只看报告里出现的两个 mock 标记；不要扩大到所有大写词，
@@ -1568,10 +1620,10 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
             }
             if banned
                 .iter()
-                .any(|b| b.chars().count() > MUST_INCLUDE_MAX_CHARS)
+                .any(|b| b.chars().count() > MUST_NOT_INCLUDE_MAX_CHARS)
             {
                 return Err(format!(
-                    "验收项 {} 的 must_not_include 超过 {MUST_INCLUDE_MAX_CHARS} 字",
+                    "验收项 {} 的 must_not_include 超过 {MUST_NOT_INCLUDE_MAX_CHARS} 字",
                     i + 1
                 ));
             }
@@ -2115,7 +2167,7 @@ mod tests {
             ]}}"
         ))
         .unwrap_err();
-        assert!(err.contains("整句") || err.contains("20"), "{err}");
+        assert!(err.contains("整句") || err.contains("12"), "{err}");
         let long = parse_rubric(
             "{\"rubric\":[
                 {\"id\":\"c1\",\"criterion\":\"结论\",\"check\":\"出现关键词\",\"must_include\":\"REVIEW-FINAL-PLACEHOLDER-TOKEN-VERY-LONG\"},
@@ -2123,7 +2175,7 @@ mod tests {
             ]}",
         )
         .unwrap_err();
-        assert!(long.contains("20"), "{long}");
+        assert!(long.contains("12"), "{long}");
     }
 
     #[test]
@@ -2509,5 +2561,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+    #[test]
+    fn review_rubric_rejects_conceptual_must_include_with_connective() {
+        let err = parse_rubric_with_input(
+        "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"说明操作系统\",\"check\":\"覆盖硬件与软件\",\"must_include\":\"管理计算机硬件和资源\"},{\"id\":\"c2\",\"criterion\":\"整体可读\",\"check\":\"读答案判断\"}]}",
+        "用三句话说明什么是操作系统",
+    )
+    .unwrap_err();
+        assert!(err.contains("连接词"), "{err}");
+        assert!(err.contains("概念性描述"), "{err}");
+    }
+
+    #[test]
+    fn review_rubric_rejects_one_char_must_include() {
+        let err = parse_rubric_with_input(
+        "{\"rubric\":[{\"id\":\"c1\",\"criterion\":\"说明操作系统\",\"check\":\"出现关键词\",\"must_include\":\"硬\"},{\"id\":\"c2\",\"criterion\":\"整体可读\",\"check\":\"读答案判断\"}]}",
+        "用三句话说明什么是操作系统",
+    )
+    .unwrap_err();
+        assert!(err.contains("至少 2 字"), "{err}");
+    }
+
+    #[test]
+    fn review_hardcheck_matches_include_terms_across_wording() {
+        let out = review_gate_plugin(
+        "review.hardcheck",
+        &json!({
+            "answer": "操作系统是管理计算机硬件与软件资源的系统。",
+            "rubric": [{"id":"c1","criterion":"覆盖硬件和软件","check":"两个词都出现","must_include":"管理计算机硬件 资源"}]
+        }),
+    )
+    .unwrap();
+        assert_eq!(out["pass"], true, "{out}");
+    }
+
+    #[test]
+    fn review_rubric_drops_fixture_must_not_include_item() {
+        let v = parse_rubric_with_input(
+        r#"{"rubric":[
+            {"id":"c1","criterion":"说明操作系统","check":"出现『操作系统』","must_include":"操作系统"},
+            {"id":"c4","criterion":"避免照搬答案","check":"没有直接复制示例中的句子或段落","must_not_include":["REVIEW-FINAL","REVIEW-START","\u003c...\u003e"]},
+            {"id":"c5","criterion":"整体可读","check":"读答案判断"}
+        ]}"#,
+        "用三句话说明什么是操作系统",
+    )
+    .unwrap();
+        assert_eq!(v["count"], 2, "{v}");
+        assert!(
+            v["warn"].as_array().unwrap().iter().any(|w| w
+                .as_str()
+                .unwrap_or("")
+                .contains("已丢弃")
+                && w.as_str().unwrap_or("").contains("c4")),
+            "{v}"
+        );
     }
 }

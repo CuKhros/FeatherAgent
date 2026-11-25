@@ -1,6 +1,24 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.5` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.6` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.6] - 2026-11-25
+
+### Fixed
+- N1: `must_include` is term-only. `GUIDE_SYSTEM` allows proper nouns, terms, file names, commands or fixed forms of 2–12 characters and rejects conceptual descriptions, sentences and connection words (`和/与/及/或/是/的/了`). `MUST_INCLUDE_MAX_CHARS` is 12; `must_not_include` keeps a separate 20-character limit. `review.hardcheck` splits the phrase into terms at whitespace, `、`, `，`, `,`, `；`, `;` and `/`, and requires every term; the reported `管理计算机硬件和资源` is rejected at guide time, while `管理计算机硬件 资源` can match a paraphrase.
+- N2: `util::percentile` sorts its own samples. Bench computes `boot_p50`/`boot_p90` once, reuses both, and exposes `metrics.boot_percentiles_consistent` and `gates.metrics_consistent`; P50 ≤ P90 is now structural.
+- N3: `run_turn` retries empty responses twice (temperatures 0.70/0.75) and malformed Ollama tool calls twice with a JSON-format correction, each emitting `model.retry` (`reason:"empty"` / `"tool_format"`). A plugin crash still restarts once; `failed` is emitted only after the budget.
+- N4: a rubric item whose `must_not_include` contains `REVIEW-FINAL`, `REVIEW-START`, `<...>`, `__FILL`, `{{` or `}}` is dropped as one item with `review.warn`.
+
+### Added
+- English editions of all five top-level binaries: `featheragent-en`, `featheragent-tui-en`, `featheragent-webui-en`, `feather-plugin-en`, `feather-storage-en`. The `-en` suffix selects English assets in the WebUI; kernel/TUI use separate English source targets; plugin/storage are protocol-only aliases.
+- Windows zip contains ten exes (five Chinese + five `-en`); Linux core contains eight binaries (four Chinese + four `-en`); the WebUI package contains both language editions.
+- Tests: `percentile_works_on_unsorted_samples_and_p50_le_p90`, `tool_format_error_detector_covers_ollama_and_json_errors`, `review_rubric_rejects_conceptual_must_include_with_connective`, `review_rubric_rejects_one_char_must_include`, `review_hardcheck_matches_include_terms_across_wording`, `review_rubric_drops_fixture_must_not_include_item`, `english_suffix_selects_english_assets`.
+
+### Changed
+- Linux automation: **162 test executions, 161 passed, 1 ignored**; the English worker/WebUI alias targets repeat 26 plugin and 4 WebUI cases. `fmt` and `clippy -D warnings` pass.
+- Bench: warm P50 1.142/1.167/1.163 ms, P90 1.761/1.190/1.170 ms; cold 3.722/2.324/2.262 ms; all gates true.
+- No wire message, contract, provider, storage, tool or plugin setting changed. `bench` fields are additive.
 
 ## [1.2.1-rc.3.5] - 2026-11-25
 

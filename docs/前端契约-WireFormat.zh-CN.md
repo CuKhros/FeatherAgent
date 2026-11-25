@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.3.5**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.3.6**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.5","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.6","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -337,6 +337,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 ```
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.3.6：没有新增 wire 消息、帧、端点或错误码。bench JSON 增加 `boot_percentiles_consistent`（同一组已排序样本保证 P50 ≤ P90）与 `gates.metrics_consistent`，均为增量字段。`review.warn` 可能报告某条 fixture 因 `must_not_include` 命中 `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}` 而被整条丢弃。hardcheck 把 `must_include` 按空白/标点拆成词项匹配；只改提示词/内部判定，不改 wire 契约。英文 `-en` 二进制使用同一协议。
 - 1.2.1-rc.3.5：没有新增 wire 消息、帧、端点或错误码。`review.parse_rubric` 输出新增 `advisory`（被排除在 hardcheck 与 judge 之外的主观判据 id）；`review.warn` 可能报告被丢弃的占位/示例条目（`已丢弃占位符/示例判据 …`）与主观降级。`must_include` 接受字符串数组，hardcheck 要求每个短语都出现。重试用尽后仍无可执行判据时，`review_prepare` 直接失败，不再继续。`GUIDE_SYSTEM` 占位符改为 `__FILL_*__`，只影响提示词文本，不影响 wire 契约。
 - 1.2.1-rc.3.4：没有新增 wire 消息、帧、端点或错误码。`review.guide` 载荷增加 `artifact`（文件路径，写盘失败时为空字符串）。`review.verdict` 增加 `attempts`（judge 模型调用次数）、`votes`（完成票数，早停跳过第三票时为 2）、`artifacts`（judge 生成物路径）。guide 与 judge 的每次模型输出在解析前写入 `<data>/review-artifacts/<session>/`，best-effort，不会让门禁失败。rubric 解析现在同时接收用户输入，`criterion` / `check` / `must_include` / `must_not_include` 中的占位符，以及任务里没出现的 `REVIEW-FINAL` / `REVIEW-START` 都会被拒绝。设置字段未变。
 - 1.2.1-rc.3.3：没有新增 wire 消息或字段。`review.hardcheck` / `review.judge` 为插件内部：字面/禁词/计数/glob/正则判据由 hardcheck 结案，只有描述型进 judge，描述型的答案原文证据规则不变。`review.warn` 文本对软 `min_points` 改为“按软判据接受…”，并说明有多少条描述型判据未评估。`plugins/review-gate/plugin.json` 新增 5 个设置声明（分流、pattern 引擎、票数、聚合、早停），经 `plugin.settings` 转述；`judge.votes` 只接受 1 或 3。bench JSON 新增 `boot_ms_p90`、`boot_sample_count`、`env.reliability` 与可选 `env.note`。帧、端点与错误码均未变化。

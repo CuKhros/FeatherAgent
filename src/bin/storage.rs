@@ -521,7 +521,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-fn main() {
+pub(crate) fn main() {
     let codec = if std::env::var("FEATHER_CODEC").ok().as_deref() == Some("json") {
         Codec::Json
     } else {

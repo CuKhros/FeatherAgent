@@ -27,11 +27,16 @@ fi
 BIN=target/release
 
 [ -x "$BIN/featheragent" ] || { echo "缺少 $BIN/featheragent，先 cargo build --release" >&2; exit 1; }
+for e in featheragent-en feather-plugin-en feather-storage-en featheragent-tui-en featheragent-webui-en; do
+  [ -x "$BIN/$e" ] || { echo "缺少英文版 $BIN/$e，先 cargo build --release --bins" >&2; exit 1; }
+done
 
 # ---------- core ----------
 CORE="$STAGE/featheragent-core"
 mkdir -p "$CORE/plugins"
 cp "$BIN/featheragent" "$BIN/feather-plugin" "$BIN/feather-storage" "$BIN/featheragent-tui" "$CORE/"
+# 每个顶层可执行文件都提供英文版；-en 后缀触发英文界面。
+cp "$BIN/featheragent-en" "$BIN/feather-plugin-en" "$BIN/feather-storage-en" "$BIN/featheragent-tui-en" "$CORE/"
 cp -r plugins/* "$CORE/plugins/"
 cp README.md README.zh-CN.md LICENSE SECURITY.md SECURITY.zh-CN.md CONTRIBUTING.md CONTRIBUTING.zh-CN.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md "$CORE/"
 mkdir -p "$CORE/docs"
@@ -40,8 +45,8 @@ cp docs/*.md "$CORE/docs/" 2>/dev/null || true
 # ---------- webui ----------
 WEBUI="$STAGE/featheragent-webui"
 mkdir -p "$WEBUI/web"
-cp "$BIN/featheragent-webui" "$WEBUI/"
-cp web/index.html web/app.js web/style.css "$WEBUI/web/"
+cp "$BIN/featheragent-webui" "$BIN/featheragent-webui-en" "$WEBUI/"
+cp web/index.html web/app.js web/style.css web/index.en.html web/app.en.js "$WEBUI/web/"
 cp README.md README.zh-CN.md LICENSE SECURITY.md SECURITY.zh-CN.md CONTRIBUTING.md CONTRIBUTING.zh-CN.md CODE_OF_CONDUCT.md CODE_OF_CONDUCT.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md "$WEBUI/"
 mkdir -p "$WEBUI/docs" && cp docs/*.md "$WEBUI/docs/" 2>/dev/null || true
 

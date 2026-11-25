@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "tool",
-    "version": "1.2.1-rc.3.5",
+    "version": "1.2.1-rc.3.6",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "tool.fs.read",

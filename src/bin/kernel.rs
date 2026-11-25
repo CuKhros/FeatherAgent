@@ -897,6 +897,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&dir);
 
     let fingerprint = env_fingerprint();
+    let boot_p50 = percentile(&boot_ms, 0.5);
+    let boot_p90 = percentile(&boot_ms, 0.9);
+    let boot_consistent = boot_p50 <= boot_p90;
     let m = serde_json::json!({
         "binary_bytes": size_bytes,
         "binary_mb": size_bytes as f64 / 1_048_576.0,
@@ -905,8 +908,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "boot_warmup_discarded_ms": boot_warmup_ms,
         "boot_samples_ms": boot_ms,
         "boot_sample_count": boot_ms.len(),
-        "boot_ms_p50": percentile(&boot_ms, 0.5),
-        "boot_ms_p90": percentile(&boot_ms, 0.9),
+        "boot_ms_p50": boot_p50,
+        "boot_ms_p90": boot_p90,
+        "boot_percentiles_consistent": boot_consistent,
         "cold_spawn_mode": "real_process_spawn",
         "cold_spawn_ms_p50": percentile(&spawn_ms, 0.5),
         "cold_spawn_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
@@ -945,6 +949,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "rss_le_15mb": rss_kb <= 15 * 1024,
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
+        "metrics_consistent": boot_consistent,
         "boot_mode": "warm_in_process_same_install_root",
         "boot_limit_ms": boot_limit,
         "cold_spawn_mode": "real_process_spawn",
@@ -952,10 +957,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "write_limit_us": write_limit,
     });
     if let Some(o) = gates.as_object_mut() {
-        o.insert(
-            boot_key.into(),
-            serde_json::json!(percentile(&boot_ms, 0.5) < boot_limit),
-        );
+        o.insert(boot_key.into(), serde_json::json!(boot_p50 < boot_limit));
         o.insert(
             cold_key.into(),
             serde_json::json!(percentile(&spawn_ms, 0.5) < cold_spawn_limit),
@@ -996,8 +998,8 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         );
         println!(
             "  热启动 P50/P90   {:.2} / {:.2} ms   (< {:.0} ms；{} 次样本，预热 {:.2} ms 已丢弃)",
-            percentile(&boot_ms, 0.5),
-            percentile(&boot_ms, 0.9),
+            boot_p50,
+            boot_p90,
             boot_limit,
             boot_ms.len(),
             boot_warmup_ms

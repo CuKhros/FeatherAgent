@@ -1,10 +1,26 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.5)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.6)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.5` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.6` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.5 summary (current candidate)
+## v1.2.1-rc.3.6 summary (current candidate)
+
+The rc.3.5 retest fully met checklist item 1, but checklist item 2 stopped at 4/5 because N1 still left a review round unapproved, checklist item 3 reached 4/5, the bench line printed P90 lower than P50 (N2), and the N4 fixture phrase was only blocked indirectly. This candidate fixes all four and adds English editions of every top-level binary.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N1 conceptual `must_include` | `GUIDE_SYSTEM` rule 4 permits only proper nouns/terms/file names/commands/fixed forms of 2–12 characters and rejects `和/与/及/或/是/的/了`; `MUST_INCLUDE_MAX_CHARS=12`; hardcheck splits at whitespace/`、`/`，`/`,`/`；`/`;`/`/` and requires every term; one-character terms are rejected | Unit `review_rubric_rejects_conceptual_must_include_with_connective` (the report's `管理计算机硬件和资源` is rejected), `review_rubric_rejects_one_char_must_include`, `review_hardcheck_matches_include_terms_across_wording` (`管理计算机硬件 资源` passes against “硬件与软件资源”) |
+| N2 P90 < P50 | `util::percentile` sorts its own samples; bench computes `boot_p50`/`boot_p90` once; JSON adds `boot_percentiles_consistent`, gates add `metrics_consistent` | Unit `percentile_works_on_unsorted_samples_and_p50_le_p90`; three release runs all have `boot_percentiles_consistent:true`, `metrics_consistent:true`, P50 ≤ P90 |
+| N3 empty/malformed model reply | Empty replies retry twice at temperatures 0.70/0.75; `is_tool_format_error` catches Ollama XML/`element ... closed by ... parameter`/generic invalid tool-call errors and retries twice with `tool_format_correction()`; every retry emits `model.retry` with `reason`; crash restart once | Unit `tool_format_error_detector_covers_ollama_and_json_errors`; loop behaviour is implemented in `run_turn`, live Ollama still pending |
+| N4 fixture item not dropped alone | `strip_placeholder_meta_items` drops an item when any `must_not_include` hits `REVIEW-FINAL`, `REVIEW-START`, `<...>`, `__FILL`, `{{` or `}}`; empty criterion/check remains a structural error | Unit `review_rubric_drops_fixture_must_not_include_item` (c1/c5 survive, c4 dropped, warn names it) |
+| English top-level binaries | `-en` suffix on all five; kernel/TUI use English source targets; WebUI switches `index.en.html`/`app.en.js` at runtime; plugin/storage are protocol-only aliases; Windows zip has 10 exes, Linux core 8 binaries, WebUI package 2 | CLI help/version English; TUI PTY shows `Sessions`/`Conversation`/`Context`/`Input`; WebUI `/` returns `lang="en"` and `RPC timeout`, Chinese WebUI still `lang="zh-CN"` and `RPC 超时` |
+
+Linux full suite: **162 test executions, 161 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). The English plugin/storage/WebUI alias targets reuse the same test modules, so 26 plugin and 4 WebUI cases execute twice. `cargo fmt --all` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): warm P50 **1.142 / 1.167 / 1.163 ms**, P90 **1.761 / 1.190 / 1.170 ms**; cold **3.722 / 2.324 / 2.262 ms**; RSS max **3,456 / 3,584 / 3,456 KiB**; write P95 **2.634 / 2.704 / 3.005 µs**; assemble P95 **0.138 / 0.143 / 0.123 ms**; RPC P95 **0.030 / 0.030 / 0.028 ms**; all gates true; `mem_load_pct` 16, `reliability:high`.
+
+Not verified: v1.2.1-rc.3.6 Windows real hardware (N1 guide rejection/term matching with a live 7B, N2 on Windows, N3 with a real Ollama malformed tool call, N4 fixture drop, bilingual exes, plus the rc.3.5 pending checks), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run. Bench numbers are from this VM and are not a Windows baseline.
+
+## v1.2.1-rc.3.5 summary (historical, released)
 
 The rc.3.4 retest met all three checklist items: criteria became task-specific (4 of 5 tasks had real criteria, 2 approved), artifacts matched the event paths, and feedback did not leak the literal phrase. Real 7B data: a1 operating-system unapproved (3 rounds), a2 TCP handshake **degraded** (guide rejected 3 times), a3 memory leak approved, a4 TCP handshake approved, a5 “ban the word system” unapproved (self-contradictory). Approval 2/5, degraded 1/5. The remaining defects were rubric-quality issues, so this candidate targets M1/M3 and hardens the S3 t6 prompt (M4).
 
@@ -166,15 +182,13 @@ Linux passes **86/86**: 57 lib + 2 plugin + 0 storage + 2 kernel + 3 TUI + 3 Web
 
 Not verified: v1.2.0-rc.1 Windows real hardware, v1.2 TUI PTY regression, two-turn in-turn steer, two full `/compact` turns, real DeepSeek billing, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64.
 
-### UI-language follow-up (2026-11-24, version unchanged)
+### UI-language follow-up (superseded by v1.2.1-rc.3.6)
 
-- English is still the primary documentation language; Chinese editions use the `.zh-CN.md` suffix. Historical Windows retest notes remain Chinese-only with the suffix.
-- TUI and WebUI are **Chinese-only**. The `--lang` switch and the English UI asset set were removed after usability feedback; the kernel stays language-neutral.
-- The WebUI ships the Chinese `index.html` + `app.js` only. There is no `index.zh-CN.html` or `app.zh-CN.js` route.
-- Verified: TUI help/main/settings screens remain Chinese; WebUI `GET /` serves the Chinese page and JS; `node --check web/app.js` passes.
-- Full suite is **86/86** (57 lib); `fmt` and `clippy -D warnings` pass. Windows cross-compile is rebuilt; real-hardware retest remains pending.
-- The Windows executable icon and WebUI favicon were replaced with the transparent-background 7-frame ICO; PE resource compilation and the WebUI favicon route were checked.
-- No version bump in this UI-language revert.
+- Chinese executables remain the default. The earlier `--lang` switch is still absent, but every top-level binary now has an English `-en` edition; the suffix, not a runtime flag, selects the language.
+- The English TUI uses separate English source strings; the English WebUI serves `index.en.html` + `app.en.js` while the Chinese WebUI keeps `index.html` + `app.js`.
+- `feather-plugin-en` and `feather-storage-en` are protocol-only aliases with no user-facing UI.
+- Verified: English TUI PTY shows English panel titles; English WebUI `GET /` returns `<html lang="en">` and English JS; the Chinese WebUI still returns `lang="zh-CN"` and `RPC 超时`. Windows cross-compile is rebuilt; real-hardware retest remains pending.
+- The Windows executable icon and WebUI favicon remain the transparent-background 7-frame ICO.
 
 ## v1.1.9 summary (historical)
 

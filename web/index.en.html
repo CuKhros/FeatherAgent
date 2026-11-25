@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="FeatherAgent: hand repetitive steps to a local 1B–14B model — a context engine and lightweight agent kernel for higher-level agents">
+  <title>FeatherAgent</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/logo-tile.png">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><img class="brand-logo" src="/logo.png" alt="FeatherAgent">FeatherAgent <span class="ver">v{{VERSION}}</span></div>
+    <div class="meta">
+      <span id="session-label">No session selected</span>
+      <span class="dot" id="state-dot"></span><span id="state-label">idle</span>
+    </div>
+    <div class="meta" id="conn">Connecting to kernel…</div>
+    <button id="btn-settings" class="settings-btn" title="Server, model, and sampling settings">⚙ Settings</button>
+    <button id="btn-plugins" class="ghost top-plugins" title="Plugin management and plugin pages">🧩 Plugins</button>
+  </header>
+
+  <main>
+    <aside class="sessions">
+      <div class="panel-title">Sessions</div>
+      <div class="new-row">
+        <input id="new-id" placeholder="New session id (optional)">
+        <button id="btn-new">New</button>
+      </div>
+      <div class="new-row">
+        <select id="new-workspace" title="Project workspace for the session"></select>
+        <button id="btn-new-workspace" class="ghost" title="Create a project under workspace_root">+ Project</button>
+      </div>
+      <div id="session-list" class="list"></div>
+    </aside>
+
+    <section class="chat">
+      <div class="panel-title">Conversation</div>
+      <div id="messages" class="messages"></div>
+      <div class="composer">
+        <textarea id="input" rows="3" placeholder="Type a message; Enter sends, Shift+Enter inserts a newline"></textarea>
+        <div class="actions">
+          <button id="btn-send" class="primary">Send</button>
+          <button id="btn-stop" class="danger">Stop and save</button>
+          <button id="btn-compact">Compact context</button>
+          <button id="btn-fork">Fork</button>
+          <span id="hint" class="hint"></span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="context">
+      <div class="panel-title">Context</div>
+      <div id="ctx" class="ctx">No snapshot yet</div>
+    </aside>
+  </main>
+
+  <div id="settings-page" class="settings-page hidden">
+    <div class="settings-shell">
+      <aside class="settings-nav">
+        <div class="nav-title">Settings</div>
+        <button class="nav-item active" data-view="general">General</button>
+        <button class="nav-item" data-view="plugins">Plugin management</button>
+        <div class="nav-subtitle">Plugin pages</div>
+        <div id="plugin-nav" class="plugin-nav"></div>
+        <div class="nav-foot">The sidebar and settings are declared by plugin manifests: the kernel only relays them, the frontend renders them, and new plugins need no UI changes.</div>
+      </aside>
+
+      <div class="settings-card">
+        <div class="settings-head">
+          <div>
+            <h2 id="settings-title">Settings</h2>
+            <p id="settings-subtitle" class="warn">Saved and submitted to the kernel via <code>config.set</code>; each plugin's settings are on its own page on the left, declared by the plugin and relayed by the kernel.</p>
+          </div>
+          <button id="btn-settings-close" class="ghost">Close</button>
+        </div>
+
+        <div id="view-general" class="settings-view">
+          <div class="settings-section">
+            <div class="section-title">Server</div>
+            <div class="settings-grid">
+              <label>Provider plugin
+                <select id="cfg-provider"></select>
+              </label>
+              <label>Base URL
+                <input id="cfg-base-url" placeholder="http://127.0.0.1:11434" autocomplete="off">
+              </label>
+              <label>API Key (optional)
+                <input id="cfg-provider-key" type="password" placeholder="Leave empty to omit Authorization" autocomplete="off">
+                <span class="form-hint">Stored only in the local config.json and sent only to the current provider; Ollama / llama.cpp / NInfer usually leave this empty.</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">Model &amp; sampling</div>
+            <div class="settings-grid">
+              <label>Model
+                <div class="model-row">
+                  <input id="cfg-model" placeholder="qwen2.5:7b" autocomplete="off">
+                  <select id="cfg-model-select" title="Discovered models"></select>
+                </div>
+                <span id="cfg-models-hint" class="form-hint"></span>
+              </label>
+              <label>Temperature <span id="cfg-temperature-val" class="value">0.70</span>
+                <input id="cfg-temperature" type="range" min="0" max="2" step="0.05" value="0.7">
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">Context &amp; workspace</div>
+            <div class="settings-grid">
+              <label>Context window (tokens)
+                <input id="cfg-context-window" type="number" min="512" max="131072" step="256" value="8192">
+              </label>
+              <label>Max tool turns per turn
+                <input id="cfg-max-turns" type="number" min="1" max="32" step="1" value="6">
+              </label>
+            </div>
+            <label class="stack-row">Project workspace container (empty = install root/workspace)
+              <input id="cfg-workspace-root" placeholder="D:\Projects\featheragent-workspaces or /home/me/work" autocomplete="off">
+              <span class="form-hint">This is not a single workspace but a project container: each direct subdirectory is an independent project with its own <code>.featheagent/</code> (worklog.md / memory.md). It may point outside the install directory; restart serve after saving.</span>
+            </label>
+            <label class="check-row">
+              <input id="cfg-auto-allow-safe" type="checkbox"> Auto-allow safe tools (e.g. file reads)
+            </label>
+          </div>
+
+          <div class="settings-actions">
+            <span id="settings-status" class="hint"></span>
+            <button id="btn-settings-refresh">Refresh model list</button>
+            <button id="btn-settings-cancel" class="ghost">Cancel</button>
+            <button id="btn-settings-save" class="primary">Save and apply</button>
+          </div>
+        </div>
+
+        <div id="view-plugins" class="settings-view hidden">
+          <div class="settings-section">
+            <div class="section-title">Installed plugins</div>
+            <div class="plugin-tools">
+              <input id="plugin-install-path" placeholder="Absolute plugin directory (containing plugin.json)" autocomplete="off">
+              <button id="btn-plugin-install">Install</button>
+              <button id="btn-plugin-refresh">Refresh</button>
+            </div>
+            <div id="plugin-list" class="plugin-list"></div>
+            <div id="plugin-status" class="form-hint"></div>
+          </div>
+        </div>
+
+        <div id="view-plugin" class="settings-view hidden">
+          <div id="plugin-detail" class="plugin-detail"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Dangerous tool needs confirmation</h3>
+      <p id="modal-tool"></p>
+      <pre id="modal-preview" class="modal-pre"></pre>
+      <p class="warn">This is a cooperative permission gate, not a sandbox: after confirmation the tool runs with the current user's permissions.</p>
+      <div class="actions">
+        <button id="btn-allow" class="danger">Allow</button>
+        <button id="btn-deny">Deny</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.5 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.3.6 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.3.5-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.3.6-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.3.5 fixes M1/M3 from the rc.3.4 retest and strengthens M4. M1: the guide prompt now uses `__FILL_*__` tokens instead of `<...>`, forbids criteria that discuss placeholders/examples, and the parser drops self-referential meta items while keeping real ones; `must_include` also accepts arrays such as `["SYN","ACK"]` and requires every phrase. An a2-style rubric must keep `c1`/`c3`, drop `c2` with `review.warn`, and reach a verdict instead of `degraded`. M3: subjective items (“concise and clear”, “well-formatted”) are marked advisory and excluded from hardcheck and judge; a rubric with no executable criterion at all is rejected after retries. M4: S3 t6 now explicitly requires one `tool.fs.read` call and forbids answering from guesswork. It also carries the rc.3.2 retest findings K1–K4: K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.3.6 fixes the rc.3.5 retest findings N1–N4 and adds English editions of all top-level binaries. N1: `must_include` is term-only (2–12 characters, no concept words or sentences), and hardcheck requires every whitespace/punctuation-separated term instead of one literal substring; a conceptual phrase such as `管理计算机硬件和资源` must be rejected and retried. N2: `percentile` sorts its own samples; bench computes P50/P90 once and exposes `boot_percentiles_consistent` / `metrics_consistent`, so P50 ≤ P90. N3: empty responses get two temperature retries and malformed Ollama tool calls get two `tool_format` retries with a JSON correction; a crash still restarts once. N4: a rubric item whose `must_not_include` contains `REVIEW-FINAL`, `REVIEW-START`, `<...>`, `__FILL`, `{{` or `}}` is dropped as one item with `review.warn`. The package contains ten exes: the five Chinese tools plus `featheragent-en`, `featheragent-tui-en`, `featheragent-webui-en`, `feather-plugin-en` and `feather-storage-en`. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.5\
+D:\FeatherAgent-1.2.1-rc.3.6\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.3.5`, then continue.
+Wait for `serve ready: 1.2.1-rc.3.6`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.5
+cd D:\FeatherAgent-1.2.1-rc.3.6
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -36,7 +36,15 @@ In another terminal:
 .\featheragent.exe chat --root . --text "hello"
 ```
 
-Both frontends are Chinese-only; there is no `--lang` switch.
+The default binaries are Chinese. For the English editions, run:
+
+```powershell
+.\featheragent-en.exe help
+.\featheragent-tui-en.exe --root .
+.\featheragent-webui-en.exe --root . --app
+```
+
+There is no `--lang` switch; the `-en` filename suffix selects the English kernel/TUI/WebUI assets. The `feather-plugin-en.exe` and `feather-storage-en.exe` workers are protocol-only aliases.
 
 ## 2. S1 project-level workspace
 
@@ -110,7 +118,7 @@ The Settings "Search provider" defaults to `local` and needs no API key. Expecte
 
 - TUI: send `# heading`, `- list`, `1. ordered`, `> quote`, code block, `**bold**`, `*italic*`, `[link](https://…)`; the assistant reply should drop Markdown markers while keeping structure.
 - WebUI: the same message renders headings, lists, quotes, code blocks, and clickable links; assistant messages no longer show raw `**` or triple backticks.
-- Taskbar/program icons: all five exes show the cyan feather icon; WebUI top-left and favicon show it too.
+- Taskbar/program icons: all ten exes show the cyan feather icon; WebUI top-left and favicon show it too.
 
 ## 6. Regression commands
 
@@ -183,6 +191,17 @@ v1.2.1-rc.3.2 regression checks:
 3. **J3: bench fingerprint.** `featheragent.exe bench --json` must include `metrics.env` with `cpu_count`, `mem_total_kb`, `mem_available_kb`, `mem_load_pct` and `uptime_s`; the human-readable run must print one “环境指纹” line. Record it next to every bench number.
 4. **Display name.** `featheragent.exe version`, `featheragent-tui.exe version`, `featheragent-webui.exe version` must print `FeatherAgent …` (TUI/WebUI included), while binary names remain lowercase.
 
+v1.2.1-rc.3.6 regression checks:
+
+**N1–N4 first:**
+
+1. **N1: conceptual `must_include` is rejected.** Run the operating-system task with a real 7B. If the guide writes `must_include:"管理计算机硬件和资源"`, validation must reject it (connection word) and retry. A term form such as `管理计算机硬件 资源` must be accepted, and an answer that says “硬件与软件资源” must pass hardcheck; an answer missing one term must fail.
+2. **N1: term matching is not a free pass.** A multi-term `must_include` must require every term; a phrase with `/` must split unless it looks like a path with a dot.
+3. **N2: bench consistency.** `bench --json` must have `boot_percentiles_consistent:true` and `gates.metrics_consistent:true`, and P50 ≤ P90 on every run and on both platforms.
+4. **N3: empty and malformed tool-call retries.** With a mock that returns an empty body, expect up to two `model.retry` events with `reason:"empty"` and temperatures 0.70/0.75. With an Ollama error containing `XML syntax error` or `element ... closed by ... parameter`, expect up to two `model.retry` events with `reason:"tool_format"`, a system correction asking for JSON `tool_calls`, and a `failed` only after the budget.
+5. **N4: fixture item drops alone.** A rubric item with `must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]` must be dropped by itself; `review.warn` must name its id and real items must survive.
+6. **Bilingual package.** The zip root must contain all ten exes. `featheragent-en.exe version` and help must be English; `featheragent-tui-en.exe` must show English panels; `featheragent-webui-en.exe` must serve `<html lang="en">` and English JS; the Chinese editions must keep Chinese UI.
+
 v1.2.1-rc.3.5 regression checks:
 
 **M1/M3/M4 first:**
@@ -218,13 +237,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.3.5 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.3.6 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.5-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.6-windows-x64.zip -Algorithm SHA256
 ```
 
-Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.
+Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

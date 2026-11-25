@@ -66,7 +66,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.3.5 pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with ten exes (Chinese + English `-en`) | **tested** (v1.1.9 real hardware; v1.2.1-rc.3.6 bilingual package pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -104,7 +104,7 @@ scripts/build-linux.sh                                  # version gate + --locke
 
 Factory plugins live in `plugins/`: `provider-mock`, `provider-ollama`, `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, generic `provider-openai`, `review-gate`, `tool`, `storage`, and `search`. `serve` scans `<install root>/plugins` and defaults to `provider-mock`. To use real Ollama: start `ollama serve`, then `serve --provider provider-ollama --model qwen2.5:7b`. Ollama native `/api/*` and `/v1` base URLs are both accepted; llama.cpp/NInfer/LM Studio/vLLM use their OpenAI-compatible `/v1` endpoints and the base URL is normalized automatically.
 
-The TUI and WebUI are **Chinese-only**; there is no `--lang` switch and no English UI asset set in the binaries. The kernel itself is language-neutral, while the documentation remains available in English and Chinese.
+The Chinese executables are the default. Every top-level binary also has an English edition selected by the `-en` filename suffix (`featheragent-en`, `featheragent-tui-en`, `featheragent-webui-en`, `feather-plugin-en`, `feather-storage-en`); there is no `--lang` switch. The English TUI and WebUI carry their own runtime strings and assets, the plugin/storage `-en` builds are protocol-only aliases, and the Chinese editions keep their previous behaviour. The kernel itself is language-neutral, while the documentation remains available in English and Chinese.
 
 The WebUI **Settings** page and TUI `/settings` switch provider, model, temperature, context parameters, workspace, and an optional Bearer API key. The key is sent only to the selected provider and stored locally in `config.json`. The WebUI **Plugins** page and TUI `/plugins` install/enable/disable plugins; each registered plugin gets a settings-sidebar page. The model dropdown lists everything returned by `provider.models`; saving applies it through `config.set`. `serve` prints a banner and writes `runtime/ipc/starting` / `ready`; if startup is slow, `chat` reports "kernel not ready (starting)".
 
@@ -114,19 +114,22 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.3.5-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.3.6-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
-.\featheragent.exe help                       # command table
+.\featheragent.exe help                       # Chinese command table
+.\featheragent-en.exe help                    # English command table
 .\featheragent.exe serve --root .
-.\featheragent-tui.exe --root .              # second terminal
-.\featheragent-webui.exe --root . --app        # finds Chrome/Edge
+.\featheragent-tui.exe --root .              # Chinese TUI (second terminal)
+.\featheragent-tui-en.exe --root .           # English TUI
+.\featheragent-webui.exe --root . --app        # Chinese WebUI (finds Chrome/Edge)
+.\featheragent-webui-en.exe --root . --app     # English WebUI
 .\featheragent.exe chat --root . --text "hello"   # script channel without TUI/WebUI
 ```
 
-The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
+The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.3.5)
+## Platform gate differences (v1.2.1-rc.3.6)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
@@ -155,6 +158,7 @@ The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runt
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.3.6 Changes](docs/v1.2.1-rc.3.6-Changes.md)** — term-only `must_include` with word-term matching, a self-sorting percentile and consistent bench P50/P90, empty/tool-format retries with correction, fixture `must_not_include` item dropping, and English editions of all top-level binaries ([中文](docs/v1.2.1-rc.3.6-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.5 Changes](docs/v1.2.1-rc.3.5-Changes.md)** — placeholder-meta items are dropped instead of copied, subjective criteria are advisory and stay out of the judge, array `must_include`, and a stronger S3 t6 tool-call prompt ([中文](docs/v1.2.1-rc.3.5-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.4 Changes](docs/v1.2.1-rc.3.4-Changes.md)** — guide schema placeholders and validation (no copied `REVIEW-FINAL`), feedback that no longer echoes the literal phrase, and guide/judge artifacts recorded under `data/review-artifacts` ([中文](docs/v1.2.1-rc.3.4-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.3 Changes](docs/v1.2.1-rc.3.3-Changes.md)** — criterion routing (hard/negative/count/regex to hardcheck; only description items to judge), regex criteria, missing-item reinjection, serial majority voting, warm P90/sample count, memory-load reliability note ([中文](docs/v1.2.1-rc.3.3-变更说明.zh-CN.md))
@@ -174,6 +178,8 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
+`v1.2.1-rc.3.6` fixes the four findings from the rc.3.5 retest and adds English editions of every top-level binary. `must_include` is now term-only (2–12 characters, no concept words or sentences such as `和/与/及/是/的`), and hardcheck requires each whitespace/punctuation-separated term rather than one literal substring; a conceptual phrase is rejected at guide time and retried. `percentile` sorts its own samples, bench computes P50/P90 once, and JSON/gates expose `boot_percentiles_consistent` / `metrics_consistent`. Empty responses get two temperature retries and malformed Ollama tool calls get two retries plus a JSON-format correction, each emitted as `model.retry`; a crash still restarts once. A rubric item whose `must_not_include` contains `REVIEW-FINAL`, `REVIEW-START`, `<...>`, `__FILL`, `{{` or `}}` is dropped as a whole with `review.warn`. The five Chinese executables keep their names; `featheragent-en`, `featheragent-tui-en`, `featheragent-webui-en`, `feather-plugin-en` and `feather-storage-en` are packaged beside them in every Release asset.
+
 `v1.2.1-rc.3.5` fixes the M1/M3 findings from the rc.3.4 real-hardware retest. The guide no longer treats a placeholder example as task content: `GUIDE_SYSTEM` uses `__FILL_*__` tokens, a rubric item that only discusses placeholders/examples is dropped with `review.warn` while real items survive, and `must_include` accepts an array such as `["SYN","ACK"]` and requires every phrase (M1). Subjective criteria such as “concise and clear” are marked advisory and excluded from hardcheck and judge, and a rubric with no executable criterion at all is rejected after retries instead of being accepted because it is non-empty (M3). The S3 t6 prompt now explicitly requires one `tool.fs.read` call before answering (M4). rc.3.4 already made criteria task-specific, stopped feedback from echoing the literal phrase, and recorded every guide/judge rollout under `data/review-artifacts/<session>/`.
 
 `v1.2.1-rc.3.2` fixed the three findings from the rc.3.1 real-hardware retest without touching the architecture: `min_points` became a soft item handed to the judge (with a broader Chinese-aware point count and a `review.warn`), review feedback used `〔1〕` labels instead of the bare `c1:` prefixes the exec model copied into answers, and `bench --json` carried a `metrics.env` fingerprint so numbers can be compared across runs.
@@ -182,6 +188,6 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 `v1.2.1-rc.3` made plugin settings a declaration: a plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. It also closed the review-gate and S3 findings H1–H4 from the rc.2.1 retest: phrase-only rubrics with four criterion kinds and a pre-judge hardcheck, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that ask for a single tool call.
 
-Linux automation has **125 tests: 124 passed, 1 ignored by default** (62 lib, 22 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 31 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (the review-gate page opens with the model hint “本地模型 1 个；←/→ 选择”, and Enter on a value row persisted `max_rounds` 2→3 into `config.json`), and the WebUI bridge over WebSocket (`plugin.settings` returns the three model fields with `options_source:"models"`, and a `tool.shell` confirm request arrived with `arguments` + a `$ echo hi` preview that could be denied).
+Linux automation has **162 test executions: 161 passed, 1 ignored by default** (63 lib, 26 plugin ×2, 2 kernel, 3 TUI, 4 WebUI ×2, 2 golden, 31 integration); the English worker/WebUI aliases repeat the plugin and WebUI modules, so those cases run twice. The ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (the review-gate page opens with the model hint “本地模型 1 个；←/→ 选择”, and Enter on a value row persisted `max_rounds` 2→3 into `config.json`), and the WebUI bridge over WebSocket (`plugin.settings` returns the three model fields with `options_source:"models"`, and a `tool.shell` confirm request arrived with `arguments` + a `$ echo hi` preview that could be denied).
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus retests through rc.3.4 that verified the provider body, temperature rejection, banner, R1 gates, review-gate routing, task-specific criteria, artifacts and non-leaking feedback. The rc.3.4 retest approved 2/5 and produced 1/5 degraded: a2’s guide kept writing a criterion about `<...>` placeholders, retried identically, and degraded the round (M1); a1’s “concise and clear” item made the judge swing to unapproved (M3). This candidate hardens the guide examples, drops meta items, makes subjective items advisory, and accepts array `must_include`; S3 t6 also gets a hard tool-call instruction. The v1.2.1-rc.3.5 Windows package is cross-compiled and its automation runs only on Linux; M1/M3/M4 and the previous pending items still need real hardware. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus retests through rc.3.4 that verified the provider body, temperature rejection, banner, R1 gates, review-gate routing, task-specific criteria, artifacts and non-leaking feedback. The rc.3.4 retest approved 2/5 and produced 1/5 degraded: a2’s guide kept writing a criterion about `<...>` placeholders, retried identically, and degraded the round (M1); a1’s “concise and clear” item made the judge swing to unapproved (M3). This candidate hardens the guide examples, drops meta items, makes subjective items advisory, and accepts array `must_include`; S3 t6 also gets a hard tool-call instruction. The v1.2.1-rc.3.6 Windows package contains ten exes (five Chinese, five English `-en`) and is cross-compiled; its automation runs only on Linux. N1–N4 and the earlier pending items still need real hardware. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.

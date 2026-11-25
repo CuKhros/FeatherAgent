@@ -1,6 +1,24 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.5` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.6` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.6] - 2026-11-25
+
+### 修复
+- N1：`must_include` 改为只收术语。`GUIDE_SYSTEM` 只允许专有名词、术语、文件名、命令或固定写法，2–12 字，禁止概念性描述、整句和连接词（`和/与/及/或/是/的/了`）。`MUST_INCLUDE_MAX_CHARS` 为 12；`must_not_include` 单独保留 20 字上限。`review.hardcheck` 按空白、`、`、`，`、`,`、`；`、`;`、`/` 拆词项，要求每个词项都出现；报告中的 `管理计算机硬件和资源` 会在 guide 阶段被拒，`管理计算机硬件 资源` 可在改写答案中通过。
+- N2：`util::percentile` 内部排序。bench 只算一次 `boot_p50`/`boot_p90` 并复用，新增 `metrics.boot_percentiles_consistent` 与 `gates.metrics_consistent`；P50 ≤ P90 成为结构保证。
+- N3：`run_turn` 对空响应最多重试 2 次（温度 0.70/0.75），对 Ollama 畸形工具调用最多重试 2 次并回注 JSON 格式纠错，均发 `model.retry`（`reason:"empty"` / `"tool_format"`）。插件崩溃仍重启一次；预算耗尽才发 `failed`。
+- N4：`must_not_include` 命中 `REVIEW-FINAL`、`REVIEW-START`、`<...>`、`__FILL`、`{{`、`}}` 时整条丢弃并打 `review.warn`。
+
+### 新增
+- 全部五个顶层二进制的英文版：`featheragent-en`、`featheragent-tui-en`、`featheragent-webui-en`、`feather-plugin-en`、`feather-storage-en`。WebUI 用 `-en` 后缀选择英文资源；kernel/TUI 使用独立英文源码 target；plugin/storage 是纯协议别名。
+- Windows zip 含 10 个 exe（5 中文 + 5 `-en`）；Linux core 含 8 个二进制（4 中文 + 4 `-en`）；WebUI 包同时含中英两版。
+- 测试：`percentile_works_on_unsorted_samples_and_p50_le_p90`、`tool_format_error_detector_covers_ollama_and_json_errors`、`review_rubric_rejects_conceptual_must_include_with_connective`、`review_rubric_rejects_one_char_must_include`、`review_hardcheck_matches_include_terms_across_wording`、`review_rubric_drops_fixture_must_not_include_item`、`english_suffix_selects_english_assets`。
+
+### 变更
+- Linux 自动化：**162 次测试执行，161 通过、1 ignored**；英文 worker/WebUI 别名 target 重复执行 26 个 plugin 与 4 个 WebUI 用例。`fmt` 与 `clippy -D warnings` 通过。
+- bench：热启动 P50 1.142/1.167/1.163 ms，P90 1.761/1.190/1.170 ms；冷启动 3.722/2.324/2.262 ms；门禁全绿。
+- 没有改动 wire 消息、契约、provider、storage、tool 或插件设置；bench 字段为增量。
 
 ## [1.2.1-rc.3.5] - 2026-11-25
 

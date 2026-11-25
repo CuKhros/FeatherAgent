@@ -26,11 +26,53 @@ use featheragent::server::client::Client;
 use featheragent::util::{base64, random_token, sha1, Args};
 
 const INDEX_HTML: &str = include_str!("../../web/index.html");
+const INDEX_HTML_EN: &str = include_str!("../../web/index.en.html");
 const APP_JS: &str = include_str!("../../web/app.js");
+const APP_JS_EN: &str = include_str!("../../web/app.en.js");
 const STYLE_CSS: &str = include_str!("../../web/style.css");
 const FAVICON_ICO: &[u8] = include_bytes!("../../web/favicon.ico");
 const LOGO_PNG: &[u8] = include_bytes!("../../web/logo.png");
 const LOGO_TILE_PNG: &[u8] = include_bytes!("../../web/logo-tile.png");
+
+/// 英文版二进制以 `-en` 结尾；同一份源码编译出中英两个 bin target。
+fn has_en_suffix(name: &str) -> bool {
+    name.to_lowercase()
+        .strip_suffix(".exe")
+        .unwrap_or(&name.to_lowercase())
+        .ends_with("-en")
+}
+
+fn is_en() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .map(|s| has_en_suffix(&s))
+        .unwrap_or(false)
+}
+
+fn t(en: &str, zh: &str) -> String {
+    if is_en() {
+        en.to_string()
+    } else {
+        zh.to_string()
+    }
+}
+
+fn index_html() -> &'static str {
+    if is_en() {
+        INDEX_HTML_EN
+    } else {
+        INDEX_HTML
+    }
+}
+
+fn app_js() -> &'static str {
+    if is_en() {
+        APP_JS_EN
+    } else {
+        APP_JS
+    }
+}
 
 struct Ctx {
     port: u16,
@@ -41,11 +83,17 @@ struct Ctx {
     rpc: Mutex<Client>,
 }
 
-fn main() {
+pub(crate) fn main() {
     let args = Args::parse(std::env::args().skip(1));
     if args.has("--help") || args.positional.iter().any(|p| p == "-h") {
         println!("FeatherAgent WebUI {}", env!("CARGO_PKG_VERSION"));
-        println!("用法: featheragent-webui [--root DIR] [--socket PATH] [--app]");
+        println!(
+            "{}",
+            t(
+                "Usage: featheragent-webui-en [--root DIR] [--socket PATH] [--app]",
+                "用法: featheragent-webui [--root DIR] [--socket PATH] [--app]"
+            )
+        );
         return;
     }
     if args.has("version") {
@@ -68,7 +116,7 @@ fn main() {
     let rpc_conn = match Client::connect(&socket) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("无法连接内核 {socket:?}: {e}\n先运行 `featheragent serve`");
+            eprintln!("{}", t(&format!("Cannot connect to kernel {socket:?}: {e}\nStart `featheragent serve` first"), &format!("无法连接内核 {socket:?}: {e}\n先运行 `featheragent serve`")));
             std::process::exit(2);
         }
     };
@@ -77,7 +125,13 @@ fn main() {
             .client
             .call_with_timeout("initialize", json!({}), Duration::from_secs(3))
     {
-        eprintln!("内核未就绪（{socket:?}）: {e}");
+        eprintln!(
+            "{}",
+            t(
+                &format!("Kernel not ready ({socket:?}): {e}"),
+                &format!("内核未就绪（{socket:?}）: {e}")
+            )
+        );
         std::process::exit(2);
     }
     // 该连接只做 RPC；通知由 SSE 连接单独订阅。这里排空事件，避免无界通道增长。
@@ -116,11 +170,17 @@ fn main() {
     if args.has("--app") {
         launch_browser(&url, &ctx.profile);
     } else {
-        println!("在浏览器打开上面的 url（token 在 #fragment 中，不会进 Referer/日志）");
+        println!("{}", t("Open the URL above in a browser (the token is in the #fragment and is not sent in Referer/logs)", "在浏览器打开上面的 url（token 在 #fragment 中，不会进 Referer/日志）"));
     }
 
     if let Err(e) = serve(listener, ctx) {
-        eprintln!("WebUI 桥退出: {e}");
+        eprintln!(
+            "{}",
+            t(
+                &format!("WebUI bridge exited: {e}"),
+                &format!("WebUI 桥退出: {e}")
+            )
+        );
     }
 }
 
@@ -286,7 +346,7 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
     }
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") | ("GET", "/index.html") => {
-            let html = INDEX_HTML.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
+            let html = index_html().replace("{{VERSION}}", env!("CARGO_PKG_VERSION"));
             respond(
                 &mut stream,
                 200,
@@ -298,7 +358,7 @@ fn handle(mut stream: TcpStream, ctx: Arc<Ctx>) -> std::io::Result<()> {
             &mut stream,
             200,
             "application/javascript; charset=utf-8",
-            APP_JS.as_bytes(),
+            app_js().as_bytes(),
         ),
         ("GET", "/style.css") => respond(
             &mut stream,
@@ -703,17 +763,40 @@ fn launch_browser(url: &str, profile: &PathBuf) {
         match cmd.spawn() {
             Ok(child) => {
                 println!(
-                    "已启动 WebUI（{}，pid {}，profile {}）",
-                    bin,
-                    child.id(),
-                    profile.display()
+                    "{}",
+                    t(
+                        &format!(
+                            "WebUI started ({}, pid {}, profile {})",
+                            bin,
+                            child.id(),
+                            profile.display()
+                        ),
+                        &format!(
+                            "已启动 WebUI（{}，pid {}，profile {}）",
+                            bin,
+                            child.id(),
+                            profile.display()
+                        )
+                    )
                 );
                 return;
             }
-            Err(e) => eprintln!("启动 {bin} 失败: {e}"),
+            Err(e) => eprintln!(
+                "{}",
+                t(
+                    &format!("Failed to start {bin}: {e}"),
+                    &format!("启动 {bin} 失败: {e}")
+                )
+            ),
         }
     }
-    eprintln!("未找到 Chromium 系浏览器；请手动打开 URL（--app 模式跳过）");
+    eprintln!(
+        "{}",
+        t(
+            "No Chromium-based browser found; open the URL manually (skipped in --app mode)",
+            "未找到 Chromium 系浏览器；请手动打开 URL（--app 模式跳过）"
+        )
+    );
 }
 
 // 供 `cargo test` 里做冒烟检查的最小自测
@@ -727,6 +810,17 @@ mod tests {
     #[test]
     fn urldecode_basic() {
         assert_eq!(urldecode("a%20b+c"), "a b c");
+    }
+
+    #[test]
+    fn english_suffix_selects_english_assets() {
+        assert!(has_en_suffix("featheragent-webui-en"));
+        assert!(has_en_suffix("featheragent-webui-en.exe"));
+        assert!(!has_en_suffix("featheragent-webui"));
+        assert!(INDEX_HTML_EN.contains("Settings"));
+        assert!(!INDEX_HTML_EN.contains("设置"));
+        assert!(APP_JS_EN.contains("RPC timeout"));
+        assert!(!APP_JS_EN.contains("RPC 超时"));
     }
 
     #[test]

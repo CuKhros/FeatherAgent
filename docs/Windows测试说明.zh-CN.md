@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.5 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.6 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.5-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.6-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.5 修复 rc.3.4 复测的 M1/M3，并强化 M4。M1：guide 提示词改用 `__FILL_*__` 形态，禁止判据讨论占位符/示例；解析器丢弃自我指涉的元判据、保留真实条目；`must_include` 接受 `["SYN","ACK"]` 这类数组并要求每个短语都出现。a2 形态的 rubric 必须保留 c1/c3、丢弃 c2 并打 `review.warn`，最终给出裁决而不是 degraded。M3：「简洁明了」「排版好看」这类主观项标记 advisory，不进入 hardcheck 与 judge；整份清单没有可执行判据时，重试用尽后直接失败。M4：S3 t6 明确要求先调用一次 `tool.fs.read`，禁止凭猜测回答。它同时延续 rc.3.2 复测的 K1–K4：K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.6 修复 rc.3.5 复测的 N1–N4，并为全部顶层二进制增加英文版。N1：`must_include` 只收术语（2–12 字，禁概念词/整句），hardcheck 按空白/标点拆词项并要求全部出现，不再要求整串连续子串；`管理计算机硬件和资源` 这类概念写法必须被拒并重试。N2：`percentile` 内部排序；bench 只算一次 P50/P90，并输出 `boot_percentiles_consistent` / `metrics_consistent`，保证 P50 ≤ P90。N3：空响应两次升温重试，Ollama 畸形工具调用两次 `tool_format` 重试并回注 JSON 纠错；崩溃仍重启一次。N4：`must_not_include` 命中 `REVIEW-FINAL`、`REVIEW-START`、`<...>`、`__FILL`、`{{`、`}}` 时整条丢弃并打 `review.warn`。包内共 10 个 exe：5 个中文工具 + `featheragent-en`、`featheragent-tui-en`、`featheragent-webui-en`、`feather-plugin-en`、`feather-storage-en`。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.5\
+D:\FeatherAgent-1.2.1-rc.3.6\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3.5\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.5` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.6` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.5
+cd D:\FeatherAgent-1.2.1-rc.3.6
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -35,6 +35,16 @@ cd D:\FeatherAgent-1.2.1-rc.3.5
 .\featheragent-webui.exe --root . --app
 .\featheragent.exe chat --root . --text "hello"
 ```
+
+默认二进制是中文版。英文版用 `-en` 后缀，不提供 `--lang` 切换：
+
+```powershell
+.\featheragent-en.exe help
+.\featheragent-tui-en.exe --root .
+.\featheragent-webui-en.exe --root . --app
+```
+
+`feather-plugin-en.exe` 与 `feather-storage-en.exe` 是纯协议 worker 别名。
 
 ## 2. S1 项目级工作区
 
@@ -108,7 +118,7 @@ WebUI：顶栏项目下拉 + “＋项目”，新建会话时选择项目；恢
 
 - TUI：发送含 `# 标题`、`- 列表`、`1. 有序列表`、`> 引用`、代码块、`**粗体**`、`*斜体*`、`[链接](https://…)` 的消息，助手回复应去掉 Markdown 标记并保留结构。
 - WebUI：同样的消息应渲染为标题、列表、引用、代码块和可点击链接；助手消息不再显示原始 `**` 或三重反引号。
-- 任务栏/程序图标：资源管理器中 5 个 exe 应显示青色羽毛图标；WebUI 左上角与浏览器标签页 favicon 也应显示羽毛。
+- 任务栏/程序图标：资源管理器中 10 个 exe 应显示青色羽毛图标；WebUI 左上角与浏览器标签页 favicon 也应显示羽毛。
 
 ## 6. 回归命令
 
@@ -181,6 +191,15 @@ v1.2.1-rc.3.2 回归核对：
 3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
 4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
 
+v1.2.1-rc.3.6 回归核对：
+
+1. **N1：概念性 `must_include` 被拒。** 用真实 7B 跑操作系统任务。guide 若写 `must_include:"管理计算机硬件和资源"`，校验必须因连接词拒绝并重试；`管理计算机硬件 资源` 这类术语形态应被接受，答案写“硬件与软件资源”应通过 hardcheck，缺任一词项必须失败。
+2. **N1：词项匹配不是无条件放行。** 多词项必须每个都出现；含 `/` 的短语要拆开，除非它像带点号的路径。
+3. **N2：bench 一致性。** `bench --json` 必须有 `boot_percentiles_consistent:true` 和 `gates.metrics_consistent:true`，每次运行、两个平台都必须 P50 ≤ P90。
+4. **N3：空响应与畸形工具调用重试。** 空 body mock 应出现最多两次 `model.retry`，`reason:"empty"`，温度 0.70/0.75；错误串含 `XML syntax error` 或 `element ... closed by ... parameter` 时，应出现最多两次 `reason:"tool_format"` 重试、一条要求 JSON `tool_calls` 的 system 纠错，且只在预算耗尽后 `failed`。
+5. **N4：fixture 条目单独丢弃。** `must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]` 的条目必须整条丢弃，`review.warn` 指明 id，真实条目保留。
+6. **双语包。** zip 根目录必须有 10 个 exe。`featheragent-en.exe version` 与 help 必须英文；`featheragent-tui-en.exe` 应显示英文三栏；`featheragent-webui-en.exe` 应返回 `<html lang="en">` 与英文 JS；中文版保持中文界面。
+
 v1.2.1-rc.3.5 回归核对：
 
 1. **L1：guide 写任务判据，不抄 schema。** 用真实 7B，输入普通任务 `用三句话说明什么是操作系统`（不含 `REVIEW_*` 令牌）。`review.guide` 必须成功；rubric 不得出现 `这项检查什么`、`怎么核对`、`REVIEW-FINAL` 或字面 `<...>`。回合不得每次都挂在 `c1`。
@@ -207,13 +226,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.5 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.6 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.5-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.6-windows-x64.zip -Algorithm SHA256
 ```
 
-以 Release 资产与 manifest 的字节数/哈希为准；包内 5 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。
+以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

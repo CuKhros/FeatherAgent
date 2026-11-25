@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Windows x64 单包（用户解压即测）：5 个 exe + plugins + web + docs。
+# Windows x64 单包（用户解压即测）：10 个 exe（5 中文 + 5 英文 -en）+ plugins + web + docs。
 # 用法: scripts/package-windows.sh [--skip-build]
 # 产物: dist/FeatherAgent-<version>-windows-x64.zip + .sha256 + manifest.json
 set -euo pipefail
@@ -25,13 +25,14 @@ STAGE=$DIST/.stage-$NAME
 scripts/version-check.sh
 [ "$SKIP_BUILD" -eq 1 ] || scripts/build-windows.sh
 
-for e in featheragent featheragent-tui featheragent-webui feather-plugin feather-storage; do
+for e in featheragent featheragent-tui featheragent-webui feather-plugin feather-storage featheragent-en featheragent-tui-en featheragent-webui-en feather-plugin-en feather-storage-en; do
   [ -f "$BIN/$e.exe" ] || { echo "缺少 $BIN/$e.exe，先跑 scripts/build-windows.sh" >&2; exit 1; }
 done
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/$NAME"
 cp "$BIN"/*.exe "$STAGE/$NAME/"
+# 每个顶层可执行文件都提供英文版；-en 后缀触发英文界面。
 cp -r plugins "$STAGE/$NAME/plugins"
 cp -r web "$STAGE/$NAME/web"
 mkdir -p "$STAGE/$NAME/tools"

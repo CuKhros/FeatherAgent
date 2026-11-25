@@ -182,10 +182,14 @@ pub fn base64(data: &[u8]) -> String {
 }
 
 /// 最近秩百分位：P95 取第 ceil(0.95*n) 个（1 起算）。
-pub fn percentile(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() {
+pub fn percentile(samples: &[f64], p: f64) -> f64 {
+    if samples.is_empty() {
         return 0.0;
     }
+    // 不要把「已排序」当前提：调用方可能传原始样本（如 bench 的 boot_samples_ms）。
+    // 内部排序保证 P50/P90 与同一组样本同源，也保证 P50 ≤ P90。
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let rank = ((sorted.len() as f64) * p).ceil() as usize;
     let idx = rank.saturating_sub(1).min(sorted.len() - 1);
     sorted[idx]
@@ -292,9 +296,13 @@ mod tests {
     }
 
     #[test]
-    fn percentile_works() {
-        let v: Vec<f64> = (1..=100).map(|x| x as f64).collect();
-        assert_eq!(percentile(&v, 0.95), 95.0);
-        assert_eq!(percentile(&v, 0.5), 50.0);
+    fn percentile_works_on_unsorted_samples_and_p50_le_p90() {
+        let v = vec![36.9, 35.6, 39.1, 56.3, 36.5];
+        assert_eq!(percentile(&v, 0.5), 36.9);
+        assert_eq!(percentile(&v, 0.9), 56.3);
+        assert!(percentile(&v, 0.5) <= percentile(&v, 0.9));
+        let sorted: Vec<f64> = (1..=100).map(|x| x as f64).collect();
+        assert_eq!(percentile(&sorted, 0.95), 95.0);
+        assert_eq!(percentile(&sorted, 0.5), 50.0);
     }
 }
