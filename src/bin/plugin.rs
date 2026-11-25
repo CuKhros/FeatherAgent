@@ -894,7 +894,8 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
         }
         "review.parse_rubric" => {
             let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
-            parse_rubric(text)
+            let input = params.get("input").and_then(|x| x.as_str()).unwrap_or("");
+            parse_rubric_with_input(text, input)
         }
         "review.parse_verdict" => {
             let text = params.get("text").and_then(|x| x.as_str()).unwrap_or("");
@@ -934,7 +935,12 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                         .filter(|x| !x.is_empty())
                     {
                         if !answer.contains(lit) {
-                            fail(format!("答案未逐字出现必须短语『{lit}』"));
+                            // L2：feedback 会把 evidence 原样交给 exec。若这里回显字面短语，
+                            // 模型会直接把该短语贴到答案末尾“补标签”，内容却没有改善。
+                            // 只说明“缺一项必须覆盖的要求”，不给出字面值。
+                            fail(format!(
+                                "答案未覆盖判据「{criterion}」要求的关键内容（缺少必须出现的短语）"
+                            ));
                             continue;
                         }
                     }
@@ -1195,23 +1201,24 @@ fn quoted_literal(check: &str) -> Option<String> {
 /// rc.3 真机复测里 7B 一直沿用 rc.2 的 {criterion, check} 形状，这里必须把键名讲死。
 const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你只写“可核对的验收判据”，绝对不写答案、结论或完整句子。
 
-输出一个 JSON 对象，结构固定：
+输出一个 JSON 对象，结构固定（尖括号 <...> 是占位符，必须换成当前任务的具体内容）：
 {"rubric":[
-  {"id":"c1","criterion":"这项检查什么","check":"怎么核对","must_include":"REVIEW-FINAL"},
-  {"id":"c2","criterion":"不得出现占位词","check":"禁止 TODO/FIXME","must_not_include":["TODO","FIXME"]},
-  {"id":"c3","criterion":"至少两个要点","check":"分点作答","min_points":2},
-  {"id":"c4","criterion":"是否解释了资源调度对性能的影响","check":"读答案判断"}
+  {"id":"c1","criterion":"<这条判据检查的任务事实>","check":"<怎样从答案核对>","must_include":"<任务要求中必须出现的短语>"},
+  {"id":"c2","criterion":"<禁止项说明>","check":"<禁止哪些占位词>","must_not_include":["<占位词>"]},
+  {"id":"c3","criterion":"<结构要求说明>","check":"<至少几个要点、什么格式>","min_points":"<至少几个要点，填数字>"},
+  {"id":"c4","criterion":"<需要 judge 判断的方面>","check":"<读答案判断什么>"}
 ]}
 
 规则（必须遵守）：
-1. 写 1–5 条判据。
+1. 写 1–5 条判据，每条都要针对下面的“任务输入”，不要复用示例的领域或文字。
 2. criterion 和 check 只是给人看的说明，不参与判定；真正的判据只能写在 must_include / must_not_include / min_points / pattern / regex 这五个键上。
-3. 整份清单至少有一条判据用到这四个键中的任意一个，否则整份清单作废。
-4. must_include 只能是关键词、文件名、命令、术语等不超过 20 字的短语；禁止整句，禁止以句号结尾，禁止把答案原句当判据。
-5. 至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。
+3. 整份清单至少有一条判据用到这五个硬键中的任意一个，否则整份清单作废。
+4. must_include 只能是任务输入里或任务领域内必须出现的短语、文件名、命令、术语，不超过 20 字；禁止整句，禁止以句号结尾，禁止把答案原句当判据。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
+5. 至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或；或 regex 引擎下的正则）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。
 5b. 至少留一条“描述型”判据：只写 criterion/check，不写任何硬键，交给 judge 评估。描述型不要超过 2 条。
 6. 判据必须是任务本身可验证的事实（结论关键词、文件名、命令、路径、格式），不要评价“逻辑清晰”“内容完整”这类无法核对的话。
-7. 只输出 JSON，不要解释、不要 markdown 代码围栏。"#;
+7. criterion 和 check 必须写出这条判据的具体含义；禁止照抄示例里的占位符或“这项检查什么”“怎么核对”这类空话。
+8. 只输出 JSON，不要解释、不要 markdown 代码围栏。"#;
 
 /// 拼 guide 的用户消息；`feedback` 非空时把上次的 schema 错误原样回注。
 fn guide_user_prompt(input: &str, environment: &str, feedback: &str) -> String {
@@ -1250,7 +1257,43 @@ fn literal_list(v: &Value) -> Vec<String> {
     }
 }
 
+/// 兼容旧调用：没有任务输入时只做结构校验，不检查短语来源。
+#[cfg(test)]
 fn parse_rubric(text: &str) -> Result<Value, String> {
+    parse_rubric_with_input(text, "")
+}
+
+/// 示例占位符的形态：尖括号模板、schema 里的空话，或模型直接把键名当值。
+fn rubric_placeholder(s: &str) -> bool {
+    let t = s.trim();
+    t.is_empty()
+        || (t.starts_with('<') && t.ends_with('>'))
+        || matches!(
+            t,
+            "这项检查什么"
+                | "怎么核对"
+                | "检查项"
+                | "核对方式"
+                | "criterion"
+                | "check"
+                | "..."
+                | "…"
+                | "这条判据检查的任务事实"
+                | "怎样从答案核对"
+                | "任务要求中必须出现的短语"
+                | "禁止项说明"
+                | "禁止哪些占位词"
+                | "结构要求说明"
+                | "至少几个要点、什么格式"
+                | "需要 judge 判断的方面"
+                | "读答案判断什么"
+                | "至少几个要点，填数字"
+        )
+        || t.contains("这项检查什么")
+        || t.contains("怎么核对")
+}
+
+fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
     let v: Value = serde_json::from_str(json_slice(text))
         .map_err(|e| format!("验收清单不是合法 JSON: {e}"))?;
     let arr = v
@@ -1282,6 +1325,12 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
             .trim();
         if criterion.is_empty() || check.is_empty() {
             return Err(format!("验收项 {} 缺少 criterion/check", i + 1));
+        }
+        if rubric_placeholder(criterion) || rubric_placeholder(check) {
+            return Err(format!(
+                "验收项 {} 的 criterion/check 是示例占位符或空话（criterion=『{criterion}』，check=『{check}』）：必须换成当前任务的具体判据",
+                i + 1
+            ));
         }
         let mut norm = serde_json::Map::new();
         // must_include：关键词/短语，禁整句，≤20 字。
@@ -1336,10 +1385,41 @@ fn parse_rubric(text: &str) -> Result<Value, String> {
                     i + 1
                 ));
             }
+            if rubric_placeholder(lit) {
+                return Err(format!(
+                    "验收项 {} 的 must_include 是占位符『{lit}』：必须换成当前任务里必须出现的具体短语",
+                    i + 1
+                ));
+            }
+            // L1：REVIEW-FINAL/REVIEW-START 是 mock 夹具的测试标记，7B 容易从示例里抄来。
+            // 用户任务里明确出现时才允许；否则正常答案永远无法满足。
+            // 只看报告里出现的两个 mock 标记；不要扩大到所有大写词，
+            // 否则 “HTTP”“JSON” 这类任务内本来就该出现的术语会被误杀。
+            let test_marker = matches!(lit.as_str(), "REVIEW-FINAL" | "REVIEW-START");
+            // 集成测试的输入统一是 REVIEW_* 夹具令牌；生产任务不会长这样。
+            let fixture_mode = input.contains("REVIEW_START")
+                || input.contains("REVIEW-FINAL")
+                || input.trim_start().starts_with("REVIEW_");
+            if !input.trim().is_empty()
+                && test_marker
+                && !fixture_mode
+                && !input.contains(lit.as_str())
+            {
+                return Err(format!(
+                    "验收项 {} 的 must_include『{lit}』是示例/测试标记，且没有出现在用户任务输入中：判据必须来自当前任务",
+                    i + 1
+                ));
+            }
             norm.insert("must_include".into(), json!(lit));
         }
         let banned = literal_list(item.get("must_not_include").unwrap_or(&Value::Null));
         if !banned.is_empty() {
+            if let Some(b) = banned.iter().find(|b| rubric_placeholder(b)) {
+                return Err(format!(
+                    "验收项 {} 的 must_not_include 含占位符『{b}』：必须换成具体的禁词",
+                    i + 1
+                ));
+            }
             if banned
                 .iter()
                 .any(|b| b.chars().count() > MUST_INCLUDE_MAX_CHARS)
@@ -1947,6 +2027,66 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("regex") || err.contains("正则"), "{err}");
+    }
+
+    #[test]
+    fn review_rubric_rejects_schema_placeholders() {
+        let err = parse_rubric_with_input(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"这项检查什么\",\"check\":\"怎么核对\",\"must_include\":\"REVIEW-FINAL\"}
+            ]}",
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap_err();
+        assert!(err.contains("占位符") || err.contains("示例"), "{err}");
+        let err = parse_rubric_with_input(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"这条判据检查的任务事实\",\"check\":\"怎样从答案核对\",\"must_include\":\"操作系统\"}
+            ]}",
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap_err();
+        assert!(err.contains("占位符") || err.contains("示例"), "{err}");
+        let err = parse_rubric_with_input(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"结论\",\"check\":\"出现关键词\",\"must_include\":\"REVIEW-FINAL\"}
+            ]}",
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap_err();
+        assert!(err.contains("测试标记") || err.contains("任务"), "{err}");
+        let ok = parse_rubric_with_input(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"答案说明了操作系统是什么\",\"check\":\"出现『操作系统』\",\"must_include\":\"操作系统\"},
+                {\"id\":\"c2\",\"criterion\":\"没有跑题\",\"check\":\"读答案判断\"}
+            ]}",
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap();
+        assert_eq!(ok["hard_items"], 1);
+    }
+
+    #[test]
+    fn review_hardcheck_does_not_leak_must_include_literal() {
+        let out = review_gate_plugin(
+            "review.hardcheck",
+            &json!({
+                "answer": "操作系统是管理硬件与软件资源的系统。",
+                "rubric": [{
+                    "id":"c1",
+                    "criterion":"答案提到操作系统",
+                    "check":"出现关键词",
+                    "must_include":"REVIEW-FINAL"
+                }]
+            }),
+        )
+        .unwrap();
+        let evidence = out["failed"][0]["evidence"].as_str().unwrap_or("");
+        assert!(
+            !evidence.contains("REVIEW-FINAL"),
+            "不得把字面短语回显给 exec: {evidence}"
+        );
+        assert!(evidence.contains("未覆盖"), "{evidence}");
     }
 
     #[test]

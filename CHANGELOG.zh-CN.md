@@ -1,6 +1,22 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.3` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.4` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.4] - 2026-11-25
+
+### 修复
+- L1：guide 不再抄 JSON schema。`GUIDE_SYSTEM` 的示例值全部改成尖括号占位符（`<...>`），删掉 mock 专用 `REVIEW-FINAL`；`review.parse_rubric` 拒绝 `criterion` / `check` / `must_include` / `must_not_include` 里的占位文本。`must_include` 为 `REVIEW-FINAL` / `REVIEW-START` 且未出现在用户输入时直接拒绝。该检查只限这两个 mock 标记，避免误杀 `HTTP`、`JSON` 这类任务术语。
+- L2：`must_include` 缺失时的 evidence 不再回显字面短语，改成“答案未覆盖判据「…」要求的关键内容”，exec 没有可粘贴的标签。
+- rubric 解析现在拿到用户输入，用于区分夹具令牌与真实任务。
+
+### 新增
+- review 生成物落盘：guide 与 judge 每次模型调用都在解析前写入 `<data>/review-artifacts/<session>/`。guide 文件为 `<unix-ms>-guide-a<attempt>.json`，judge 文件为 `<unix-ms>-judge-v<vote>-a<attempt>.json`，保留原始输出与解析错误。
+- `review.guide` 增加 `artifact`；`review.verdict` 增加 `attempts`、`votes`、`artifacts`。落盘是 best-effort，不会因磁盘错误拖垮门禁。
+- 测试：`review_rubric_rejects_schema_placeholders`、`review_hardcheck_does_not_leak_must_include_literal`，以及 `review_gate_three_roles_retry_and_approve` 的端到端生成物断言。
+
+### 变更
+- 判据校验更严：抄 schema 的 guide 会被拒绝并重试，不再生成永远无法满足的判据。
+- 插件设置未变，`plugins/review-gate/plugin.json` 仍是 14 个字段；生成物始终记录。
 
 ## [1.2.1-rc.3.3] - 2026-11-25
 

@@ -606,7 +606,7 @@ fn review_gate_missing_description_item_is_reinjected() {
 
 #[test]
 fn review_gate_three_roles_retry_and_approve() {
-    let (_h, conn) = start("review", |cfg| {
+    let (h, conn) = start("review", |cfg| {
         cfg.review_gate.enabled = true;
         cfg.review_gate.max_rounds = 1;
         cfg.review_gate.guide.temperature = 0.3;
@@ -654,6 +654,52 @@ fn review_gate_three_roles_retry_and_approve() {
             .and_then(|x| x.as_u64()),
         Some(2)
     );
+
+    // 生成物落盘：guide 的 rubric 与 judge 的逐票 verdict 都要能在磁盘上找到。
+    let guide = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.guide"))
+        .expect("应有 review.guide");
+    let guide_path = guide
+        .pointer("/params/payload/artifact")
+        .and_then(|x| x.as_str())
+        .filter(|x| !x.is_empty())
+        .expect("review.guide 应带 artifact 路径");
+    assert!(
+        Path::new(guide_path).is_file(),
+        "guide 生成物不存在: {guide_path}"
+    );
+    let guide_artifact: Value =
+        serde_json::from_str(&std::fs::read_to_string(guide_path).unwrap()).unwrap();
+    assert_eq!(guide_artifact["role"], "guide");
+    assert!(guide_artifact["raw"]
+        .as_str()
+        .unwrap_or("")
+        .contains("rubric"));
+    assert!(Path::new(guide_path).starts_with(h.root.join("data/review-artifacts/sreview")));
+
+    let verdict_event = seen
+        .iter()
+        .filter(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.verdict"))
+        .find(|v| {
+            v.pointer("/params/payload/artifacts")
+                .and_then(|x| x.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        })
+        .expect("应有带 judge 生成物的 review.verdict");
+    let artifacts = verdict_event
+        .pointer("/params/payload/artifacts")
+        .and_then(|x| x.as_array())
+        .expect("review.verdict 应带 artifacts");
+    assert!(!artifacts.is_empty(), "judge 生成物为空");
+    for a in artifacts {
+        let p = a.as_str().expect("artifact 路径");
+        assert!(Path::new(p).is_file(), "judge 生成物不存在: {p}");
+        let j: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        assert_eq!(j["role"], "judge");
+        assert!(Path::new(p).starts_with(h.root.join("data/review-artifacts/sreview")));
+    }
 }
 
 #[test]

@@ -1229,6 +1229,9 @@ impl Kernel {
                                         "failed": failed,
                                         "items": verdict.get("items").cloned().unwrap_or(json!([])),
                                         "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
+                                        "attempts": verdict.get("attempts").cloned().unwrap_or(json!(0)),
+                                        "votes": verdict.get("votes").cloned().unwrap_or(json!(0)),
+                                        "artifacts": verdict.get("artifacts").cloned().unwrap_or(json!([])),
                                     }),
                                 );
                                 if pass {
@@ -1831,6 +1834,26 @@ impl Kernel {
         Ok(acc)
     }
 
+    /// review-gate 的 guide/judge 生成物落盘。放在 `data/review-artifacts/<session>/`，
+    /// 文件名带毫秒时间戳与角色/票/尝试号，失败重试的原始输出也保留。
+    fn persist_review_artifact(
+        &self,
+        session_id: &str,
+        stem: &str,
+        payload: &Value,
+    ) -> Option<String> {
+        let dir = self
+            .paths
+            .data
+            .join("review-artifacts")
+            .join(sanitize_artifact_name(session_id));
+        std::fs::create_dir_all(&dir).ok()?;
+        let path = dir.join(format!("{}-{stem}.json", now_ms()));
+        let body = serde_json::to_vec_pretty(payload).ok()?;
+        std::fs::write(&path, body).ok()?;
+        Some(path.display().to_string())
+    }
+
     fn review_prepare(
         &self,
         session: &Arc<Session>,
@@ -1866,7 +1889,24 @@ impl Kernel {
                 messages,
                 Duration::from_secs(180),
             )?;
-            match gate.call("review.parse_rubric", json!({"text": raw})) {
+            let parsed = gate.call("review.parse_rubric", json!({"text": raw, "input": input}));
+            let artifact = self.persist_review_artifact(
+                &session.id,
+                &format!("guide-a{attempt}"),
+                &json!({
+                    "role": "guide",
+                    "session": session.id,
+                    "model": model,
+                    "temperature": rg.guide.temperature,
+                    "attempt": attempt,
+                    "at_unix_ms": now_ms(),
+                    "input": input,
+                    "raw": raw,
+                    "parsed": match &parsed { Ok(v) => v.clone(), Err(_) => Value::Null },
+                    "parse_error": parsed.as_ref().err().map(|e| e.to_string()).unwrap_or_default(),
+                }),
+            );
+            match parsed {
                 Ok(parsed) => {
                     let rubric = parsed.get("rubric").cloned().unwrap_or(json!([]));
                     let count = rubric.as_array().map(|x| x.len()).unwrap_or(0);
@@ -1881,7 +1921,7 @@ impl Kernel {
                         self.emit(
                             &session.id,
                             EventKind::ReviewWarn,
-                            json!({"text": format!("第 {attempt} 次判据不合格：{last}"), "model": model, "attempts": attempt, "retry": true}),
+                            json!({"text": format!("第 {attempt} 次判据不合格：{last}"), "model": model, "attempts": attempt, "retry": true, "artifact": artifact.clone().unwrap_or_default()}),
                         );
                         continue;
                     }
@@ -1895,6 +1935,7 @@ impl Kernel {
                                 "temperature": rg.guide.temperature,
                                 "tokens_approx": raw.chars().count() / 4,
                                 "attempts": attempt,
+                                "artifact": artifact.clone().unwrap_or_default(),
                             }),
                         );
                         // 宽容降级：只有描述、没有硬判据的条目交给 judge，但要明说，
@@ -2093,6 +2134,7 @@ impl Kernel {
 
         let votes_wanted = rg.judge.votes.clamp(1, 3);
         let mut vote_verdicts: Vec<Value> = Vec::new();
+        let mut artifacts: Vec<String> = Vec::new();
         let mut attempts_total = 0u32;
         for vote in 1..=votes_wanted {
             let temperature = judge_vote_temperature(rg.judge.temperature, vote);
@@ -2109,10 +2151,32 @@ impl Kernel {
                     messages.clone(),
                     Duration::from_secs(180),
                 )?;
-                match gate.call(
+                let parsed = gate.call(
                     "review.parse_verdict",
                     json!({"text": raw, "rubric": judge_rubric, "answer": req.answer}),
+                );
+                if let Some(path) = self.persist_review_artifact(
+                    &session.id,
+                    &format!("judge-v{vote}-a{attempt}"),
+                    &json!({
+                        "role": "judge",
+                        "session": session.id,
+                        "model": model,
+                        "temperature": temperature,
+                        "vote": vote,
+                        "attempt": attempt,
+                        "at_unix_ms": now_ms(),
+                        "input": req.input,
+                        "answer": req.answer,
+                        "rubric": judge_rubric,
+                        "raw": raw,
+                        "parsed": match &parsed { Ok(v) => v.clone(), Err(_) => Value::Null },
+                        "parse_error": parsed.as_ref().err().map(|e| e.to_string()).unwrap_or_default(),
+                    }),
                 ) {
+                    artifacts.push(path);
+                }
+                match parsed {
                     Ok(verdict) => {
                         got = Some(verdict);
                         break;
@@ -2251,6 +2315,7 @@ impl Kernel {
             "votes": vote_verdicts.len(),
             "source": "judge",
             "routing": routing,
+            "artifacts": artifacts,
         }))
     }
 
@@ -2949,6 +3014,25 @@ fn judge_vote_temperature(base: f64, vote: u32) -> f64 {
     } else {
         (base + 0.05 * f64::from(vote - 1)).min(0.2)
     }
+}
+
+/// session id 不可信：只保留 ASCII 字母数字、`-`、`_`，其余替换为 `_`，并截断长度。
+fn sanitize_artifact_name(id: &str) -> String {
+    let mut out: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(80)
+        .collect();
+    if out.trim_matches('_').is_empty() {
+        out = "session".into();
+    }
+    out
 }
 
 fn review_feedback_text(verdict: &Value) -> String {

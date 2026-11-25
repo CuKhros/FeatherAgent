@@ -1,10 +1,25 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.3)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.4)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.4` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.3 summary (current candidate)
+## v1.2.1-rc.3.4 summary (current candidate)
+
+The rc.3.3 real-hardware retest verified K1/K3/K4: criterion routing and short-circuit ran as designed, three runs produced **0 degraded**, and a hardcheck failure emitted `review.verdict` 0.01 s after the answer, proving no judge call. Approval was still **0/3**, but the cause was the guide copying the kernel JSON schema: `criterion:"这项检查什么"`, `check:"怎么核对"`, `must_include:"REVIEW-FINAL"`. `REVIEW-FINAL` is a mock fixture word absent from the real task, so `c1` could never pass. This candidate fixes that (L1), removes the literal phrase from feedback (L2), and records guide/judge model outputs.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| L1 guide copies schema | `GUIDE_SYSTEM` example values are all `<...>` placeholders; `REVIEW-FINAL` removed; `review.parse_rubric` rejects placeholder `criterion`/`check`/`must_include`/`must_not_include`, and rejects `REVIEW-FINAL`/`REVIEW-START` when absent from the user input; parser now receives the input | Unit `review_rubric_rejects_schema_placeholders` (rejects the exact rc.3.3 rubric, accepts a real `must_include:"操作系统"` item); test-marker check limited to two mock words so `HTTP`/`JSON` are not false positives |
+| L2 feedback leaks literal | Missing `must_include` evidence says `答案未覆盖判据「{criterion}」要求的关键内容（缺少必须出现的短语）`; no literal phrase, so the exec model has nothing to paste | Unit `review_hardcheck_does_not_leak_must_include_literal` |
+| Guide/Judge artifacts | Every model call is written before parsing under `<data>/review-artifacts/<session>/`; guide `<ms>-guide-a<n>.json`, judge `<ms>-judge-v<n>-a<n>.json`, raw output + parse error included; write failures are best-effort | Integration `review_gate_three_roles_retry_and_approve` asserts the `review.guide.artifact` file and every `review.verdict.artifacts` file exist in the session directory and parse as JSON with `role` = guide/judge |
+| Event observability | `review.guide` adds `artifact`; `review.verdict` adds `attempts`, `votes`, `artifacts` | Same integration test plus manual event inspection |
+
+Linux has **120 tests: 119 passed, 1 ignored by default** (62 lib, 19 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 29 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy --locked --all-targets` pass. Release bench (3 consecutive runs): kernel **2,522,160 B (2.405 MiB)**; warm **1.186 / 1.195 / 1.221 ms** (P90 1.181 / 1.191 / 1.186 ms, 5 samples); cold **4.272 / 4.269 / 4.394 ms**; RSS max **1,920 KiB**; write P95 **5.908 / 6.660 / 6.019 µs**; assemble P95 **0.147 / 0.141 / 0.137 ms**; RPC P95 **0.045 / 0.048 / 0.046 ms**; all gates true; `env.mem_load_pct` 23, `reliability:high`. This VM was busier than during rc.3.3, so cold/write numbers are higher; gates stayed green.
+
+Not verified: v1.2.1-rc.3.4 Windows real hardware (L1 with a live 7B task that has no fixture token, L2 feedback without the literal, artifact files on Windows, plus the rc.3.3 pending K1/K3/K4 recheck, live-Ollama dropdowns, ConPTY Enter-save, Windows Terminal permission popup and S3 t6 single call), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run. Bench numbers above are from this VM at the recorded `metrics.env`; they are not a Windows baseline.
+
+## v1.2.1-rc.3.3 summary (historical, released)
 
 The rc.3.2 real-hardware retest re-verified J1–J3: `review.warn` carried `min_points 机器计数不足…`, answers had no `cN` leakage across three runs, and `metrics.env` showed the earlier slow numbers came from a host at 87–90% memory (1.5–2 GB free of 16 GB). Windows bench was 7/7 twice (warm 38.1 / 85.5 ms, cold 181.8 / 204.0 ms, write P95 4,079 / 5,041 µs, RPC P95 0.312 / 0.320 ms, binary 2.141 MB, RSS 10,584–10,588 KB). The gate still approved only **1/3**, now because K1/K2 were criteria and judge-stability problems rather than mechanism problems.
 

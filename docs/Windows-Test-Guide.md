@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.3 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.3.4 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.3.3-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.3.4-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.3.3 fixes the rc.3.2 retest findings K1–K4. K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.3.4 fixes the two review-gate findings from the rc.3.3 retest. L1: the guide prompt has no copyable example values (`<...>` placeholders only), and the rubric parser rejects placeholders plus `REVIEW-FINAL` / `REVIEW-START` when they are absent from the user task. L2: a missing `must_include` no longer echoes the literal phrase, so the exec model cannot paste a label into the answer. Guide and judge model calls are recorded under `data/review-artifacts/<session>/`. It also carries the rc.3.2 retest findings K1–K4: K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.3\
+D:\FeatherAgent-1.2.1-rc.3.4\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.3.3`, then continue.
+Wait for `serve ready: 1.2.1-rc.3.4`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.3
+cd D:\FeatherAgent-1.2.1-rc.3.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -178,20 +178,23 @@ v1.2.1-rc.3.1 regression checks:
 
 v1.2.1-rc.3.2 regression checks:
 
-1. **J1: `min_points` is soft.** With a 7B guide, ask for a structured answer and let the exec write three points in one paragraph separated by `；` or as `**bold headings**`. The round must not be rejected with “只有 1 个要点”; if the machine count is still short, `review.warn` must say “min_points 机器计数不足，交 judge 复核” and the judge must decide from the answer.
+1. **J1: `min_points` is soft.** With a 7B guide, ask for a structured answer and let the exec write three points in one paragraph separated by `；` or as `**bold headings**`. The round must not be rejected with “只有 1 个要点”; if the machine count is still short, `review.warn` must say “min_points 机器计数不足，按软判据接受（确定性判据，不交 judge）”.
 2. **J2: no rubric ids in the answer.** Force one failed review (e.g. rubric with `min_points:2` and a one-line answer). `review.feedback.text` must use `〔1〕` labels, never `- c1:`, and the revised answer must not contain `c1/c2/c3` headings.
 3. **J3: bench fingerprint.** `featheragent.exe bench --json` must include `metrics.env` with `cpu_count`, `mem_total_kb`, `mem_available_kb`, `mem_load_pct` and `uptime_s`; the human-readable run must print one “环境指纹” line. Record it next to every bench number.
 4. **Display name.** `featheragent.exe version`, `featheragent-tui.exe version`, `featheragent-webui.exe version` must print `FeatherAgent …` (TUI/WebUI included), while binary names remain lowercase.
 
-v1.2.1-rc.3.3 regression checks:
+v1.2.1-rc.3.4 regression checks:
 
-1. **K1: negative criterion stays in hardcheck.** Enable review-gate with a real 7B. Send a task whose rubric contains `must_not_include` (e.g. “no TODO/FIXME”) plus one description item. The round must not produce `evidence 不是答案原文`; the negative item must be settled by `review.hardcheck` and only the description item may appear in `review.verdict`.
-2. **K1: regex criterion.** A rubric item with `regex` and `min_matches` must be accepted by guide; an invalid regex must be rejected before the exec round. Set `hardcheck.pattern_engine=regex` and confirm a `pattern` item is interpreted as a regular expression.
-3. **K2: missing item reinjected.** Force a judge omission (e.g. a 4B judge or a three-item description rubric). `review.warn` must say `第 1 票第 1 次审批不合格：…缺少验收项…`, the retry must list every id, and a compliant retry must end `approved` rather than `degraded`.
-4. **Votes.** Set `judge.votes=3`, enable review-gate, and run three rounds. Approval must stay stable; the system must never run two model calls at once (watch the provider log timestamps). With `judge.early_stop_on_agreement=true`, two identical votes should skip the third.
-5. **K3: warm tail.** `bench --json` must include `boot_ms_p90` and `boot_sample_count=5`; the human-readable line must print P50/P90. The gate still uses P50.
-6. **K4: memory note.** `metrics.env` must include `mem_load_pct` and `reliability`. Under ≥85% memory load it must include the `note`; gates must not turn red because of it.
-7. **Settings coverage.** The review-gate page must show 14 fields; `judge.votes=2` must be rejected, while 1/3, `criteria_routing`, and `pattern_engine` must save and reload on both TUI and WebUI.
+1. **L1: guide writes task criteria, not schema text.** Use a real 7B and the plain task `用三句话说明什么是操作系统` (no `REVIEW_*` token). `review.guide` must succeed; the rubric must not contain `这项检查什么`, `怎么核对`, `REVIEW-FINAL`, or a literal `<...>`. The round must not fail every time on `c1`.
+2. **L1: artifacts.** After that round, `data\review-artifacts\<session>\` must contain `*-guide-a*.json` and, if the judge ran, `*-judge-v*-a*.json`. Each file must be valid JSON with `role` guide/judge, `raw`, and `parse_error`. `review.guide.artifact` and `review.verdict.artifacts` must point at these files.
+3. **L2: no literal in feedback.** Force a `must_include` failure. `review.feedback` must say the answer did not cover the requirement in the named criterion; it must not repeat the literal phrase, and the exec must not pass by appending that phrase.
+4. **K1: negative criterion stays in hardcheck.** Enable review-gate with a real 7B. Send a task whose rubric contains `must_not_include` (e.g. “no TODO/FIXME”) plus one description item. The round must not produce `evidence 不是答案原文`; the negative item must be settled by `review.hardcheck` and only the description item may appear in `review.verdict`.
+5. **K1: regex criterion.** A rubric item with `regex` and `min_matches` must be accepted by guide; an invalid regex must be rejected before the exec round. Set `hardcheck.pattern_engine=regex` and confirm a `pattern` item is interpreted as a regular expression.
+6. **K2: missing item reinjected.** Force a judge omission (e.g. a 4B judge or a three-item description rubric). `review.warn` must say `第 1 票第 1 次审批不合格：…缺少验收项…`, the retry must list every id, and a compliant retry must end `approved` rather than `degraded`.
+7. **Votes.** Set `judge.votes=3`, enable review-gate, and run three rounds. Approval must stay stable; the system must never run two model calls at once (watch the provider log timestamps). With `judge.early_stop_on_agreement=true`, two identical votes should skip the third.
+8. **K3: warm tail.** `bench --json` must include `boot_ms_p90` and `boot_sample_count=5`; the human-readable line must print P50/P90. The gate still uses P50.
+9. **K4: memory note.** `metrics.env` must include `mem_load_pct` and `reliability`. Under ≥85% memory load it must include the `note`; gates must not turn red because of it.
+10. **Settings coverage.** The review-gate page must show 14 fields; `judge.votes=2` must be rejected, while 1/3, `criteria_routing`, and `pattern_engine` must save and reload on both TUI and WebUI.
 
 v1.2.1 additional checks:
 
@@ -206,13 +209,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.3.3 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.3.4 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.3-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.4-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

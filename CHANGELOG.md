@@ -1,6 +1,22 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.3` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.4` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.4] - 2026-11-25
+
+### Fixed
+- L1: the guide no longer copies the JSON schema. Every example value in `GUIDE_SYSTEM` is now an angle-bracket placeholder (`<...>`), the mock-only `REVIEW-FINAL` is gone, and `review.parse_rubric` rejects placeholder text in `criterion` / `check` / `must_include` / `must_not_include`. A `must_include` of `REVIEW-FINAL` / `REVIEW-START` is rejected when it does not appear in the user input. The check is limited to those mock markers so domain terms such as `HTTP` or `JSON` are not rejected.
+- L2: a missing `must_include` evidence line no longer echoes the literal phrase. It says the answer does not cover the requirement in the named criterion, so the exec model has no label to paste at the end of the answer.
+- The rubric parser now receives the user input, which is needed to tell fixture tokens from real tasks.
+
+### Added
+- Review artifacts: every guide and judge model call is written to `<data>/review-artifacts/<session>/` before parsing. Guide files are `<unix-ms>-guide-a<attempt>.json`; judge files are `<unix-ms>-judge-v<vote>-a<attempt>.json`, and each keeps the raw output plus parse error.
+- `review.guide` carries `artifact`; `review.verdict` carries `attempts`, `votes`, and `artifacts`. Artifact writing is best-effort and never degrades the gate.
+- Tests: `review_rubric_rejects_schema_placeholders`, `review_hardcheck_does_not_leak_must_include_literal`, and end-to-end artifact assertions in `review_gate_three_roles_retry_and_approve`.
+
+### Changed
+- Rubric validation is stricter: a guide that copies schema text is rejected and retried instead of producing an impossible criterion.
+- No plugin setting changed; `plugins/review-gate/plugin.json` still declares 14 fields, and artifacts are always recorded.
 
 ## [1.2.1-rc.3.3] - 2026-11-25
 

@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.3.3**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.3.4**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.3","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.3.4","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -337,6 +337,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 ```
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.3.4：没有新增 wire 消息、帧、端点或错误码。`review.guide` 载荷增加 `artifact`（文件路径，写盘失败时为空字符串）。`review.verdict` 增加 `attempts`（judge 模型调用次数）、`votes`（完成票数，早停跳过第三票时为 2）、`artifacts`（judge 生成物路径）。guide 与 judge 的每次模型输出在解析前写入 `<data>/review-artifacts/<session>/`，best-effort，不会让门禁失败。rubric 解析现在同时接收用户输入，`criterion` / `check` / `must_include` / `must_not_include` 中的占位符，以及任务里没出现的 `REVIEW-FINAL` / `REVIEW-START` 都会被拒绝。设置字段未变。
 - 1.2.1-rc.3.3：没有新增 wire 消息或字段。`review.hardcheck` / `review.judge` 为插件内部：字面/禁词/计数/glob/正则判据由 hardcheck 结案，只有描述型进 judge，描述型的答案原文证据规则不变。`review.warn` 文本对软 `min_points` 改为“按软判据接受…”，并说明有多少条描述型判据未评估。`plugins/review-gate/plugin.json` 新增 5 个设置声明（分流、pattern 引擎、票数、聚合、早停），经 `plugin.settings` 转述；`judge.votes` 只接受 1 或 3。bench JSON 新增 `boot_ms_p90`、`boot_sample_count`、`env.reliability` 与可选 `env.note`。帧、端点与错误码均未变化。
 - 1.2.1-rc.3.2：没有新增消息或字段。`review.hardcheck`（插件内部，不是 wire）对 `min_points` 不足改为返回 `soft` 数组；引擎打 `review.warn`（`text` 以“min_points 机器计数不足，交 judge 复核”开头），并给 judge 输入追加机器计数提示，由 judge 按答案裁决，不再硬拒绝。`review.feedback.text` 改用 `〔1〕`/`〔2〕` 标注未通过项，不再出现裸 `c1:`；事件 payload（`round`/`failed`/`text`/`next_temperature`）不变。
 - 1.2.1-rc.3.1：`review.guide`（25）、`review.verdict`（26）、`review.finished`（27）、`review.feedback`（28）之后新增 `review.warn`（29，payload `{text, model, attempts, retry?}`）。warn 只表示“用较弱判据评估”或“这次判据被拒并重试”，不表示门禁失败；只有描述项判据会走 judge-only 并告警，完全产不出判据仍以 `degraded` 收尾。`review.guide` payload 的 `attempts` 标明是第几次产出的判据；`review.guide` 插件调用新增可选 `feedback` 参数，用于回注上一轮校验错误。

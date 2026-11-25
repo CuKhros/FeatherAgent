@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.3 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.4 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.3-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.4-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.3 修 rc.3.2 复测的 K1–K4。K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.4 修 rc.3.3 复测的两条 review-gate 问题。L1：guide 提示词不再有可抄的示例值（只用 `<...>` 占位符），rubric 解析拒绝占位符，以及用户任务里没出现的 `REVIEW-FINAL` / `REVIEW-START`。L2：`must_include` 缺失时不再回显字面短语，exec 不能靠贴标签过检。guide 与 judge 的模型调用都记录到 `data/review-artifacts/<session>/`。它同时延续 rc.3.2 复测的 K1–K4：K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.3\
+D:\FeatherAgent-1.2.1-rc.3.4\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3.3\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.3` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.4` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.2
+cd D:\FeatherAgent-1.2.1-rc.3.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -176,20 +176,23 @@ v1.2.1-rc.3.1 回归核对：
 
 v1.2.1-rc.3.2 回归核对：
 
-1. **J1：`min_points` 变软。** 用 7B guide 让 exec 输出结构化答案，把三个要点写成一段里用 `；` 分隔，或用 `**加粗小标题**`。回合不得再以“只有 1 个要点”硬拒绝；若机器计数仍不足，必须出现 `review.warn`“min_points 机器计数不足，交 judge 复核”，由 judge 按答案实际内容裁决。
+1. **J1：`min_points` 变软。** 用 7B guide 让 exec 输出结构化答案，把三个要点写成一段里用 `；` 分隔，或用 `**加粗小标题**`。回合不得再以“只有 1 个要点”硬拒绝；若机器计数仍不足，必须出现 `review.warn`“min_points 机器计数不足，按软判据接受（确定性判据，不交 judge）”。
 2. **J2：答案里不再出现 rubric 编号。** 构造一次失败（例如判据 `min_points:2`、答案只有一行）：`review.feedback.text` 必须用 `〔1〕` 序号，不能出现 `- c1:`；修订后的答案不得带 `c1/c2/c3` 小标题。
 3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
 4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
 
-v1.2.1-rc.3.3 回归核对：
+v1.2.1-rc.3.4 回归核对：
 
-1. **K1：负向判据留在 hardcheck。** 用真实 7B 开启 review-gate，发一条含 `must_not_include`（如禁 TODO/FIXME）加一条描述型的任务。回合不得出现“evidence 不是答案原文”；负向项必须由 `review.hardcheck` 结案，`review.verdict` 里只能出现描述型项。
-2. **K1：正则判据。** 带 `regex` 与 `min_matches` 的判据必须被 guide 接受；非法正则必须在 exec 轮之前被拒。把 `hardcheck.pattern_engine` 设为 `regex`，确认 `pattern` 项按正则解释。
-3. **K2：漏项回注。** 构造一次 judge 漏项（如 4B judge，或三条描述型判据）。`review.warn` 必须写明“第 1 票第 1 次审批不合格：…缺少验收项…”，补投消息要列全 id；补投合规后应为 `approved`，不是 `degraded`。
-4. **投票。** 设 `judge.votes=3` 开 review-gate 连跑三轮：通过率要稳定；provider 日志时间戳不得出现两个模型调用重叠。`judge.early_stop_on_agreement=true` 时，前两票逐项一致应跳过第三票。
-5. **K3：热启动尾部。** `bench --json` 必须含 `boot_ms_p90` 与 `boot_sample_count=5`；人类可读行要打印 P50/P90。门禁仍看 P50。
-6. **K4：内存注记。** `metrics.env` 必须含 `mem_load_pct` 与 `reliability`；整机内存 ≥85% 时必须带 `note`，且门禁不得因此转红。
-7. **设置覆盖。** review-gate 页必须显示 14 个字段；`judge.votes=2` 必须被拒，1/3、`criteria_routing`、`pattern_engine` 必须在 TUI 与 WebUI 都能保存并回读。
+1. **L1：guide 写任务判据，不抄 schema。** 用真实 7B，输入普通任务 `用三句话说明什么是操作系统`（不含 `REVIEW_*` 令牌）。`review.guide` 必须成功；rubric 不得出现 `这项检查什么`、`怎么核对`、`REVIEW-FINAL` 或字面 `<...>`。回合不得每次都挂在 `c1`。
+2. **L1：生成物。** 该回合结束后，`data\review-artifacts\<session>\` 下应有 `*-guide-a*.json`，若跑了 judge 还应有 `*-judge-v*-a*.json`。每个文件必须是合法 JSON，含 `role`（guide/judge）、`raw`、`parse_error`；`review.guide.artifact` 与 `review.verdict.artifacts` 必须指向这些文件。
+3. **L2：feedback 不带字面值。** 构造一次 `must_include` 缺失。`review.feedback` 只能说明“未覆盖判据「…」要求的关键内容”，不得重复字面短语；exec 不能靠追加该短语过检。
+4. **K1：负向判据留在 hardcheck。** 用真实 7B 开启 review-gate，发一条含 `must_not_include`（如禁 TODO/FIXME）加一条描述型的任务。回合不得出现“evidence 不是答案原文”；负向项必须由 `review.hardcheck` 结案，`review.verdict` 里只能出现描述型项。
+5. **K1：正则判据。** 带 `regex` 与 `min_matches` 的判据必须被 guide 接受；非法正则必须在 exec 轮之前被拒。把 `hardcheck.pattern_engine` 设为 `regex`，确认 `pattern` 项按正则解释。
+6. **K2：漏项回注。** 构造一次 judge 漏项（如 4B judge，或三条描述型判据）。`review.warn` 必须写明“第 1 票第 1 次审批不合格：…缺少验收项…”，补投消息要列全 id；补投合规后应为 `approved`，不是 `degraded`。
+7. **投票。** 设 `judge.votes=3` 开 review-gate 连跑三轮：通过率要稳定；provider 日志时间戳不得出现两个模型调用重叠。`judge.early_stop_on_agreement=true` 时，前两票逐项一致应跳过第三票。
+8. **K3：热启动尾部。** `bench --json` 必须含 `boot_ms_p90` 与 `boot_sample_count=5`；人类可读行要打印 P50/P90。门禁仍看 P50。
+9. **K4：内存注记。** `metrics.env` 必须含 `mem_load_pct` 与 `reliability`；整机内存 ≥85% 时必须带 `note`，且门禁不得因此转红。
+10. **设置覆盖。** review-gate 页必须显示 14 个字段；`judge.votes=2` 必须被拒，1/3、`criteria_routing`、`pattern_engine` 必须在 TUI 与 WebUI 都能保存并回读。
 
 v1.2.1 追加核对：
 
@@ -204,7 +207,7 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.3 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.4 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
