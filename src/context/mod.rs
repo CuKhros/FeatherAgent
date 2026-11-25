@@ -231,7 +231,7 @@ impl ContextEngine {
 
         // ---- 稳定前缀 ----
         let mut system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。回答简洁、工具优先、不要臆造。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。默认简洁、工具优先、不要臆造；用户要求列举、比较、穷举或说明全部要点时，必须覆盖全部要点，不要因简洁而省略。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
             profile.name
         );
         if let Some(note) = &self.cfg.workspace_note {
@@ -808,6 +808,20 @@ mod tests {
         let a = engine.assemble(&[], &profile, &[], &[], &[]).unwrap();
         assert_eq!(a.messages[0].role, "system");
         assert!(a.messages[0].content.contains(".featheagent/worklog.md"));
+    }
+
+    #[test]
+    fn system_prompt_distinguishes_brevity_from_coverage() {
+        let engine = ContextEngine::default();
+        let profile = ModelProfile {
+            context_window: 4096,
+            max_output: 128,
+            ..Default::default()
+        };
+        let a = engine.assemble(&[], &profile, &[], &[], &[]).unwrap();
+        let prompt = &a.messages[0].content;
+        assert!(prompt.contains("列举"), "{prompt}");
+        assert!(prompt.contains("覆盖全部要点"), "{prompt}");
     }
 
     #[test]

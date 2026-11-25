@@ -1,24 +1,27 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.1)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.2)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.1` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.1 summary (current candidate)
+## v1.2.1-rc.4.2 summary (current candidate)
 
-The rc.4 retest passed N5–N9 but exposed four actionable problems: N10 (path `must_include` hit the 12-character phrase limit), N11 (4B wrote `tool_call ...` into the answer body with review-gate on), N12 (no auditable search artifact under `data/`), and N13 (no final-rubric record). N14 is a documented 4B long-flow boundary. This patch fixes N10–N13 and records N14.
+The rc.4.1 retest confirmed N10, N12 and N13. N11's plain-text fallback worked, but an XML-style function/parameter call still ended the whole turn with `status=failed`; N16 kept about 1/2 bench failures; N17 inflated the gate count with `boot_gate_trusted`; N18 showed a coverage gap from “concise” prompt wording. This patch addresses N15–N18.
 
 | Item | Treatment | Verification |
 |---|---|---|
-| N10 path `must_include` rejected | `path_like` recognizes `/`, `\`, or a dot form with a 1–8 character ASCII alphanumeric extension; path-like values use `PATH_MUST_INCLUDE_MAX_CHARS=64`, ordinary terms stay at 12; error text names the limit and suggests `pattern/regex` | Unit `review_rubric_allows_file_path_must_include` (`workspace/notes.txt` accepted; >64-character path rejected); existing whole-sentence/long-token tests pass |
-| N11 plain-text tool call | `plain_tool_line` parses `tool_call <name> <json>` / `tool_call: ...` when no structured call exists; `tool_fs_read/write/list` and `tool_shell` normalize; `tool_fs` maps to read, `tool.fs` only maps to write when `content` is present; review feedback adds a tool-format guard | Unit `plain_text_tool_call_line_is_extracted`, `plain_text_tool_call_aliases_are_normalized`; H3 unknown-tool integration still passes for bare `tool.fs` |
-| N12 no auditable search artifact | Search/news/fetch writes both the workspace mirror (`artifact`/`artifact_kind`) and `data/web-artifacts/<session>/...json` (`audit_artifact`); either write failure joins `persist_error` | Integration `web_search_artifact_audit_copy_is_written` plus the existing workspace test |
-| N13 no final-rubric record | Accepted rubric writes `data/review-artifacts/<session>/<ms>-rubric-final.json` with normalized `match`/`min_matches`, `hard_items`, `judge_only`; `review.guide` adds `final_artifact` | Integration `review_gate_drops_placeholder_meta_item_and_approves` asserts the file, `role:"rubric-final"`, and `final_artifact` |
-| N14 4B long-flow drift | Documentation only: ≥7B exec for multi-task long flows and repeated sampling; 4B runs are observational | README, Windows Test Guide, this report |
+| N15 XML-style call failed the turn | Context parser accepts function/parameter tags (`=` and `name="..."` forms, values until the parameter close tag, missing function close tolerated); the Ollama provider salvages a parsed call from accumulated text on a stream `error` instead of emitting a terminal error | Unit `xml_function_parameter_fallback`, `malformed_xml_function_without_close_is_recovered`; existing plain-text/alias tests pass |
+| N16 bench RPC still ~1/2 failed on Windows | `ipc::connect` retries `ERROR_FILE_NOT_FOUND(2)` and `ERROR_PIPE_NOT_CONNECTED(233)` within 3s; `bench` creates `rpc/` and retries `Client::connect` up to 10s after `wait_ready` | Three Linux release bench runs pass; Windows retest required |
+| N17 `boot_gate_trusted` counted as a failed gate | Removed from `gates`; added to `advisory_gates` with `boot_gate_status` and `reliability`; `metrics` keeps it for diagnostics; human output prints the advisory line separately | Code inspection on both kernel editions; Windows retest required |
+| N18 concise prompt dropped required points | System prompt keeps default brevity but requires full coverage for list/compare/enumerate/explain-all tasks | Unit `system_prompt_distinguishes_brevity_from_coverage` |
 
-Linux full suite: **181 test executions, 180 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 66 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 35 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): binary **2,554,208 B (2.44 MiB)**; warm P50 **1.159 / 1.188 / 1.200 ms**, P90 **1.206 / 1.250 / 1.328 ms**; cold **2.058 / 3.084 / 3.172 ms**; RSS **3,584 / 3,456 / 3,456 KiB**; write P95 **2.724 / 2.694 / 3.906 µs**; assemble P95 **0.121 / 0.145 / 0.128 ms**; RPC P95 **0.030 / 0.067 / 0.059 ms**; all gates true, `mem_load_pct` 16, `reliability:high`, `boot_gate_status:"pass"`.
+Linux full suite: **184 test executions, 183 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 69 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 36 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,557,784 B (2.44 MiB)**; warm P50 **1.140 / 1.137 / 1.136 ms**, P90 **1.159 / 1.144 / 1.146 ms**; cold **2.891 / 2.085 / 2.140 ms**; RSS **3,456 / 3,584 / 3,584 KiB**; write P95 **2.684 / 2.684 / 2.564 µs**; assemble P95 **0.125 / 0.119 / 0.121 ms**; RPC P95 **0.023 / 0.024 / 0.028 ms**; all release gates true, `advisory_gates.boot_gate_trusted=true`, `reliability:"high"`.
 
-Not verified: v1.2.1-rc.4.1 Windows real hardware (N10 path guide with a live model, N11 4B recovery/aliases, N12 double-write permissions, N13 `rubric-final`, N5–N9 regression, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
+Not verified: v1.2.1-rc.4.2 Windows real hardware (N15 XML recovery with a live 4B, N16 repeated bench, N17 advisory output, N18 coverage, N5–N14 regression, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
+
+## v1.2.1-rc.4.1 summary (historical, released)
+
+The rc.4 retest passed N5–N9 but exposed four actionable problems: N10 (path `must_include` hit the 12-character phrase limit), N11 (4B wrote `tool_call ...` into the answer body with review-gate on), N12 (no auditable search artifact under `data/`), and N13 (no final-rubric record). N14 is a documented 4B long-flow boundary. This patch fixed N10–N13 and recorded N14; see [v1.2.1-rc.4.1 Changes](v1.2.1-rc.4.1-Changes.md). Linux full suite at that release: 181 executions, 180 passed, 1 ignored; release bench kernel 2,554,208 B (2.44 MiB), warm P50 1.159/1.188/1.200 ms, all gates true, `reliability:"high"`.
 
 ## v1.2.1-rc.4 summary (historical, released)
 

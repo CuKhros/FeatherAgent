@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.4.1**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.4.2**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.1","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.2","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -350,6 +350,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 安装目录内的本地文件返回 `copied:false` 和 canonical 路径；目录外文件复制到默认工作区。浏览器字节总是落到默认工作区。模型只拿 `result.path`，不拿浏览器路径或目录外原路径。
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.4.2：没有新增帧、端点、事件类型或错误码。`bench --json` 把 `boot_gate_trusted` 从 `gates` 移到顶层 `advisory_gates`，与 `boot_gate_status`、`reliability` 同列；`metrics` 保留该诊断字段。上下文解析器也能恢复 XML 风格的 function/parameter 调用，Ollama provider 可从已累计流文本抢救；这是 provider 侧兼容，不是 wire 变更。均为增量。
 - 1.2.1-rc.4.1：没有新增帧、端点、事件类型或错误码。`web.search|news|fetch` 的工具结果在 `artifact` / `artifact_kind` 之外增加 `audit_artifact`；审计文件位于 `<data>/web-artifacts/<session>/`。`review.guide` 增加 `final_artifact`，指向 `<data>/review-artifacts/<session>/<ms>-rubric-final.json`；`artifact` 仍指本次被接受的尝试。模型答案里的纯文本 `tool_call <name> {...}` 只是上下文解析器的兼容兜底，不是 wire 变更；标准 provider 仍应返回结构化 `tool_calls`。均为增量。
 - 1.2.1-rc.4：`file.attach` / `file.prepare` 是 WebUI 所用 HTTP RPC `/rpc` 上的增量方法；请求 `{path}` 或 `{name,data_base64}`，返回 `{path,copied,source,name,bytes}`。错误为 `-32602` + `attachment_not_found|attachment_not_file|attachment_empty|attachment_too_large|attachment_write_failed|attachment_copy_failed|attachment_invalid_base64`。没有新增帧、端点或事件类型。`web.search|news|fetch` 结果可增加 `artifact` / `artifact_kind`；bench JSON 增加 `boot_gate_raw`、`boot_gate_trusted`、`boot_gate_status`、`reliability`；`tool.call` 增加 `attempt` 与 `call_index`；`must_include` 增加 `match` / `min_matches`。均为增量。
 - 1.2.1-rc.3.6：没有新增 wire 消息、帧、端点或错误码。bench JSON 增加 `boot_percentiles_consistent`（同一组已排序样本保证 P50 ≤ P90）与 `gates.metrics_consistent`，均为增量字段。`review.warn` 可能报告某条 fixture 因 `must_not_include` 命中 `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}` 而被整条丢弃。hardcheck 把 `must_include` 按空白/标点拆成词项匹配；只改提示词/内部判定，不改 wire 契约。英文 `-en` 二进制使用同一协议。

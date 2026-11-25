@@ -1,6 +1,14 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.1` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.2` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.2] - 2026-11-25
+
+### Fixed
+- N15: the context parser recovers Qwen/Ollama XML-style function/parameter tool calls (both `=` and `name="..."` forms, values until the parameter close tag, missing function close tolerated), and the Ollama provider salvages a parsed call from the accumulated stream instead of terminating the turn on the XML error. Tests: `xml_function_parameter_fallback`, `malformed_xml_function_without_close_is_recovered`.
+- N16: Windows `ipc::connect` retries `ERROR_FILE_NOT_FOUND(2)` and `ERROR_PIPE_NOT_CONNECTED(233)` as well as `ERROR_PIPE_BUSY` within its 3-second deadline; `bench` creates the `rpc` directory explicitly and retries `Client::connect` for up to 10 seconds after `wait_ready`. Linux behavior is unchanged.
+- N17: `bench --json` no longer puts `boot_gate_trusted` in `gates`; it moves to `advisory_gates` with `boot_gate_status` and `reliability`, so a low-reliability host is not counted as a failed release gate. `metrics` keeps the field for diagnostics; human output prints the advisory line separately.
+- N18: the system prompt keeps default brevity but requires full coverage when the user asks to list, compare, enumerate, or explain all points. Test: `system_prompt_distinguishes_brevity_from_coverage`.
 
 ## [1.2.1-rc.4.1] - 2026-11-25
 

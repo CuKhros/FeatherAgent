@@ -1,6 +1,14 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.1` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.2` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.2] - 2026-11-25
+
+### 修复
+- N15：上下文解析器恢复 Qwen/Ollama 的 XML 风格 function/parameter 工具调用（兼容 `=` 与 `name="..."`、参数值读到结束标签、缺失 function 结束标签也能解析）；Ollama provider 在流式 XML 报错时先从已累计文本抢救调用，不再直接终止整轮。测试：`xml_function_parameter_fallback`、`malformed_xml_function_without_close_is_recovered`。
+- N16：Windows `ipc::connect` 在 3 秒预算内除 `ERROR_PIPE_BUSY` 外，也重试 `ERROR_FILE_NOT_FOUND(2)` 与 `ERROR_PIPE_NOT_CONNECTED(233)`；`bench` 显式创建 `rpc` 目录，并在 `wait_ready` 后对 `Client::connect` 做最多 10 秒有界重试。Linux 行为不变。
+- N17：`bench --json` 不再把 `boot_gate_trusted` 放进 `gates`，而是与 `boot_gate_status`、`reliability` 一起移到 `advisory_gates`，低可信度主机不算发布门禁失败；`metrics` 保留该字段供诊断，人类可读输出单独打印建议项。
+- N18：系统提示保留默认简洁，但用户要求列举、比较、穷举或说明全部要点时必须覆盖全部要点。测试：`system_prompt_distinguishes_brevity_from_coverage`。
 
 ## [1.2.1-rc.4.1] - 2026-11-25
 

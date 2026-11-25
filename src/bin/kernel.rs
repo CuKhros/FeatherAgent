@@ -895,6 +895,8 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     }
     // 6) RPC 往返 P95
     let rdir = dir.join("rpc");
+    std::fs::create_dir_all(&rdir)
+        .map_err(|e| format!("[bench:rpc_mkdir] {}: {e}", rdir.display()))?;
     let paths = Paths::resolve(
         &exe,
         &Overrides {
@@ -918,8 +920,22 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     };
     server::wait_ready(&socket, Duration::from_secs(10))
         .map_err(|e| format!("[bench:rpc_ready] {}: {e}", socket.display()))?;
-    let conn = Client::connect(&socket)
-        .map_err(|e| format!("[bench:rpc_connect] {}: {e}", socket.display()))?;
+    // wait_ready 探测成功后会断开一次；Windows 命名管道在重建窗口里可能短暂
+    // 返回 ERROR_FILE_NOT_FOUND(2)，因此这里再做有界重试，而不是只 connect 一次。
+    let conn = {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match Client::connect(&socket) {
+                Ok(c) => break c,
+                Err(e) => {
+                    if Instant::now() >= deadline {
+                        return Err(format!("[bench:rpc_connect] {}: {e}", socket.display()));
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    };
     let mut rpc = Vec::new();
     for _ in 0..200 {
         let t = Instant::now();
@@ -998,7 +1014,6 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
         "metrics_consistent": boot_consistent,
         "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
-        "boot_gate_trusted": boot_trusted,
         "boot_gate_raw": boot_gate_raw,
         "reliability": reliability,
         "boot_mode": "warm_in_process_same_install_root",
@@ -1019,10 +1034,22 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             serde_json::json!(percentile(&lat, 0.95) < write_limit),
         );
     }
+    // N17：可信度是环境的“建议项”，不是版本门禁；单独列出，避免
+    // reliability=low 时被人工统计成 passed/total 失败。
+    let advisory_gates = serde_json::json!({
+        "boot_gate_trusted": boot_trusted,
+        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
+        "reliability": reliability,
+    });
     if json_only {
         println!(
             "{}",
-            serde_json::to_string(&serde_json::json!({"metrics": m, "gates": gates})).unwrap()
+            serde_json::to_string(&serde_json::json!({
+                "metrics": m,
+                "gates": gates,
+                "advisory_gates": advisory_gates
+            }))
+            .unwrap()
         );
     } else {
         println!("FeatherAgent 内核实测（{}）", featheragent::VERSION);
@@ -1082,6 +1109,10 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             percentile(&rpc, 0.95)
         );
         println!("门禁: {}", serde_json::to_string_pretty(&gates).unwrap());
+        println!(
+            "建议项（不计入门禁）: {}",
+            serde_json::to_string(&advisory_gates).unwrap()
+        );
         let _ = human_bytes(size_bytes);
         let _ = std::io::stdout().flush();
     }

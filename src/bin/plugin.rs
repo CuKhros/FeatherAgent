@@ -736,6 +736,21 @@ fn provider_http(
                         .get("message")
                         .and_then(|x| x.as_str())
                         .unwrap_or_else(|| e.as_str().unwrap_or("provider error"));
+                    // N15：Ollama 对 XML 风格工具调用会先报 XML syntax error；
+                    // 若已累计到可解析的调用文本，就从文本恢复，不让整轮直接失败。
+                    if acc.contains("<function") {
+                        if let Some(c) = featheragent::context::parse::extract(&acc)
+                            .into_iter()
+                            .next()
+                        {
+                            native_calls.push(json!({
+                                "name": c.name,
+                                "arguments": c.arguments
+                            }));
+                            upstream_finish = "tool_calls".into();
+                            return false;
+                        }
+                    }
                     io.emit(req, json!({"kind": "error", "message": msg}));
                     return false;
                 }
@@ -799,8 +814,25 @@ fn provider_http(
                 true
             });
             if let Err(e) = result {
-                io.emit(req, json!({"kind": "error", "message": e}));
-                return Err(e);
+                // HTTP 500 的错误体可能只有 XML syntax error，生成内容没有进入回调；
+                // 若回调已收到 function 文本，仍先从累计文本抢救调用。
+                let recovered = if acc.contains("<function") {
+                    featheragent::context::parse::extract(&acc)
+                        .into_iter()
+                        .next()
+                } else {
+                    None
+                };
+                if let Some(c) = recovered {
+                    native_calls.push(json!({
+                        "name": c.name,
+                        "arguments": c.arguments
+                    }));
+                    upstream_finish = "tool_calls".into();
+                } else {
+                    io.emit(req, json!({"kind": "error", "message": e}));
+                    return Err(e);
+                }
             }
             for (_, (name, args)) in openai_calls {
                 if name.is_empty() {

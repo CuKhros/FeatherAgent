@@ -61,12 +61,20 @@ pub fn extract(text: &str) -> Vec<ToolCall> {
         }
     }
 
-    // 5) `<tool_call>` XML 伪标签
+    // 6) `<tool_call>` XML 伪标签
     if out.is_empty() {
         for frag in tag_fragments(text, "tool_call") {
             if let Some(c) = regex_fallback(&frag) {
                 out.push(c);
             }
+        }
+    }
+
+    // 7) Qwen/Ollama 的 `<function=...><parameter=...>` 变体；小模型在
+    // review feedback 后偶发输出这种 XML，Ollama 自身也可能报 XML syntax error。
+    if out.is_empty() {
+        if let Some(c) = xml_tool_call(text) {
+            out.push(c);
         }
     }
 
@@ -315,6 +323,88 @@ fn quote_bare_keys(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// N15：解析小模型偶发的函数式伪标签：`<function=tool.fs.write>` 后跟若干
+/// `<parameter=path>…` 参数；也兼容 `name="..."` 写法与缺失结束标签的畸形输出。
+fn xml_tool_call(text: &str) -> Option<ToolCall> {
+    const PARAM_CLOSE: &str = concat!("</", "parameter>");
+    let start = text.find("<function")?;
+    let tag_end = start + text[start..].find('>')?;
+    let tag = &text[start..=tag_end];
+    let name = xml_attr(tag, "function")?;
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let body = &text[tag_end + 1..];
+    let mut args = serde_json::Map::new();
+    let mut rest = body;
+    while let Some(pos) = rest.find("<parameter") {
+        let part = &rest[pos..];
+        let open_end = part.find('>')?;
+        let open = &part[..=open_end];
+        let key = xml_attr(open, "parameter")?;
+        let after = &part[open_end + 1..];
+        let close = after.find(PARAM_CLOSE);
+        let next_param = after.find("<parameter");
+        let stop = match (close, next_param) {
+            (Some(c), Some(p)) => c.min(p),
+            (Some(c), None) => c,
+            (None, Some(p)) => p,
+            (None, None) => after.len(),
+        };
+        let raw = &after[..stop];
+        let next = if close == Some(stop) {
+            after[stop..]
+                .find('>')
+                .map(|j| stop + j + 1)
+                .unwrap_or(after.len())
+        } else {
+            stop
+        };
+        args.insert(key, Value::String(raw.trim().to_string()));
+        rest = &after[next..];
+    }
+    if args.is_empty() {
+        let trimmed = body.trim();
+        if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed) {
+            args = map;
+        } else {
+            return None;
+        }
+    }
+    let value = Value::Object(args);
+    Some(ToolCall {
+        name: alias_name(name, &value),
+        arguments: value,
+    })
+}
+
+/// 读取伪标签里的 `key=value` 或 `key name="value"` 属性值。
+fn xml_attr(tag: &str, key: &str) -> Option<String> {
+    let inner = tag
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim();
+    let rest = inner.strip_prefix(key)?.trim_start();
+    let rest = if let Some(r) = rest.strip_prefix('=') {
+        r
+    } else {
+        let r = rest.strip_prefix("name")?.trim_start();
+        r.strip_prefix('=')?
+    };
+    let value = rest.trim_start();
+    let value = value.trim_start_matches(['"', '\'']);
+    let end = value
+        .find(|c: char| c == '"' || c == '\'' || c == '>' || c.is_whitespace())
+        .unwrap_or(value.len());
+    if end == 0 {
+        None
+    } else {
+        Some(value[..end].to_string())
+    }
+}
+
 /// N11：解析 `tool_call <name> <json>` / `tool_call: <name> <json>` 这类纯文本调用；
 /// 它没有 `"name"`/`"arguments"` 包装，正则回退看不到，容易被当成最终答案。
 fn plain_tool_line(text: &str) -> Option<ToolCall> {
@@ -502,6 +592,33 @@ mod tests {
         assert_eq!(c.len(), 1, "{c:?}");
         assert_eq!(c[0].name, "tool.fs.read");
         assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
+    }
+
+    #[test]
+    fn xml_function_parameter_fallback() {
+        let pclose = concat!("</", "parameter>");
+        let fclose = concat!("</", "function>");
+        let text = format!(
+            "<function=tool.fs.write><parameter=path>workspace/notes.txt{pclose}<parameter=content>- a\n- b{pclose}{fclose}"
+        );
+        let c = extract(&text);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].name, "tool.fs.write");
+        assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
+        assert_eq!(c[0].arguments["content"], "- a\n- b");
+    }
+
+    #[test]
+    fn malformed_xml_function_without_close_is_recovered() {
+        let pclose = concat!("</", "parameter>");
+        let text = format!(
+            "<function=tool.fs.write><parameter=path>workspace/notes.txt{pclose}<parameter=content>done{pclose}"
+        );
+        let c = extract(&text);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].name, "tool.fs.write");
+        assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
+        assert_eq!(c[0].arguments["content"], "done");
     }
 
     #[test]

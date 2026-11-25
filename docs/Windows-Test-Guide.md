@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.1 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.2 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4.1-windows-x64.zip`
-> Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.4.1 fixes the rc.4 retest findings N10–N13 and records N14. N10: path/file `must_include` values use 64 characters (`workspace/notes.txt` passes) while ordinary terms keep 12. N11: plain-text `tool_call <name> {...}` is recovered and aliases such as `tool_fs_write` normalize to `tool.fs.write`; review feedback adds a tool-format guard. N12: search/news/fetch results are written both to the project workspace and to `data/web-artifacts/<session>/` (`audit_artifact`). N13: an accepted rubric is recorded as `data/review-artifacts/<session>/*-rubric-final.json` (`final_artifact`). N14: multi-task long flows need a ≥7B exec model and repeated sampling. rc.4's N5–N9 fixes, attachments and workspace search artifacts remain. N5: `must_include` supports `match:any|all|min`; multi-term items default to `min` with `ceil(n/2)` matches, and `all` is explicit for protocol constraints. N6: subjective criteria cannot use `must_not_include`, and a banned word already present in the user input rejects the guide; N4's fixture-item drop remains covered. N7: bench uses a unique temp directory per run, and errors return `artifact_missing`/`bench_failed` JSON with the path. N8: identical tool calls in one reply are de-duplicated; `tool.call` carries `attempt`/`call_index`. N9: when `reliability` is not `high`, the boot gate is `advisory` with `boot_gate_status` and `boot_gate_raw`. WebUI/TUI attachments are copied to `workspace/default/uploads/` when outside the install root; search/news/fetch results are written under `workspace/<project>/.featheagent/search/`. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
+> Package under test: `FeatherAgent-1.2.1-rc.4.2-windows-x64.zip`
+> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.1 retest (N15–N18)
+> Note: v1.2.1-rc.4.2 fixes the four actionable findings from the rc.4.1 retest. N10, N12 and N13 were confirmed fixed; N11's plain-text form worked but the XML-style function/parameter variant still failed the whole turn, so N15 adds parser recovery plus an Ollama stream-error salvage path. N16 adds Windows pipe retries (`ERROR_FILE_NOT_FOUND(2)` / `ERROR_PIPE_NOT_CONNECTED(233)`) and a bounded `bench` connect retry. N17 moves `boot_gate_trusted` from `gates` to `advisory_gates`; it no longer counts in `passed/total`. N18 distinguishes default brevity from list/compare/enumerate tasks that must cover every point. The rc.4/rc.4.1 fixes N5–N14 remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.1\
+D:\FeatherAgent-1.2.1-rc.4.2\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4.1`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.2`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.1
+cd D:\FeatherAgent-1.2.1-rc.4.2
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -205,9 +205,17 @@ v1.2.1-rc.4 regression checks:
 3. **N4 regression.** The rc.3.5 raw fixture item (`must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]`) must still be dropped by itself with `review.warn` naming its id.
 4. **N7: bench temp/error contract.** Run `bench --json` several times; every run must have a distinct temp directory and no `os error 2`. If a path is deliberately broken, the JSON must be one line with `ok:false`, `code:"artifact_missing"` or `"bench_failed"`, and the path in `error`.
 5. **N8: duplicate tool calls.** Trigger the retry chain with a model that repeats the same tool call. `tool.call` must carry `attempt` and `call_index`; identical name+arguments in one reply must execute once. A different path must still execute separately.
-6. **N9: advisory boot gate.** Under memory pressure (`reliability` medium or low), `gates.boot_gate_status` must be `"advisory"`, `boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` must not alone turn the run red, and `reliability` must appear in both `metrics` and `gates`.
+6. **N9: advisory boot gate.** Under memory pressure (`reliability` medium or low), `gates.boot_gate_status` must be `"advisory"`, `boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` must not alone turn the run red, and `reliability` must appear in both `metrics` and `gates`; `boot_gate_trusted` must appear under `advisory_gates`, not inside `gates`.
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
+
+v1.2.1-rc.4.2 regression checks:
+
+1. **N15: XML-style call recovery.** With review-gate on and a 4B exec, repeat the write task until the model emits a function/parameter-style call. The turn must execute `tool.fs.write`, write `workspace\notes.txt`, and finish successfully instead of `status=failed`; the raw XML must not leak into the final answer. If the model mixes prose and a call, record whether the parser recovered it.
+2. **N16: bench connect.** Run `featheragent.exe bench --json` at least five times, and also with the host under memory pressure. There must be no `[bench:rpc_connect] ... 系统找不到指定的文件`; each result must have a unique `fa-bench-*` root and valid gates. If a failure still appears, keep the full path and OS error.
+3. **N17: advisory split.** Inspect `bench --json`: `gates` must not contain `boot_gate_trusted`; `advisory_gates` must contain `boot_gate_trusted`, `boot_gate_status` and `reliability`. With `reliability` medium/low, the release gates may stay green and the advisory line must say it is not counted.
+4. **N18: coverage.** Ask a list/compare question (for example, “列出三个要点并说明顺序和开销”). The answer must cover every requested point; a short answer that omits ordering or cost is a finding. Also verify the “默认简洁” behavior on a simple factual question.
+5. **N10/N12/N13 regression.** Re-run the rc.4.1 checks: path `must_include`, `data\web-artifacts` audit copy, and `rubric-final.json`; all three were confirmed in rc.4.1 and must remain green.
 
 v1.2.1-rc.4.1 regression checks:
 
@@ -253,13 +261,13 @@ v1.2.1 additional checks:
 - N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.4.1 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.4.2 did not run Wine; passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.2-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

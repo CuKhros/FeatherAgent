@@ -905,8 +905,10 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     if !json_only {
         eprintln!("bench[6/6] RPC round-trip");
     }
-    // 6) RPC 往返 P95
+    // 6) RPC round-trip P95
     let rdir = dir.join("rpc");
+    std::fs::create_dir_all(&rdir)
+        .map_err(|e| format!("[bench:rpc_mkdir] {}: {e}", rdir.display()))?;
     let paths = Paths::resolve(
         &exe,
         &Overrides {
@@ -928,7 +930,21 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         })
     };
     server::wait_ready(&socket, Duration::from_secs(10)).map_err(|e| e.to_string())?;
-    let conn = Client::connect(&socket).map_err(|e| e.to_string())?;
+    // N16: retry briefly after wait_ready disconnects its probe connection.
+    let conn = {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match Client::connect(&socket) {
+                Ok(c) => break c,
+                Err(e) => {
+                    if Instant::now() >= deadline {
+                        return Err(format!("[bench:rpc_connect] {}: {e}", socket.display()));
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    };
     let mut rpc = Vec::new();
     for _ in 0..200 {
         let t = Instant::now();
@@ -1007,7 +1023,6 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
         "metrics_consistent": boot_consistent,
         "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
-        "boot_gate_trusted": boot_trusted,
         "boot_gate_raw": boot_gate_raw,
         "reliability": reliability,
         "boot_mode": "warm_in_process_same_install_root",
@@ -1028,10 +1043,22 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             serde_json::json!(percentile(&lat, 0.95) < write_limit),
         );
     }
+    // N17: trust is an environment advisory, not a release gate; list it
+    // separately so reliability=low is not counted as a failed gate.
+    let advisory_gates = serde_json::json!({
+        "boot_gate_trusted": boot_trusted,
+        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
+        "reliability": reliability,
+    });
     if json_only {
         println!(
             "{}",
-            serde_json::to_string(&serde_json::json!({"metrics": m, "gates": gates})).unwrap()
+            serde_json::to_string(&serde_json::json!({
+                "metrics": m,
+                "gates": gates,
+                "advisory_gates": advisory_gates
+            }))
+            .unwrap()
         );
     } else {
         println!("FeatherAgent kernel benchmark ({})", featheragent::VERSION);
@@ -1091,6 +1118,10 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             percentile(&rpc, 0.95)
         );
         println!("gate: {}", serde_json::to_string_pretty(&gates).unwrap());
+        println!(
+            "advisory (not counted in gates): {}",
+            serde_json::to_string(&advisory_gates).unwrap()
+        );
         let _ = human_bytes(size_bytes);
         let _ = std::io::stdout().flush();
     }

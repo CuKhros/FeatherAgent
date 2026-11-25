@@ -66,7 +66,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with ten exes (Chinese + English `-en`) | **tested** (v1.1.9 real hardware; v1.2.1-rc.4.1 bilingual package pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with ten exes (Chinese + English `-en`) | **tested** (v1.1.9 real hardware; v1.2.1-rc.4.2 bilingual package pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -116,7 +116,7 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.4.1-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.4.2-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
 .\featheragent.exe help                       # Chinese command table
@@ -131,7 +131,7 @@ Unzip `FeatherAgent-1.2.1-rc.4.1-windows-x64.zip` into a writable directory (not
 
 The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.4.1)
+## Platform gate differences (v1.2.1-rc.4.2)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
@@ -143,7 +143,7 @@ The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runti
 | Context assembly P95 | < 30 ms | < 30 ms | shared |
 | RPC P95 | < 1 ms | < 1 ms | shared |
 
-`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `boot_sample_count`, `boot_ms_p50`/`boot_ms_p90`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; `metrics.env` carries `mem_load_pct`, `reliability`, and a `note` when the host is above 85% memory. Windows is not hard-coded as a failure.
+`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `boot_sample_count`, `boot_ms_p50`/`boot_ms_p90`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; release gates live under `gates`, while `boot_gate_trusted`, `boot_gate_status` and `reliability` live under `advisory_gates` and are not counted in `passed/total`. `metrics.env` carries `mem_load_pct` and a `note` when the host is above 85% memory. Windows is not hard-coded as a failure.
 
 ## Contributing and license
 
@@ -160,6 +160,7 @@ The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runti
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.4.2 Changes](docs/v1.2.1-rc.4.2-Changes.md)** — XML-style tool-call recovery, bench RPC connect retries on Windows, `advisory_gates` separation, and concise-vs-complete prompt wording ([中文](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4.1 Changes](docs/v1.2.1-rc.4.1-Changes.md)** — path/file `must_include` exemption, plain-text tool-call recovery and alias normalization, auditable `data/web-artifacts` copies, and `rubric-final` artifacts; documents the 4B long-flow boundary ([中文](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4 Changes](docs/v1.2.1-rc.4-Changes.md)** — `must_include` match modes, subjective/banned-word validation, unique bench temp dirs with structured errors, reliability-aware boot gate, duplicate tool-call suppression, search-result artifacts, and WebUI/TUI file attachments ([中文](docs/v1.2.1-rc.4-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.6 Changes](docs/v1.2.1-rc.3.6-Changes.md)** — term-only `must_include` with word-term matching, a self-sorting percentile and consistent bench P50/P90, empty/tool-format retries with correction, fixture `must_not_include` item dropping, and English editions of all top-level binaries ([中文](docs/v1.2.1-rc.3.6-变更说明.zh-CN.md))
@@ -182,7 +183,7 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
-`v1.2.1-rc.4.1` fixes the four actionable findings from the rc.4 retest. A path/file `must_include` such as `workspace/notes.txt` now gets a 64-character limit instead of being rejected by the 12-character phrase limit. Plain-text `tool_call <name> {...}` output is recovered and common aliases are normalized, with a tool-format guard in review feedback. Search/news/fetch results are written both to the project workspace and to `data/web-artifacts/<session>/`, and an accepted rubric is recorded as `rubric-final.json` under `data/review-artifacts/<session>/`. N14 is documentation only: multi-task long flows need a ≥7B exec model and repeated sampling.
+`v1.2.1-rc.4.2` fixes the four findings from the rc.4.1 retest. XML-style function/parameter tool calls are recovered by the context parser, and the Ollama provider salvages a parsed call from an accumulated stream instead of failing the whole turn. Bench creates its RPC directory explicitly and retries the Windows named-pipe connect across the pipe-creation window; `boot_gate_trusted` moves to `advisory_gates` so a low-reliability host is not counted as a failed release gate. The system prompt now distinguishes default brevity from list/compare/enumerate tasks, where every required point must be covered. N10, N12 and N13 were confirmed on real hardware; N15–N18 still need the next Windows retest.
 
 `v1.2.1-rc.4` fixes the five findings from the rc.3.6 retest and adds the attachment/search-artifact features. `must_include` now supports `match: any|all|min`; a multi-term item defaults to `min` with `ceil(n/2)` matches, and hardcheck reports how many requirements were covered. Subjective criteria may not use `must_not_include`, and a banned word that appears in the user input rejects the guide. Bench uses a unique temp directory per run and returns `artifact_missing` / `bench_failed` JSON on error; when `reliability` is not `high`, the boot gate is `advisory` with `boot_gate_raw` preserved. Identical tool calls in one model reply are de-duplicated, and every `tool.call` carries `attempt` and `call_index`. Search/news/fetch results are persisted as JSON artifacts; WebUI/TUI attachments are copied to the default workspace when outside the install root.
 
@@ -196,6 +197,6 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 `v1.2.1-rc.3` made plugin settings a declaration: a plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. It also closed the review-gate and S3 findings H1–H4 from the rc.2.1 retest: phrase-only rubrics with four criterion kinds and a pre-judge hardcheck, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that ask for a single tool call.
 
-Linux automation has **181 test executions: 180 passed, 1 ignored by default** (66 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 35 integration); the English worker/WebUI aliases repeat the plugin and WebUI modules, so those cases run twice. The ignored network-dependent test needs public network. `fmt` and `clippy -D warnings` pass. Release bench: kernel 2,554,208 B (2.44 MiB); warm P50 1.159/1.188/1.200 ms; all gates true, `reliability:"high"`. Settings pages were verified at rc.3 on both front ends: TUI through a PTY and the WebUI bridge over WebSocket.
+Linux automation has **184 test executions: 183 passed, 1 ignored by default** (69 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 36 integration); the English worker/WebUI aliases repeat the plugin and WebUI modules, so those cases run twice. The ignored network-dependent test needs public network. `fmt` and `clippy -D warnings` pass. Release bench: kernel size and three-run numbers are recorded in the rc.4.2 change note; all release gates are green and `reliability:"high"`. Settings pages were verified at rc.3 on both front ends: TUI through a PTY and the WebUI bridge over WebSocket.
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus retests through rc.3.4 that verified the provider body, temperature rejection, banner, R1 gates, review-gate routing, task-specific criteria, artifacts and non-leaking feedback. The rc.3.4 retest approved 2/5 and produced 1/5 degraded: a2’s guide kept writing a criterion about `<...>` placeholders, retried identically, and degraded the round (M1); a1’s “concise and clear” item made the judge swing to unapproved (M3). This candidate also fixes N10–N13 and records the N14 model boundary: path/file `must_include` exemption, plain-text tool-call recovery, `data/web-artifacts` audit copies, and `rubric-final` artifacts. The v1.2.1-rc.4.1 Windows package contains ten exes (five Chinese, five English `-en`) and is cross-compiled; its automation runs only on Linux. N1–N14, the attachment paths, the search artifacts and the new audit/rubric files still need real hardware. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus retests through rc.4.1 that verified the provider body, temperature rejection, banner, R1 gates, review-gate routing, task-specific criteria, artifacts and non-leaking feedback. The rc.4.1 retest confirmed N10, N12 and N13; it found the XML style of N11 uncovered (N15) and kept about 1/2 bench failures (N16), an inflated gate count from `boot_gate_trusted` (N17), and a coverage gap from “concise” prompt wording (N18). This candidate fixes those four. The v1.2.1-rc.4.2 Windows package contains ten exes (five Chinese, five English `-en`) and is cross-compiled; its automation runs only on Linux. The XML recovery, bench retry, `advisory_gates` output, prompt change and the new N15–N18 paths still need real hardware. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.

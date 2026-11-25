@@ -78,8 +78,9 @@ mod imp {
     use std::time::{Duration, Instant};
     use windows_sys::Win32::Foundation::{
         CloseHandle, DuplicateHandle, GetLastError, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
-        ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
-        ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+        ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE,
+        INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, ReadFile, WriteFile, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
@@ -371,13 +372,26 @@ mod imp {
                 });
             }
             let err = unsafe { GetLastError() };
-            if err == ERROR_PIPE_BUSY {
+            if err == ERROR_PIPE_BUSY
+                || err == ERROR_FILE_NOT_FOUND
+                || err == ERROR_PIPE_NOT_CONNECTED
+            {
                 let now = Instant::now();
                 if now >= deadline {
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, "named pipe busy"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("named pipe unavailable: win32={err}"),
+                    ));
                 }
-                let wait = (deadline - now).as_millis().max(1) as u32;
-                unsafe { WaitNamedPipeW(name.as_ptr(), wait) };
+                if err == ERROR_PIPE_BUSY {
+                    let wait = (deadline - now).as_millis().max(1) as u32;
+                    unsafe { WaitNamedPipeW(name.as_ptr(), wait) };
+                } else {
+                    // Windows 命名管道在监听端创建/重建的窗口里会短暂返回
+                    // ERROR_FILE_NOT_FOUND(2) 或 ERROR_PIPE_NOT_CONNECTED(233)；
+                    // 与 busy 一样退避重试，避免 bench 的 wait_ready 与 connect 之间漏接。
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 continue;
             }
             return Err(io::Error::from_raw_os_error(err as i32));
