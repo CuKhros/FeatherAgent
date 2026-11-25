@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.6 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.6-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.4-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.6 修复 rc.3.5 复测的 N1–N4，并为全部顶层二进制增加英文版。N1：`must_include` 只收术语（2–12 字，禁概念词/整句），hardcheck 按空白/标点拆词项并要求全部出现，不再要求整串连续子串；`管理计算机硬件和资源` 这类概念写法必须被拒并重试。N2：`percentile` 内部排序；bench 只算一次 P50/P90，并输出 `boot_percentiles_consistent` / `metrics_consistent`，保证 P50 ≤ P90。N3：空响应两次升温重试，Ollama 畸形工具调用两次 `tool_format` 重试并回注 JSON 纠错；崩溃仍重启一次。N4：`must_not_include` 命中 `REVIEW-FINAL`、`REVIEW-START`、`<...>`、`__FILL`、`{{`、`}}` 时整条丢弃并打 `review.warn`。包内共 10 个 exe：5 个中文工具 + `featheragent-en`、`featheragent-tui-en`、`featheragent-webui-en`、`feather-plugin-en`、`feather-storage-en`。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.4 修复 rc.3.6 复测的 N5–N9，并加入文件附件与搜索落盘。N5：`must_include` 支持 `match:any|all|min`；多术语默认 `min`（至少 ceil(n/2) 项），协议类硬约束显式 `all`。N6：主观判据不能用 `must_not_include`；禁词已出现在用户输入中也会判 guide 不合格；N4 的 fixture 整条丢弃继续覆盖。N7：bench 每次唯一临时目录；失败返回带路径的 `artifact_missing`/`bench_failed` JSON。N8：同一回复内相同工具调用去重；`tool.call` 带 `attempt`/`call_index`。N9：`reliability` 非 `high` 时启动门禁标为 `advisory`，保留 `boot_gate_status` 与 `boot_gate_raw`。WebUI/TUI 附件在安装目录外时复制到 `workspace/default/uploads/`；search/news/fetch 结果写入 `workspace/<项目>/.featheagent/search/`。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.6\
+D:\FeatherAgent-1.2.1-rc.4\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.3.6\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.6` 后再操作。
+看到 `serve ready: 1.2.1-rc.4` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.6
+cd D:\FeatherAgent-1.2.1-rc.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -114,6 +114,13 @@ WebUI：顶栏项目下拉 + “＋项目”，新建会话时选择项目；恢
 
 **DeepSeek（可选）**：设置页切到 `deepseek`，填 `DEEPSEEK_API_KEY` 后才启用；按成功请求计费（5 元/1,000 次）。不想联网就把 `search_provider` 设为 `none`。
 
+### 文件附件与搜索落盘
+
+1. **WebUI `+`。** 点输入区 `+` 应打开系统文件选择框；选一个小文本文件后出现附件 chip，`file.attach` 返回 `copied:true`，路径在 `workspace\default\uploads\`。发送后模型文本里必须带 `[附件] <该路径>`。
+2. **TUI `@`。** 发送 `@D:\temp\note.txt 请读取这个文件`，TUI 必须显示内核解析后的路径；路径不存在必须在 `chat.send` 前报错。含空格路径写 `@"D:\My Files\a.txt"`。
+3. **安装目录外。** 选一个解压目录之外的文件，内核必须复制到 `workspace\default\uploads\` 并返回副本路径；安装目录内的文件可保留原路径。
+4. **搜索落盘。** `web.search`、`web.news`、`web.fetch` 后工具结果必须带 `artifact`；`workspace\<项目>\.featheagent\search\` 下必须有 JSON，含 `tool`、`arguments`、`result`、`untrusted:true`。
+
 ## 5. Markdown 与图标
 
 - TUI：发送含 `# 标题`、`- 列表`、`1. 有序列表`、`> 引用`、代码块、`**粗体**`、`*斜体*`、`[链接](https://…)` 的消息，助手回复应去掉 Markdown 标记并保留结构。
@@ -191,14 +198,16 @@ v1.2.1-rc.3.2 回归核对：
 3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
 4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
 
-v1.2.1-rc.3.6 回归核对：
+v1.2.1-rc.4 回归核对：
 
-1. **N1：概念性 `must_include` 被拒。** 用真实 7B 跑操作系统任务。guide 若写 `must_include:"管理计算机硬件和资源"`，校验必须因连接词拒绝并重试；`管理计算机硬件 资源` 这类术语形态应被接受，答案写“硬件与软件资源”应通过 hardcheck，缺任一词项必须失败。
-2. **N1：词项匹配不是无条件放行。** 多词项必须每个都出现；含 `/` 的短语要拆开，除非它像带点号的路径。
-3. **N2：bench 一致性。** `bench --json` 必须有 `boot_percentiles_consistent:true` 和 `gates.metrics_consistent:true`，每次运行、两个平台都必须 P50 ≤ P90。
-4. **N3：空响应与畸形工具调用重试。** 空 body mock 应出现最多两次 `model.retry`，`reason:"empty"`，温度 0.70/0.75；错误串含 `XML syntax error` 或 `element ... closed by ... parameter` 时，应出现最多两次 `reason:"tool_format"` 重试、一条要求 JSON `tool_calls` 的 system 纠错，且只在预算耗尽后 `failed`。
-5. **N4：fixture 条目单独丢弃。** `must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]` 的条目必须整条丢弃，`review.warn` 指明 id，真实条目保留。
-6. **双语包。** zip 根目录必须有 10 个 exe。`featheragent-en.exe version` 与 help 必须英文；`featheragent-tui-en.exe` 应显示英文三栏；`featheragent-webui-en.exe` 应返回 `<html lang="en">` 与英文 JS；中文版保持中文界面。
+1. **N5：匹配模式。** 让 guide 写 4 个 `must_include` 术语，答案覆盖 2 个；默认（不写 `match`）hardcheck 必须通过（`{hits}/{total}` ≥ 2）。写 `match:"all"` 必须失败；写 `match:"any"` 覆盖 1 个即通过；`min_matches:3` 必须要求 3 个。TCP 题保留 `["SYN","ACK"]` 并写 `match:"all"`。
+2. **N6：主观判据带禁词被拒。** 用 `用三句话说明什么是操作系统`，criterion 写 `使用准确的术语`，`must_not_include:["软件","硬件","计算机"]`；guide 必须因主观判据报错并重试。禁词出现在用户输入中也要拒绝。
+3. **N4 回归。** rc.3.5 原始 fixture 项（`must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]`）仍必须整条丢弃，`review.warn` 指明 id。
+4. **N7：bench 临时目录/错误契约。** 连续跑 `bench --json` 多次，每次临时目录唯一，不得出现 `os error 2`。故意破坏路径时，stdout 必须只有一行 JSON：`ok:false`、`code:"artifact_missing"` 或 `"bench_failed"`，`error` 里带路径。
+5. **N8：重复工具调用。** 用会重复调用的模型触发重试链；`tool.call` 必须带 `attempt` 与 `call_index`；同一回复内同名同参数只执行一次，不同路径仍分别执行。
+6. **N9：启动门禁 advisory。** 内存压力下（`reliability` medium/low）`gates.boot_gate_status` 必须为 `"advisory"`，`boot_gate_raw` 保留原始结果，`gates.boot_lt_*` 不单独判红，`reliability` 同时出现在 `metrics` 与 `gates`。
+7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
+8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
 
 v1.2.1-rc.3.5 回归核对：
 
@@ -226,13 +235,13 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.6 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.4 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.6-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

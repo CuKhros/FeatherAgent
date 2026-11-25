@@ -4,7 +4,7 @@
 //! 底：输入行。危险工具确认用 y/n 应答。所有数据走 UDS 契约，不读内核内存。
 
 use std::io::{stdout, Stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -1743,7 +1743,7 @@ impl App {
             "clear" => self.messages.clear(),
             "help" => self.messages.push((
                 "系统".into(),
-                "/new [id] [项目] /workspace <项目> /workspaces /use <id> /fork [id]\n/stop /steer <引导> /compact /settings /plugins /clear /quit\n运行中直接输入文本=插入引导；/stop=紧急停止并保存上下文".into(),
+                "/new [id] [项目] /workspace <项目> /workspaces /use <id> /fork [id]\n/stop /steer <引导> /compact /settings /plugins /clear /quit\n@<路径> 添加附件；运行中直接输入文本=插入引导；/stop=紧急停止并保存上下文".into(),
             )),
             _ => self.status = format!("未知命令 /{name}"),
         }
@@ -1756,16 +1756,62 @@ impl App {
         };
         self.focus = Focus::Chat;
         self.chat_scroll = 0;
+        // TUI 侧先核实 @ 路径存在，再交给内核；内核会复核并把安装目录外的文件
+        // 复制到默认工作区，返回最终模型路径。
+        let (clean, paths) = split_at_attachments(text);
+        if !paths.is_empty() {
+            for path in &paths {
+                if !Path::new(path).is_file() {
+                    self.messages
+                        .push(("系统".into(), format!("附件不存在: {path}")));
+                    self.status = format!("附件不存在: {path}");
+                    return;
+                }
+            }
+        }
+        let mut final_text = clean.trim().to_string();
+        for path in paths {
+            let source = std::fs::canonicalize(&path)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| path.clone());
+            match self
+                .conn
+                .client
+                .call("file.prepare", json!({"session": id, "path": source}))
+            {
+                Ok(v) => {
+                    let resolved = v
+                        .get("path")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or(path.as_str());
+                    if !final_text.is_empty() {
+                        final_text.push_str("\n\n");
+                    }
+                    final_text.push_str(&format!("[附件] {resolved}"));
+                }
+                Err(e) => {
+                    self.messages
+                        .push(("系统".into(), format!("附件交给内核失败: {e}")));
+                    self.status = e;
+                    return;
+                }
+            }
+        }
+        if final_text.is_empty() {
+            self.status = "消息和附件都为空".into();
+            return;
+        }
         let running = matches!(
             self.state.as_str(),
             "running" | "assembling" | "generating" | "tool_executing"
         );
         if running {
-            self.messages.push(("你（引导）".into(), text.to_string()));
+            self.messages
+                .push(("你（引导）".into(), final_text.clone()));
             match self
                 .conn
                 .client
-                .call("chat.inject", json!({"session": id, "text": text}))
+                .call("chat.inject", json!({"session": id, "text": final_text}))
             {
                 Ok(_) => self.status = "引导已插入上下文；当前生成中断后继续".into(),
                 Err(e) => {
@@ -1776,11 +1822,11 @@ impl App {
             }
             return;
         }
-        self.messages.push(("你".into(), text.to_string()));
+        self.messages.push(("你".into(), final_text.clone()));
         match self
             .conn
             .client
-            .call("chat.send", json!({"session": id, "text": text}))
+            .call("chat.send", json!({"session": id, "text": final_text}))
         {
             Ok(_) => {
                 self.state = "running".into();
@@ -3067,6 +3113,45 @@ fn draw_plugins(f: &mut Frame, app: &App) {
     );
 }
 
+fn split_at_attachments(text: &str) -> (String, Vec<String>) {
+    let mut clean = String::new();
+    let mut paths = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == '@' && (i == 0 || chars[i - 1].is_whitespace()) {
+            let mut j = i + 1;
+            let quoted = j < chars.len() && (chars[j] == '"' || chars[j] == '\'');
+            if quoted {
+                let quote = chars[j];
+                j += 1;
+                let start = j;
+                while j < chars.len() && chars[j] != quote {
+                    j += 1;
+                }
+                if j > start {
+                    paths.push(chars[start..j].iter().collect::<String>());
+                    i = (j + 1).min(chars.len());
+                    continue;
+                }
+            } else {
+                let start = j;
+                while j < chars.len() && !chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if j > start {
+                    paths.push(chars[start..j].iter().collect::<String>());
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        clean.push(chars[i]);
+        i += 1;
+    }
+    (clean, paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3096,6 +3181,20 @@ mod tests {
         assert!(!joined.contains("](https://"));
         assert!(joined.contains("1. 第一项"));
         assert!(joined.contains("╰─"));
+    }
+
+    #[test]
+    fn at_attachment_parser_handles_plain_and_quoted_paths() {
+        let (clean, paths) = split_at_attachments("看下 @/tmp/a.txt 和 @\"/tmp/b c.pdf\"");
+        assert_eq!(clean.trim(), "看下  和");
+        assert_eq!(paths, vec!["/tmp/a.txt", "/tmp/b c.pdf"]);
+    }
+
+    #[test]
+    fn at_attachment_parser_ignores_email_addresses() {
+        let (clean, paths) = split_at_attachments("mail a@b.com");
+        assert_eq!(clean, "mail a@b.com");
+        assert!(paths.is_empty());
     }
 
     #[test]

@@ -1523,6 +1523,79 @@ fn local_web_search_tool_via_kernel() {
 }
 
 #[test]
+fn web_search_artifact_is_persisted_under_project_workspace() {
+    let d = tempfile::tempdir().unwrap();
+    let path = featheragent::engine::save_web_artifact(
+        d.path(),
+        "web.search",
+        &json!({"query":"rust"}),
+        &json!({"results":[{"title":"Rust"}]}),
+    )
+    .unwrap();
+    assert!(
+        path.starts_with(d.path().join(".featheagent").join("search")),
+        "{path:?}"
+    );
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(v["tool"], "web.search");
+    assert_eq!(v["untrusted"], true);
+    assert_eq!(v["result"]["results"][0]["title"], "Rust");
+}
+
+#[test]
+fn file_attach_copies_upload_to_default_workspace() {
+    let (h, conn) = start("fileattach", |_| {});
+    let v = conn
+        .client
+        .call(
+            "file.attach",
+            json!({"name":"hello.txt","data_base64":"aGVsbG8="}),
+        )
+        .unwrap();
+    let path = PathBuf::from(v["path"].as_str().unwrap());
+    assert!(v["copied"].as_bool().unwrap_or(false), "{v}");
+    assert!(
+        path.starts_with(h.root.join("workspace").join("default")),
+        "{v}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello");
+}
+
+#[test]
+fn file_prepare_copies_local_file_outside_install_root() {
+    let (h, conn) = start("fileprepare", |_| {});
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(outside.path(), "outside").unwrap();
+    let v = conn
+        .client
+        .call(
+            "file.prepare",
+            json!({"path": outside.path().display().to_string()}),
+        )
+        .unwrap();
+    let path = PathBuf::from(v["path"].as_str().unwrap());
+    assert!(v["copied"].as_bool().unwrap_or(false), "{v}");
+    assert!(
+        path.starts_with(h.root.join("workspace").join("default")),
+        "{v}"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "outside");
+
+    let inside = h.root.join("data").join("inside.txt");
+    std::fs::create_dir_all(inside.parent().unwrap()).unwrap();
+    std::fs::write(&inside, "inside").unwrap();
+    let v2 = conn
+        .client
+        .call(
+            "file.prepare",
+            json!({"path": inside.display().to_string()}),
+        )
+        .unwrap();
+    assert_eq!(v2["copied"].as_bool(), Some(false), "{v2}");
+    assert_eq!(PathBuf::from(v2["path"].as_str().unwrap()), inside);
+}
+
+#[test]
 fn inject_steers_running_turn() {
     let (_h, conn) = start("steer", |_| {});
     conn.client

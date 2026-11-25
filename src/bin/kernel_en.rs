@@ -698,6 +698,33 @@ fn stress_log(n: usize) -> Result<(), String> {
 
 fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let json_only = args.has("--json");
+    match bench_run(args) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let code = if e.contains("os error 2") {
+                "artifact_missing"
+            } else {
+                "bench_failed"
+            };
+            if json_only {
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({
+                        "ok": false,
+                        "code": code,
+                        "error": e,
+                        "hint": "Check the path in the error; each bench run uses a unique temporary directory"
+                    }))
+                    .unwrap()
+                );
+            }
+            Err(e)
+        }
+    }
+}
+
+fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
+    let json_only = args.has("--json");
     // NEW-K：bench 会自行拉起内核实例；同一安装根已有 serve 时先明确拒绝，
     // 避免 Windows 命名管道冲突被翻译成裸 os error 2。
     let probe_paths = paths_from(args)?;
@@ -726,9 +753,14 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         // 明确以专用退出码结束，避免 Windows 下被包装脚本/管道吞成 0。
         std::process::exit(2);
     }
-    let dir = std::env::temp_dir().join(format!("fa-bench-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // N7: use a unique temp dir per run; do not reuse PID-only names.
+    let dir = std::env::temp_dir().join(format!(
+        "fa-bench-{}-{}",
+        std::process::id(),
+        featheragent::util::random_token(6)
+    ));
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("[bench:temp_dir] {}: {e}", dir.display()))?;
 
     if !json_only {
         eprintln!("bench[1/6] binary size");
@@ -914,6 +946,15 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let boot_p50 = percentile(&boot_ms, 0.5);
     let boot_p90 = percentile(&boot_ms, 0.9);
     let boot_consistent = boot_p50 <= boot_p90;
+    let windows = cfg!(windows);
+    let boot_limit = if windows { 100.0 } else { 20.0 };
+    let reliability = fingerprint
+        .get("reliability")
+        .and_then(|x| x.as_str())
+        .unwrap_or("unknown");
+    let boot_trusted = reliability == "high";
+    let boot_gate_raw = boot_p50 < boot_limit;
+    let boot_gate_effective = boot_gate_raw || !boot_trusted;
     let m = serde_json::json!({
         "binary_bytes": size_bytes,
         "binary_mb": size_bytes as f64 / 1_048_576.0,
@@ -925,6 +966,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "boot_ms_p50": boot_p50,
         "boot_ms_p90": boot_p90,
         "boot_percentiles_consistent": boot_consistent,
+        "reliability": reliability,
+        "boot_gate_raw": boot_gate_raw,
+        "boot_gate_trusted": boot_trusted,
         "cold_spawn_mode": "real_process_spawn",
         "cold_spawn_ms_p50": percentile(&spawn_ms, 0.5),
         "cold_spawn_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
@@ -937,9 +981,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "rpc_p50_ms": percentile(&rpc, 0.5),
         "rpc_p95_ms": percentile(&rpc, 0.95),
     });
-    let windows = cfg!(windows);
     let platform = if windows { "windows" } else { "linux" };
-    let boot_limit = if windows { 100.0 } else { 20.0 };
     let cold_spawn_limit = if windows { 250.0 } else { 100.0 };
     let write_limit = if windows { 10_000.0 } else { 100.0 };
     let boot_key = if windows {
@@ -964,6 +1006,10 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
         "metrics_consistent": boot_consistent,
+        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
+        "boot_gate_trusted": boot_trusted,
+        "boot_gate_raw": boot_gate_raw,
+        "reliability": reliability,
         "boot_mode": "warm_in_process_same_install_root",
         "boot_limit_ms": boot_limit,
         "cold_spawn_mode": "real_process_spawn",
@@ -971,7 +1017,8 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "write_limit_us": write_limit,
     });
     if let Some(o) = gates.as_object_mut() {
-        o.insert(boot_key.into(), serde_json::json!(boot_p50 < boot_limit));
+        // N9: when reliability is not high, report the boot gate as advisory.
+        o.insert(boot_key.into(), serde_json::json!(boot_gate_effective));
         o.insert(
             cold_key.into(),
             serde_json::json!(percentile(&spawn_ms, 0.5) < cold_spawn_limit),

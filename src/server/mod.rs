@@ -367,6 +367,33 @@ fn dispatch(
                 json!({"ok": true, "name": name.trim(), "path": path, "workspaces": kernel.workspace_list()}),
             )
         }
+        // 文件附件：WebUI 传 name+data_base64；TUI 传本地 path。两种入口都先核实存在，
+        // 安装目录外的本地文件由内核复制到默认工作区，返回值里的 path 才是模型路径。
+        "file.attach" | "file.prepare" => {
+            if let Some(path) = params.get("path").and_then(|x| x.as_str()) {
+                kernel
+                    .attach_file_path(std::path::Path::new(path))
+                    .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))
+            } else {
+                let name = params
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .ok_or_else(|| invalid("name required for upload"))?;
+                let data = params
+                    .get("data_base64")
+                    .and_then(|x| x.as_str())
+                    .ok_or_else(|| invalid("data_base64 required for upload"))?;
+                let bytes = crate::util::base64_decode(data).map_err(|e| {
+                    (
+                        rpc::ERR_INVALID_PARAMS,
+                        format!("attachment_invalid_base64: {e}"),
+                    )
+                })?;
+                kernel
+                    .attach_file_bytes(name, &bytes)
+                    .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))
+            }
+        }
         "session.list" => {
             let log_sessions = kernel.store.list_sessions().unwrap_or_default();
             let live: HashMap<String, Value> = kernel

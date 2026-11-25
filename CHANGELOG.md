@@ -1,6 +1,24 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.6` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4] - 2026-11-25
+
+### Fixed
+- N5: `must_include` now supports `match: "any" | "all" | "min"` plus `min_matches`. A multi-term item defaults to `min` with `ceil(n/2)` required matches instead of requiring every literal; protocol constraints can opt into `all`, and `any` covers one-of lists. Hardcheck reports `{hits}/{total}` and no longer fails a semantically correct paraphrase just because all terms are not present.
+- N6: subjective criteria (`准确/准确无误/完整/正确/恰当/专业/规范/流畅/自然`, plus the existing readability words) may not use `must_not_include`; a banned word that already appears in the user input also rejects the guide. This prevents “术语准确” from banning `软件/硬件/计算机` and failing every correct answer. N4's fixture-item drop remains covered by the rc.3.5 raw regression test.
+- N7: bench uses a unique temporary directory per run (`fa-bench-<pid>-<random>`), so a recycled Windows PID or stale directory cannot produce `os error 2`; I/O failures carry the operation and path, and `bench --json` returns `{"ok":false,"code":"artifact_missing"|"bench_failed","error":...}`.
+- N8: identical tool calls in one model reply are de-duplicated before execution; every `tool.call` event carries `attempt` and `call_index`, so a retry-chain replay is distinguishable instead of silently executing twice.
+- N9: when `metrics.env.reliability` is not `high`, the boot gate is marked `boot_gate_status:"advisory"` with `boot_gate_raw` preserved; `gates.boot_lt_*` is no longer a red failure caused only by host memory pressure. `reliability` is copied into gates and metrics.
+
+### Added
+- Web search/news/fetch results are persisted as pretty JSON under `workspace/<project>/.featheagent/search/<timestamp>-<tool>.json`; the tool result gains `artifact` and `artifact_kind`, and a write failure is reported as `persist_error` without failing the search.
+- WebUI file attachment: a `+` button opens the native file picker, uploads bytes over HTTP RPC (`file.attach`, base64, 8 MiB file limit / 12 MiB request limit), and shows removable chips with the kernel-returned path. TUI supports `@<path>` and `@"path with spaces"`; it checks `is_file` before calling `file.prepare`.
+- Kernel `file.attach` / `file.prepare`: rechecks existence, copies files outside the install root to `workspace/default/uploads/`, and returns the model-facing path; browser uploads always land in the default workspace. Tests: upload to default workspace, outside-path copy/inside-path passthrough, attachment parser (plain/quoted/email), base64 round-trip, search artifact JSON.
+
+### Changed
+- `GUIDE_SYSTEM` explains `match`/`min_matches` and forbids subjective `must_not_include`.
+- `bench` JSON adds `boot_gate_raw`, `boot_gate_trusted`, `boot_gate_status`, `reliability`.
 
 ## [1.2.1-rc.3.6] - 2026-11-25
 

@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.6 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.3.6-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.4-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.3.6 fixes the rc.3.5 retest findings N1–N4 and adds English editions of all top-level binaries. N1: `must_include` is term-only (2–12 characters, no concept words or sentences), and hardcheck requires every whitespace/punctuation-separated term instead of one literal substring; a conceptual phrase such as `管理计算机硬件和资源` must be rejected and retried. N2: `percentile` sorts its own samples; bench computes P50/P90 once and exposes `boot_percentiles_consistent` / `metrics_consistent`, so P50 ≤ P90. N3: empty responses get two temperature retries and malformed Ollama tool calls get two `tool_format` retries with a JSON correction; a crash still restarts once. N4: a rubric item whose `must_not_include` contains `REVIEW-FINAL`, `REVIEW-START`, `<...>`, `__FILL`, `{{` or `}}` is dropped as one item with `review.warn`. The package contains ten exes: the five Chinese tools plus `featheragent-en`, `featheragent-tui-en`, `featheragent-webui-en`, `feather-plugin-en` and `feather-storage-en`. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.4 fixes the rc.3.6 retest findings N5–N9 and adds file attachments plus search-result artifacts. N5: `must_include` supports `match:any|all|min`; multi-term items default to `min` with `ceil(n/2)` matches, and `all` is explicit for protocol constraints. N6: subjective criteria cannot use `must_not_include`, and a banned word already present in the user input rejects the guide; N4's fixture-item drop remains covered. N7: bench uses a unique temp directory per run, and errors return `artifact_missing`/`bench_failed` JSON with the path. N8: identical tool calls in one reply are de-duplicated; `tool.call` carries `attempt`/`call_index`. N9: when `reliability` is not `high`, the boot gate is `advisory` with `boot_gate_status` and `boot_gate_raw`. WebUI/TUI attachments are copied to `workspace/default/uploads/` when outside the install root; search/news/fetch results are written under `workspace/<project>/.featheagent/search/`. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.6\
+D:\FeatherAgent-1.2.1-rc.4\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.3.6`, then continue.
+Wait for `serve ready: 1.2.1-rc.4`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.6
+cd D:\FeatherAgent-1.2.1-rc.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -114,6 +114,13 @@ The Settings "Search provider" defaults to `local` and needs no API key. Expecte
 
 **DeepSeek (optional)**: switch to `deepseek` and provide `DEEPSEEK_API_KEY`; billed per successful request (5 CNY / 1,000 requests). Set `search_provider` to `none` to disable network search.
 
+### File attachments and search artifacts
+
+1. **WebUI `+`.** Click the `+` in the composer; the native file picker opens. Choose a small text file. A chip must appear with the kernel path; `file.attach` must return `copied:true` when the file is uploaded, and the path must be under `workspace\default\uploads\`. Send a message with the attachment; the model-visible text must contain `[附件] <that path>` (English: `[Attachment] <path>`).
+2. **TUI `@`.** Send `@D:\temp\note.txt 请读取这个文件`; the TUI must show the resolved kernel path, and a missing path must fail before `chat.send`. Quote `@"D:\My Files\a.txt"` for spaces.
+3. **Outside install root.** Pick a file outside the unpacked install directory; the kernel must copy it to `workspace\default\uploads\` and return the copy path. A file inside the install root may keep its path.
+4. **Search artifact.** After `web.search`, `web.news` or `web.fetch`, the tool result must include `artifact`; `workspace\<project>\.featheagent\search\` must contain a JSON file with `tool`, `arguments`, `result`, `untrusted:true`.
+
 ## 5. Markdown and icons
 
 - TUI: send `# heading`, `- list`, `1. ordered`, `> quote`, code block, `**bold**`, `*italic*`, `[link](https://…)`; the assistant reply should drop Markdown markers while keeping structure.
@@ -191,16 +198,16 @@ v1.2.1-rc.3.2 regression checks:
 3. **J3: bench fingerprint.** `featheragent.exe bench --json` must include `metrics.env` with `cpu_count`, `mem_total_kb`, `mem_available_kb`, `mem_load_pct` and `uptime_s`; the human-readable run must print one “环境指纹” line. Record it next to every bench number.
 4. **Display name.** `featheragent.exe version`, `featheragent-tui.exe version`, `featheragent-webui.exe version` must print `FeatherAgent …` (TUI/WebUI included), while binary names remain lowercase.
 
-v1.2.1-rc.3.6 regression checks:
+v1.2.1-rc.4 regression checks:
 
-**N1–N4 first:**
-
-1. **N1: conceptual `must_include` is rejected.** Run the operating-system task with a real 7B. If the guide writes `must_include:"管理计算机硬件和资源"`, validation must reject it (connection word) and retry. A term form such as `管理计算机硬件 资源` must be accepted, and an answer that says “硬件与软件资源” must pass hardcheck; an answer missing one term must fail.
-2. **N1: term matching is not a free pass.** A multi-term `must_include` must require every term; a phrase with `/` must split unless it looks like a path with a dot.
-3. **N2: bench consistency.** `bench --json` must have `boot_percentiles_consistent:true` and `gates.metrics_consistent:true`, and P50 ≤ P90 on every run and on both platforms.
-4. **N3: empty and malformed tool-call retries.** With a mock that returns an empty body, expect up to two `model.retry` events with `reason:"empty"` and temperatures 0.70/0.75. With an Ollama error containing `XML syntax error` or `element ... closed by ... parameter`, expect up to two `model.retry` events with `reason:"tool_format"`, a system correction asking for JSON `tool_calls`, and a `failed` only after the budget.
-5. **N4: fixture item drops alone.** A rubric item with `must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]` must be dropped by itself; `review.warn` must name its id and real items must survive.
-6. **Bilingual package.** The zip root must contain all ten exes. `featheragent-en.exe version` and help must be English; `featheragent-tui-en.exe` must show English panels; `featheragent-webui-en.exe` must serve `<html lang="en">` and English JS; the Chinese editions must keep Chinese UI.
+1. **N5: match modes.** Force a guide with four `must_include` terms and an answer covering two. With the default (no `match`), hardcheck must pass (`{hits}/{total}` ≥ 2). Set `match:"all"` and it must fail; set `match:"any"` and one term must pass; `min_matches:3` must require three. Keep `["SYN","ACK"]` on the TCP task with `match:"all"`.
+2. **N6: subjective must_not_include is rejected.** Use a task such as `用三句话说明什么是操作系统` and a criterion `使用准确的术语` plus `must_not_include:["软件","硬件","计算机"]`. Guide validation must reject it with a subjective-criterion message and retry. A banned word present in the user input must also reject the guide.
+3. **N4 regression.** The rc.3.5 raw fixture item (`must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]`) must still be dropped by itself with `review.warn` naming its id.
+4. **N7: bench temp/error contract.** Run `bench --json` several times; every run must have a distinct temp directory and no `os error 2`. If a path is deliberately broken, the JSON must be one line with `ok:false`, `code:"artifact_missing"` or `"bench_failed"`, and the path in `error`.
+5. **N8: duplicate tool calls.** Trigger the retry chain with a model that repeats the same tool call. `tool.call` must carry `attempt` and `call_index`; identical name+arguments in one reply must execute once. A different path must still execute separately.
+6. **N9: advisory boot gate.** Under memory pressure (`reliability` medium or low), `gates.boot_gate_status` must be `"advisory"`, `boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` must not alone turn the run red, and `reliability` must appear in both `metrics` and `gates`.
+7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
+8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
 
 v1.2.1-rc.3.5 regression checks:
 
@@ -237,13 +244,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.3.6 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.4 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.6-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

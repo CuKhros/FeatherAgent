@@ -961,18 +961,42 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                             .collect(),
                         _ => Vec::new(),
                     };
-                    if musts.iter().any(|lit| {
-                        include_terms(lit)
+                    if !musts.is_empty() {
+                        // N5：数组不再默认“全部命中”。默认 min（至少 ceil(n/2) 项），
+                        // 显式 all/any/min 由 match + min_matches 决定。
+                        let mode = item
+                            .get("match")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or(if musts.len() > 1 { "min" } else { "all" });
+                        let need = match mode {
+                            "all" => musts.len(),
+                            "any" => 1,
+                            "min" => item
+                                .get("min_matches")
+                                .and_then(featheragent::util::json_u64)
+                                .unwrap_or(musts.len().div_ceil(2) as u64)
+                                as usize,
+                            _ => musts.len(),
+                        };
+                        let need = need.clamp(1, musts.len());
+                        let hits = musts
                             .iter()
-                            .any(|term| !answer.contains(term.as_str()))
-                    }) {
-                        // L2：feedback 会把 evidence 原样交给 exec。若这里回显字面短语，
-                        // 模型会直接把该短语贴到答案末尾“补标签”，内容却没有改善。
-                        // 只说明“缺一项必须覆盖的要求”，不给出字面值。
-                        fail(format!(
-                            "答案未覆盖判据「{criterion}」要求的关键内容（缺少必须出现的短语）"
-                        ));
-                        continue;
+                            .filter(|lit| {
+                                include_terms(lit)
+                                    .iter()
+                                    .all(|term| answer.contains(term.as_str()))
+                            })
+                            .count();
+                        if hits < need {
+                            // L2：feedback 会把 evidence 原样交给 exec。若这里回显字面短语，
+                            // 模型会直接把该短语贴到答案末尾“补标签”，内容却没有改善。
+                            // 只说明“缺一项必须覆盖的要求”，不给出字面值。
+                            fail(format!(
+                                "答案未覆盖必须内容：只出现 {hits}/{} 项，判据「{criterion}」要求 match={mode}（至少 {need} 项）",
+                                musts.len()
+                            ));
+                            continue;
+                        }
                     }
                     let banned: Vec<String> = match item.get("must_not_include") {
                         Some(Value::String(s)) => vec![s.clone()],
@@ -1243,13 +1267,13 @@ const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你�
 1. 写 1–5 条判据，每条都要针对下面的“任务输入”，不要复用示例的领域或文字。
 2. criterion 和 check 只是给人看的说明，不参与判定；真正的判据只能写在 must_include / must_not_include / min_points / pattern / regex 这五个键上。
 3. 整份清单至少有一条判据用到这五个硬键中的任意一个，否则整份清单作废。
-4. must_include 只能写任务里必须出现的专有名词、术语、文件名、命令或固定写法，2–12 字；禁止写概念性描述或句子，禁止含“和/与/及/或/是/的”等连接词。概念要求（如“说明作用”“解释过程”）不要用 must_include，写在 criterion/check 交给 judge。例如 must_include 用 “SYN”“ACK”“操作系统”“进程调度”，不要写“管理计算机硬件和资源”。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
+4. must_include 只能写任务里必须出现的专有名词、术语、文件名、命令或固定写法，2–12 字；禁止写概念性描述或句子，禁止含“和/与/及/或/是/的”等连接词。概念要求（如“说明作用”“解释过程”）不要用 must_include，写在 criterion/check 交给 judge。多个术语用数组时，默认 match=min（至少 ceil(n/2) 项）；功能清单/举例用 match=min 或 any，只有“SYN 与 ACK 都必须出现”这类硬约束才写 match=all；需要精确数量时写 min_matches。例如 must_include 用 “SYN”“ACK”“操作系统”“进程调度”，不要写“管理计算机硬件和资源”。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
 5. 至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或；或 regex 引擎下的正则）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。
 5b. 至少留一条“描述型”判据：只写 criterion/check，不写任何硬键，交给 judge 评估。描述型不要超过 2 条。
 6. 判据必须是任务本身可验证的事实（结论关键词、文件名、命令、路径、格式），不要评价“逻辑清晰”“内容完整”这类无法核对的话。
 7. criterion 和 check 必须写出这条判据的具体含义；禁止照抄示例里的占位符或“这项检查什么”“怎么核对”这类空话。
 8. 示例只示范字段名与结构。不要在判据里讨论占位符、示例、模板本身，不要把 __FILL_*__ 写进 must_not_include；不要写“禁止使用占位符”这类自我指涉的条目。
-9. 不要写主观判据（简洁、清晰、明了、美观、通顺、易懂、逻辑性强、排版好看）。需要篇幅或格式时，用 min_points / pattern / regex 等可计数、可核对的判据；否则直接省略。
+9. 不要写主观判据（简洁、清晰、明了、美观、通顺、易懂、逻辑性强、排版好看、术语准确、表达准确、内容完整）。主观要求只写在 criterion/check，不写 must_not_include；不要把“软件/硬件/计算机”这类领域常用词当禁词。需要篇幅或格式时，用 min_points / pattern / regex 等可计数、可核对的判据；否则直接省略。
 10. 只输出 JSON，不要解释、不要 markdown 代码围栏。"#;
 
 /// 拼 guide 的用户消息；`feedback` 非空时把上次的 schema 错误原样回注。
@@ -1393,6 +1417,14 @@ fn subjective_reason(t: &str) -> Option<&'static str> {
         "完整性",
         "语气",
         "排版",
+        "准确",
+        "准确无误",
+        "正确",
+        "恰当",
+        "专业",
+        "规范",
+        "流畅",
+        "自然",
     ];
     WORDS.iter().find(|w| t.contains(**w)).copied()
 }
@@ -1602,6 +1634,57 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
                 ));
             }
         }
+        let must_count = must_include_values.len();
+        let match_mode = item
+            .get("match")
+            .and_then(|x| x.as_str())
+            .map(|x| x.trim().to_lowercase())
+            .filter(|x| !x.is_empty())
+            .unwrap_or_else(|| {
+                if must_count > 1 {
+                    "min".into()
+                } else {
+                    "all".into()
+                }
+            });
+        if must_count == 0 && item.get("match").is_some() {
+            return Err(format!(
+                "验收项 {} 写了 match，但 must_include 为空；match 只用于多项 must_include",
+                i + 1
+            ));
+        }
+        let include_min = if must_count == 0 {
+            0
+        } else {
+            match match_mode.as_str() {
+                "all" => must_count,
+                "any" => 1,
+                "min" => item
+                    .get("min_matches")
+                    .and_then(featheragent::util::json_u64)
+                    .map(|n| n as usize)
+                    .unwrap_or(must_count.div_ceil(2)),
+                other => {
+                    return Err(format!(
+                        "验收项 {} 的 match 只能是 any/all/min，实际『{other}』",
+                        i + 1
+                    ))
+                }
+            }
+            .clamp(1, must_count)
+        };
+        if must_count > 0 && item.get("min_matches").is_some() {
+            let n = item
+                .get("min_matches")
+                .and_then(featheragent::util::json_u64)
+                .unwrap_or(0) as usize;
+            if n < 1 || n > must_count {
+                return Err(format!(
+                    "验收项 {} 的 min_matches 必须在 1–{must_count} 之间（must_include 共 {must_count} 项）",
+                    i + 1
+                ));
+            }
+        }
         if !must_include_values.is_empty() {
             let value = if must_include_values.len() == 1 {
                 json!(must_include_values[0])
@@ -1609,9 +1692,30 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
                 json!(must_include_values)
             };
             norm.insert("must_include".into(), value);
+            norm.insert("match".into(), json!(match_mode));
+            norm.insert("min_matches".into(), json!(include_min));
         }
         let banned = literal_list(item.get("must_not_include").unwrap_or(&Value::Null));
         if !banned.is_empty() {
+            // N6：主观判据（如“术语准确”）不能用禁掉常用词的 must_not_include 来实现；
+            // 这样会把“软件/硬件/计算机”这类答案必用词判死，失败原因还与判据无关。
+            if let Some(word) = subjective_reason(criterion).or_else(|| subjective_reason(check)) {
+                return Err(format!(
+                    "验收项 {} 是主观判据（含『{word}』），不能用 must_not_include 实现；主观要求请只写 criterion/check 交给 judge，或改成可计数/可核对的 format",
+                    i + 1
+                ));
+            }
+            // 禁词已经出现在用户任务输入里：判据和任务自相矛盾，要求 guide 重写。
+            let input_low = input.to_lowercase();
+            if let Some(b) = banned
+                .iter()
+                .find(|b| !b.trim().is_empty() && input_low.contains(&b.to_lowercase()))
+            {
+                return Err(format!(
+                    "验收项 {} 的 must_not_include『{b}』出现在用户任务输入中：禁词与任务矛盾，请改成当前任务真正应避免的内容",
+                    i + 1
+                ));
+            }
             if let Some(b) = banned.iter().find(|b| rubric_placeholder(b)) {
                 return Err(format!(
                     "验收项 {} 的 must_not_include 含占位符『{b}』：必须换成具体的禁词",
@@ -2331,7 +2435,7 @@ mod tests {
     fn review_rubric_accepts_array_must_include_and_hardcheck_requires_all() {
         let v = parse_rubric_with_input(
             "{\"rubric\":[
-                {\"id\":\"c1\",\"criterion\":\"说明 TCP 三次握手的过程\",\"check\":\"包含 SYN 和 ACK\",\"must_include\":[\"SYN\",\"ACK\"]},
+                {\"id\":\"c1\",\"criterion\":\"说明 TCP 三次握手的过程\",\"check\":\"包含 SYN 和 ACK\",\"match\":\"all\",\"must_include\":[\"SYN\",\"ACK\"]},
                 {\"id\":\"c2\",\"criterion\":\"至少三个要点\",\"check\":\"分点说明\",\"min_points\":3}
             ]}",
             "用三句话说明 TCP 三次握手，必须提到 SYN 和 ACK",
@@ -2616,5 +2720,82 @@ mod tests {
                 && w.as_str().unwrap_or("").contains("c4")),
             "{v}"
         );
+    }
+
+    #[test]
+    fn review_rubric_defaults_multi_must_include_to_half() {
+        let v = parse_rubric_with_input(
+            r#"{"rubric":[
+                {"id":"c1","criterion":"说明文件与进程管理","check":"覆盖功能","must_include":["文件管理","进程管理","设备驱动","用户界面"]},
+                {"id":"c2","criterion":"整体可读","check":"读答案判断"}
+            ]}"#,
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap();
+        assert_eq!(v["rubric"][0]["match"], "min", "{v}");
+        assert_eq!(v["rubric"][0]["min_matches"], 2, "{v}");
+        let pass = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"操作系统负责进程管理、内存分配，也提供用户界面。", "rubric":v["rubric"]}),
+        )
+        .unwrap();
+        assert_eq!(pass["pass"], true, "{pass}");
+    }
+
+    #[test]
+    fn review_hardcheck_supports_any_all_and_min() {
+        let rubric = json!([
+            {"id":"any","criterion":"任一项","check":"任一项","match":"any","must_include":["文件管理","进程管理"]},
+            {"id":"all","criterion":"全部","check":"全部","match":"all","must_include":["文件管理","进程管理"]},
+            {"id":"min","criterion":"至少两项","check":"至少两项","match":"min","min_matches":2,"must_include":["文件管理","进程管理","设备驱动"]}
+        ]);
+        let one = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"只提到进程管理。", "rubric":rubric.clone()}),
+        )
+        .unwrap();
+        assert_eq!(one["pass"], false, "{one}");
+        let failed: Vec<&str> = one["failed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|x| x.get("id").and_then(|v| v.as_str()))
+            .collect();
+        assert!(failed.contains(&"all"), "{one}");
+        assert!(failed.contains(&"min"), "{one}");
+        assert!(!failed.contains(&"any"), "{one}");
+        let two = review_gate_plugin(
+            "review.hardcheck",
+            &json!({"answer":"文件管理、进程管理都有。", "rubric":rubric}),
+        )
+        .unwrap();
+        assert_eq!(two["pass"], true, "{two}");
+    }
+
+    #[test]
+    fn review_rubric_rejects_subjective_must_not_include() {
+        let err = parse_rubric_with_input(
+            r#"{"rubric":[
+                {"id":"c1","criterion":"使用准确的术语","check":"确保术语和概念准确无误","must_not_include":["软件","硬件","计算机"]},
+                {"id":"c2","criterion":"说明操作系统","check":"出现关键词","must_include":"操作系统"}
+            ]}"#,
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap_err();
+        assert!(err.contains("主观判据"), "{err}");
+        assert!(err.contains("must_not_include"), "{err}");
+    }
+
+    #[test]
+    fn review_rubric_rejects_banned_word_from_input() {
+        let err = parse_rubric_with_input(
+            r#"{"rubric":[
+                {"id":"c1","criterion":"说明操作系统","check":"出现关键词","must_include":"操作系统"},
+                {"id":"c2","criterion":"避免重复输入","check":"不要复述任务词","must_not_include":["操作系统"]}
+            ]}"#,
+            "用三句话说明什么是操作系统",
+        )
+        .unwrap_err();
+        assert!(err.contains("出现在用户任务输入中"), "{err}");
     }
 }

@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.3.6** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.4** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.6","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -170,6 +170,7 @@ On Windows, Python can use `open(r'\\.\pipe\featheragent-...', 'r+b', buffering=
 | `plugin.enable` / `plugin.disable` | enable/disable plugin | `name` |
 | `plugin.install` | install plugin | `path` (absolute directory containing `plugin.json`) |
 | `plugin.settings` | read a plugin's declared settings schema and values | `name` |
+| `file.attach` / `file.prepare` | upload or resolve a local attachment; returns the model-facing path | `path`, or `name` + `data_base64` |
 
 Full parameter details live in `src/server/mod.rs::dispatch`; this document locks down the **transport** so third parties do not get stuck on framing. Tool calls have no standalone RPC: the model/session triggers them through `chat.send`, and results return as events. `model.message.finish` may be `tool_calls`, followed by `tool.call` / `tool.result`. Business errors (path escape/missing args/file not found) are `tool.error`; only plugin crash/timeout/IO are `tool.failed`; three consecutive technical failures emit `tool.degraded`. Providers must put structured tool calls into the `done` event, not just concatenated text.
 
@@ -335,7 +336,20 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 //    "billing":"Search/Fetch billed per successful request, 5 CNY / 1000"}
 ```
 
+### 5.5 File attachments (v1.2.1-rc.4)
+
+`file.attach` and `file.prepare` are dispatched by the same `src/server/mod.rs` handler. WebUI calls them over HTTP RPC (`POST /rpc`, JSON) because the WebSocket frame limit is still 1 MiB; TUI uses the normal MsgPack connection. Either `path` (local, canonicalized) or `name` + `data_base64` (browser upload) is accepted; an empty object is invalid.
+
+```json
+{"method":"file.attach","params":{"name":"note.txt","data_base64":"aGVsbG8="}}
+// → {"path":".../workspace/default/uploads/...-note.txt","copied":true,
+//    "source":"upload","name":"note.txt","bytes":5}
+```
+
+A local file inside the install root returns `copied:false` and its canonical path; an outside file is copied to the default workspace. Browser bytes always land in the default workspace. The model receives only `result.path`, never the browser path or the outside source.
+
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.4: `file.attach` / `file.prepare` are additive methods on the same HTTP RPC `/rpc` endpoint used by WebUI; request `{path}` or `{name,data_base64}`, response `{path,copied,source,name,bytes}`. Errors use `-32602` with `attachment_not_found|attachment_not_file|attachment_empty|attachment_too_large|attachment_write_failed|attachment_copy_failed|attachment_invalid_base64`. No new frame, endpoint, or event kind. Tool results for `web.search|news|fetch` may add `artifact` / `artifact_kind`; bench JSON adds `boot_gate_raw`, `boot_gate_trusted`, `boot_gate_status`, and `reliability`; `tool.call` adds `attempt` and `call_index`. `must_include` adds `match` / `min_matches`. All additive; prompt text and plugin internals only otherwise.
 - 1.2.1-rc.3.6: no new wire message, frame, endpoint, or error code. Bench JSON adds `boot_percentiles_consistent` (P50 ≤ P90 from the same sorted samples) and `gates.metrics_consistent`; both are additive. `review.warn` may now report a fixture item dropped because its `must_not_include` contained `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}`. `must_include` is interpreted as whitespace/punctuation-separated terms during hardcheck; prompt text changed, not the wire contract. The English `-en` binaries use the same protocol.
 - 1.2.1-rc.3.5: no new wire message, frame, endpoint, or error code. `review.parse_rubric` adds `advisory` (ids of subjective items excluded from hardcheck and judge); `review.warn` may report dropped placeholder/example items (`已丢弃占位符/示例判据 …`) and subjective downgrades. `must_include` accepts a string array and hardcheck requires every phrase. A rubric with no executable criterion after retries now fails `review_prepare` instead of proceeding. `GUIDE_SYSTEM` placeholder tokens changed to `__FILL_*__`; this affects prompt text only, not the wire contract.
 - 1.2.1-rc.3.4: no new wire message, frame, endpoint, or error code. `review.guide` payload adds `artifact` (path or empty string when writing failed). `review.verdict` adds `attempts` (judge model calls), `votes` (completed votes, 2 when the third is skipped by early stop) and `artifacts` (judge artifact paths). Guide and judge rollouts are written under `<data>/review-artifacts/<session>/` before parsing; this is best-effort and never fails the gate. Rubric parsing now also receives the user input, so `criterion` / `check` / `must_include` / `must_not_include` placeholders and `REVIEW-FINAL` / `REVIEW-START` tokens absent from the task are rejected. No setting field changed.

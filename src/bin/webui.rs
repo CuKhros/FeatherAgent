@@ -257,7 +257,8 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Req> {
         .get("content-length")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    if len > 1024 * 1024 {
+    // 文件附件走 base64 JSON；8 MiB 文件编码后约 11 MiB，留出 RPC 包装余量。
+    if len > 12 * 1024 * 1024 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "body too large",
@@ -821,6 +822,9 @@ mod tests {
         assert!(!INDEX_HTML_EN.contains("设置"));
         assert!(APP_JS_EN.contains("RPC timeout"));
         assert!(!APP_JS_EN.contains("RPC 超时"));
+        assert!(INDEX_HTML_EN.contains("btn-attach"));
+        assert!(APP_JS_EN.contains("file.attach"));
+        assert!(APP_JS_EN.contains("outgoingText"));
     }
 
     #[test]
@@ -843,6 +847,10 @@ mod tests {
         assert!(APP_JS.contains("renderPluginNav"));
         assert!(APP_JS.contains("installPlugin"));
         assert!(APP_JS.contains("showSettingsView"));
+        assert!(INDEX_HTML.contains("btn-attach"));
+        assert!(INDEX_HTML.contains("file-input"));
+        assert!(APP_JS.contains("file.attach"));
+        assert!(APP_JS.contains("renderAttachments"));
     }
 
     fn masked_frame(opcode: u8, fin: bool, text: &str) -> Vec<u8> {

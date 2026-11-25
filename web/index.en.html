@@ -40,7 +40,12 @@
       <div class="panel-title">Conversation</div>
       <div id="messages" class="messages"></div>
       <div class="composer">
-        <textarea id="input" rows="3" placeholder="Type a message; Enter sends, Shift+Enter inserts a newline"></textarea>
+        <div id="attachments" class="attachments"></div>
+        <div class="composer-main">
+          <button id="btn-attach" class="attach" type="button" aria-label="Attach file">+</button>
+          <textarea id="input" rows="3" placeholder="Type a message; Enter sends, Shift+Enter inserts a newline"></textarea>
+        </div>
+        <input id="file-input" type="file" multiple hidden>
         <div class="actions">
           <button id="btn-send" class="primary">Send</button>
           <button id="btn-stop" class="danger">Stop and save</button>

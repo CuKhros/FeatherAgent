@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "provider-mock",
-    "version": "1.2.1-rc.3.6",
+    "version": "1.2.1-rc.4",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "chat",

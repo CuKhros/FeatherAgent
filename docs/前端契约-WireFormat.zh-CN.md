@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.3.6**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.4**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.3.6","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -171,6 +171,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 | `plugin.list` | 插件清单 | 无 |
 | `plugin.enable` / `plugin.disable` | 启停插件 | `name` |
 | `plugin.settings` | 读取插件自述的设置 schema 与当前值 | `name` |
+| `file.attach` / `file.prepare` | 上传或解析本地附件，返回模型应使用的路径 | `path`，或 `name` + `data_base64` |
 | `plugin.install` | 安装插件 | `path`（含 `plugin.json` 的目录绝对路径） |
 
 完整参数以 `src/server/mod.rs` 的 `dispatch` 为准；本文只锁定**传输层**，避免第三方再被分帧卡住。工具调用没有独立 RPC：模型/会话通过 `chat.send` 触发，工具结果以事件形式回传。`model.message` 的 `finish` 可能是 `tool_calls`，随后依次出现 `tool.call` / `tool.result`。业务错误（路径越界/缺参数/文件不存在）为 `tool.error`；只有插件崩溃/超时/IO 故障才为 `tool.failed`；连续 3 次技术失败会为该工具发 `tool.degraded`。provider 必须把结构化 tool_calls 放进 `done` 事件，而不是只拼接文本。
@@ -336,7 +337,20 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 //    "billing":"Search/Fetch 按成功请求计费，5 元/1000 次"}
 ```
 
+### 5.5 文件附件（v1.2.1-rc.4）
+
+`file.attach` / `file.prepare` 由同一个 `src/server/mod.rs` 处理器分发。WebUI 走 HTTP RPC（`POST /rpc`，JSON），因为 WebSocket 单帧上限仍是 1 MiB；TUI 走普通 MsgPack 连接。接受 `path`（本地文件，canonicalize）或 `name` + `data_base64`（浏览器上传）；空对象非法。
+
+```json
+{"method":"file.attach","params":{"name":"note.txt","data_base64":"aGVsbG8="}}
+// → {"path":".../workspace/default/uploads/...-note.txt","copied":true,
+//    "source":"upload","name":"note.txt","bytes":5}
+```
+
+安装目录内的本地文件返回 `copied:false` 和 canonical 路径；目录外文件复制到默认工作区。浏览器字节总是落到默认工作区。模型只拿 `result.path`，不拿浏览器路径或目录外原路径。
+
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.4：`file.attach` / `file.prepare` 是 WebUI 所用 HTTP RPC `/rpc` 上的增量方法；请求 `{path}` 或 `{name,data_base64}`，返回 `{path,copied,source,name,bytes}`。错误为 `-32602` + `attachment_not_found|attachment_not_file|attachment_empty|attachment_too_large|attachment_write_failed|attachment_copy_failed|attachment_invalid_base64`。没有新增帧、端点或事件类型。`web.search|news|fetch` 结果可增加 `artifact` / `artifact_kind`；bench JSON 增加 `boot_gate_raw`、`boot_gate_trusted`、`boot_gate_status`、`reliability`；`tool.call` 增加 `attempt` 与 `call_index`；`must_include` 增加 `match` / `min_matches`。均为增量。
 - 1.2.1-rc.3.6：没有新增 wire 消息、帧、端点或错误码。bench JSON 增加 `boot_percentiles_consistent`（同一组已排序样本保证 P50 ≤ P90）与 `gates.metrics_consistent`，均为增量字段。`review.warn` 可能报告某条 fixture 因 `must_not_include` 命中 `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}` 而被整条丢弃。hardcheck 把 `must_include` 按空白/标点拆成词项匹配；只改提示词/内部判定，不改 wire 契约。英文 `-en` 二进制使用同一协议。
 - 1.2.1-rc.3.5：没有新增 wire 消息、帧、端点或错误码。`review.parse_rubric` 输出新增 `advisory`（被排除在 hardcheck 与 judge 之外的主观判据 id）；`review.warn` 可能报告被丢弃的占位/示例条目（`已丢弃占位符/示例判据 …`）与主观降级。`must_include` 接受字符串数组，hardcheck 要求每个短语都出现。重试用尽后仍无可执行判据时，`review_prepare` 直接失败，不再继续。`GUIDE_SYSTEM` 占位符改为 `__FILL_*__`，只影响提示词文本，不影响 wire 契约。
 - 1.2.1-rc.3.4：没有新增 wire 消息、帧、端点或错误码。`review.guide` 载荷增加 `artifact`（文件路径，写盘失败时为空字符串）。`review.verdict` 增加 `attempts`（judge 模型调用次数）、`votes`（完成票数，早停跳过第三票时为 2）、`artifacts`（judge 生成物路径）。guide 与 judge 的每次模型输出在解析前写入 `<data>/review-artifacts/<session>/`，best-effort，不会让门禁失败。rubric 解析现在同时接收用户输入，`criterion` / `check` / `must_include` / `must_not_include` 中的占位符，以及任务里没出现的 `REVIEW-FINAL` / `REVIEW-START` 都会被拒绝。设置字段未变。

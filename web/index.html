@@ -40,7 +40,12 @@
       <div class="panel-title">对话</div>
       <div id="messages" class="messages"></div>
       <div class="composer">
-        <textarea id="input" rows="3" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <div id="attachments" class="attachments"></div>
+        <div class="composer-main">
+          <button id="btn-attach" class="attach" type="button" aria-label="Attach file">+</button>
+          <textarea id="input" rows="3" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        </div>
+        <input id="file-input" type="file" multiple hidden>
         <div class="actions">
           <button id="btn-send" class="primary">发送</button>
           <button id="btn-stop" class="danger">停止并保存</button>

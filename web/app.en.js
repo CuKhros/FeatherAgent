@@ -32,6 +32,8 @@
   let current = null;
   let sessions = [];
   let pendingConfirm = null;
+  let attachments = [];
+  let attaching = false;
   let ws = null;
   let cfg = null;
   let providers = [];
@@ -246,6 +248,8 @@
     try {
       const v = await rpc("session.resume", { session: id });
       current = id;
+      attachments = [];
+      renderAttachments();
       $("#messages").innerHTML = "";
       const ws = (v && v.workspace) || "default";
       addMessage("system", `Restored session ${id} | project ${ws} | ${v.total || 0} events`);
@@ -310,6 +314,81 @@
     } catch (e) {
       $("#hint").textContent = "Create failed: " + e.message;
     }
+  }
+
+
+  function renderAttachments() {
+    const box = $("#attachments");
+    box.innerHTML = "";
+    for (const [i, a] of attachments.entries()) {
+      const chip = document.createElement("span");
+      chip.className = "attachment";
+      chip.title = a.path || "";
+      const name = document.createElement("span");
+      name.textContent = `${a.name || "Attachment"} (${a.bytes || 0} B)`;
+      const path = document.createElement("span");
+      path.className = "apath";
+      path.textContent = a.path || "";
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "×";
+      del.onclick = () => { attachments.splice(i, 1); renderAttachments(); };
+      chip.append(name, path, del);
+      box.appendChild(chip);
+    }
+  }
+
+  function readFileBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.onload = () => {
+        const s = String(reader.result || "");
+        const comma = s.indexOf(",");
+        if (comma < 0) reject(new Error("Failed to encode file"));
+        else resolve(s.slice(comma + 1));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachFiles(files) {
+    if (!files || !files.length || attaching) return;
+    if (attachments.length + files.length > 8) {
+      $("#hint").textContent = "At most 8 attachments at a time";
+      return;
+    }
+    attaching = true;
+    const btn = $("#btn-attach");
+    if (btn) btn.disabled = true;
+    let added = 0;
+    for (const file of files) {
+      if (file.size > 8 * 1024 * 1024) {
+        $("#hint").textContent = `${file.name} exceeds 8 MiB and was not uploaded`;
+        continue;
+      }
+      try {
+        const data = await readFileBase64(file);
+        const v = await httpRpc("file.attach", { name: file.name, data_base64: data });
+        attachments.push({ name: file.name, path: v.path, bytes: v.bytes || file.size });
+        added += 1;
+      } catch (e) {
+        $("#hint").textContent = `Upload ${file.name} failed: ${e.message}`;
+      }
+    }
+    attaching = false;
+    if (btn) btn.disabled = false;
+    renderAttachments();
+    if (added) $("#hint").textContent = `Added ${added} attachment(s); sending will include the workspace path`;
+  }
+
+  function outgoingText(text) {
+    let out = text || "";
+    for (const a of attachments) {
+      if (!out) out = "See the attached file.";
+      out += `\n\n[Attachment] ${a.path}`;
+    }
+    return out;
   }
 
   async function send() {
@@ -966,6 +1045,12 @@
 
   function bindUi() {
     $("#btn-send").onclick = send;
+    $("#btn-attach").onclick = () => $("#file-input").click();
+    $("#file-input").onchange = async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      await attachFiles(files);
+    };
     $("#btn-stop").onclick = cancel;
     $("#btn-compact").onclick = compact;
     $("#btn-fork").onclick = fork;

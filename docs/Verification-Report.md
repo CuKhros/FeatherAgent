@@ -1,10 +1,28 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.6)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.6` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.6 summary (current candidate)
+## v1.2.1-rc.4 summary (current candidate)
+
+The rc.3.6 retest left five findings. This candidate fixes them and adds search-result artifacts plus WebUI/TUI file attachments.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N5 `must_include` defaulted to all | `match:any|all|min`; multi-term default `min` with `ceil(n/2)`; `min_matches` 1..n; hardcheck counts hits | Unit `review_rubric_defaults_multi_must_include_to_half`, `review_hardcheck_supports_any_all_and_min`; TCP case explicitly `match:"all"` |
+| N6 subjective criterion banned common words | `subjective_reason` catches accuracy/professionalism words; subjective + `must_not_include` is a guide error; a banned word present in the user input also errors | Unit `review_rubric_rejects_subjective_must_not_include`, `review_rubric_rejects_banned_word_from_input` |
+| N7 bench occasional `os error 2` | unique `fa-bench-<pid>-<random>` per run; `bench` wrapper prints `{ok:false,code,error,hint}` on failure; path-stamped phases; `os error 2` → `artifact_missing` | Three consecutive release runs used distinct dirs and exited 0; error path is unit-visible in code but not forced on Windows |
+| N8 retry-chain replay | identical `name+arguments` in one reply executed once; `tool.call` adds `attempt`, `call_index` | Unit coverage is indirect through `run_turn`; live Ollama retry still pending |
+| N9 boot gate red under low reliability | `reliability != high` → `boot_gate_status:"advisory"`, `boot_gate_raw` preserved, effective gate true; fields copied to gates/metrics | Release run: `reliability:"high"`, `boot_gate_status:"pass"`, `boot_gate_raw:true`; medium/low not simulated |
+| Search artifacts | `web.search/news/fetch` JSON under `workspace/<project>/.featheagent/search/`; tool result `artifact`/`artifact_kind` | Integration `web_search_artifact_is_persisted_under_project_workspace` |
+| File attachments | `file.attach`/`file.prepare`; outside-install files copied to `workspace/default/uploads/`; WebUI `+` (HTTP RPC, 8 MiB file / 12 MiB body); TUI `@path` with `is_file` precheck | Integration `file_attach_copies_upload_to_default_workspace`, `file_prepare_copies_local_file_outside_install_root`; TUI parser/email tests; WebUI static assertions; real picker/PTY pending |
+
+Linux full suite: **176 test executions, 175 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 64 lib, 30 plugin ×2 (Chinese + English alias), 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 34 integration (1 ignored). `cargo check --bins`, `cargo fmt --check`, and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): binary **2,550,480 B (2.43 MiB)**; warm P50 **1.186 / 1.180 / 1.167 ms**, P90 **1.217 / 1.207 / 1.195 ms**; cold **3.179 / 3.085 / 3.283 ms**; RSS **3,584 / 3,456 / 3,456 KiB**; write P95 **2.684 / 3.114 / 4.567 µs**; assemble P95 **0.143 / 0.152 / 0.129 ms**; RPC P95 **0.057 / 0.059 / 0.082 ms**; all gates true, `mem_load_pct` 20, `reliability:high`.
+
+Not verified: v1.2.1-rc.4 Windows real hardware (N5–N9 with a live 7B/Ollama, N4 raw a11, native picker and PTY attachments, bilingual packages), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
+
+## v1.2.1-rc.3.6 summary (historical, released)
 
 The rc.3.5 retest fully met checklist item 1, but checklist item 2 stopped at 4/5 because N1 still left a review round unapproved, checklist item 3 reached 4/5, the bench line printed P90 lower than P50 (N2), and the N4 fixture phrase was only blocked indirectly. This candidate fixes all four and adds English editions of every top-level binary.
 
@@ -288,11 +306,11 @@ NEW-K fixed; TUI session/chat modes, CJK cursor alignment, external workspace, p
 
 ## 3. Test matrix
 
-### 3.1 Unit tests (59 lib + 9 plugin in v1.2.1-rc.2.1)
+### 3.1 Unit tests (64 lib + 30 plugin + 2 kernel + 5 TUI + 4 WebUI in v1.2.1-rc.4)
 
 `cargo test --lib`: log (round-trip / CRC / rotation / recovery / archive / fork), event bus (cursor / lost wakeup / lagged), governance (volume / env cleanup / permission gate), context engine (budget / four layers / skill budget / image budget), tolerant parser, plugin process (handshake / routing / breaker), WASM (fuel / no syscalls), registry, net (Bearer headers and optional-header/body layout), util, provider HTTP/Ollama JSON and review-gate parsers.
 
-### 3.2 Integration tests (24, `tests/integration.rs`)
+### 3.2 Integration tests (34, `tests/integration.rs`)
 
 Real kernel + plugin subprocesses over UDS:
 
@@ -317,6 +335,9 @@ Real kernel + plugin subprocesses over UDS:
 | `ollama_native_chat_without_key_still_sends_body` | empty key still sends `Content-Length` + `/api/chat` body; `/api/embed` carries model/input |
 | `ollama_provider_models_reads_api_tags` | `provider.models` returns native models and requests `/api/tags`, not `/models` |
 | `review_gate_unapproved_is_reflected_in_chat_status` | forced unapproved review yields `chat.finished.status=unapproved` and `review.status=unapproved` |
+| `web_search_artifact_is_persisted_under_project_workspace` | search result JSON under `.featheagent/search/` with tool/arguments/result/untrusted |
+| `file_attach_copies_upload_to_default_workspace` | base64 upload lands in `workspace/default/uploads/` with correct bytes |
+| `file_prepare_copies_local_file_outside_install_root` | outside file copied; inside-root file returns `copied:false` |
 
 ### 3.3 Golden trace
 

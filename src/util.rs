@@ -181,6 +181,45 @@ pub fn base64(data: &[u8]) -> String {
     out
 }
 
+pub fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let clean: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if clean.len() % 4 != 0 {
+        return Err("base64 长度不是 4 的倍数".into());
+    }
+    let mut out = Vec::with_capacity(clean.len() / 4 * 3);
+    for c in clean.chunks(4) {
+        let mut vals = [0u8; 4];
+        let mut pad = 0usize;
+        for (i, b) in c.iter().enumerate() {
+            vals[i] = if *b == b'=' {
+                pad += 1;
+                0
+            } else {
+                T.iter()
+                    .position(|x| *x == *b)
+                    .ok_or_else(|| format!("base64 含非法字符: {}", *b as char))?
+                    as u8
+            };
+        }
+        if pad > 2 {
+            return Err("base64 填充字符过多".into());
+        }
+        let v = ((vals[0] as u32) << 18)
+            | ((vals[1] as u32) << 12)
+            | ((vals[2] as u32) << 6)
+            | vals[3] as u32;
+        out.push((v >> 16) as u8);
+        if pad < 2 {
+            out.push((v >> 8) as u8);
+        }
+        if pad < 1 {
+            out.push(v as u8);
+        }
+    }
+    Ok(out)
+}
+
 /// 最近秩百分位：P95 取第 ceil(0.95*n) 个（1 起算）。
 pub fn percentile(samples: &[f64], p: f64) -> f64 {
     if samples.is_empty() {
@@ -304,5 +343,15 @@ mod tests {
         let sorted: Vec<f64> = (1..=100).map(|x| x as f64).collect();
         assert_eq!(percentile(&sorted, 0.95), 95.0);
         assert_eq!(percentile(&sorted, 0.5), 50.0);
+    }
+
+    #[test]
+    fn base64_roundtrip_handles_padding() {
+        for s in ["", "a", "ab", "abc", "hello world"] {
+            let enc = base64(s.as_bytes());
+            assert_eq!(base64_decode(&enc).unwrap(), s.as_bytes());
+        }
+        assert!(base64_decode("a").is_err());
+        assert!(base64_decode("****").is_err());
     }
 }

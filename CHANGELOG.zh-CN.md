@@ -1,6 +1,24 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.6` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4] - 2026-11-25
+
+### 修复
+- N5：`must_include` 支持 `match: "any" | "all" | "min"` 与 `min_matches`。多术语默认 `min`，要求覆盖 ceil(n/2) 项，不再强制全部字面命中；协议类硬约束可显式 `all`，列举类可用 `any`。hardcheck 报告 `{hits}/{total}`，语义正确但未覆盖全部字面的答案不再误杀。
+- N6：主观判据（准确/准确无误/完整/正确/恰当/专业/规范/流畅/自然等）禁止使用 `must_not_include`；禁词若已出现在用户输入中，guide 也判不合格。避免“术语准确”禁掉 `软件/硬件/计算机`，把所有正确答案判死。N4 的 fixture 整条丢弃由 rc.3.5 原始回归测试继续覆盖。
+- N7：bench 每次使用唯一临时目录（`fa-bench-<pid>-<random>`），Windows 复用 pid 或残留目录不再造成 `os error 2`；I/O 错误带操作与路径，`bench --json` 失败返回 `{"ok":false,"code":"artifact_missing"|"bench_failed","error":...}`。
+- N8：同一条模型回复里的相同工具调用在执行前去重；每条 `tool.call` 增加 `attempt` 与 `call_index`，重试链里的重放可区分，不会静默执行两次。
+- N9：`metrics.env.reliability` 非 `high` 时，启动门禁标为 `boot_gate_status:"advisory"`，保留 `boot_gate_raw`；`gates.boot_lt_*` 不再因整机内存压力单独判红。`reliability` 同步写入 gates 与 metrics。
+
+### 新增
+- 网络 search/news/fetch 结果以 pretty JSON 落到 `workspace/<项目>/.featheagent/search/<时间戳>-<工具>.json`；工具结果增加 `artifact` / `artifact_kind`，写失败只附 `persist_error`，不影响搜索本身。
+- WebUI 附件：`+` 打开系统文件选择框，经 HTTP RPC（`file.attach`，base64，文件上限 8 MiB、请求体上限 12 MiB）上传，显示可移除的附件 chip 与内核返回路径。TUI 支持 `@<路径>` / `@"含空格路径>"`，先 `is_file` 校验再调用 `file.prepare`。
+- 内核 `file.attach` / `file.prepare`：复核存在性；安装目录外的文件复制到 `workspace/default/uploads/`，返回模型应使用的路径；浏览器上传总是落到默认工作区。测试覆盖上传落默认工作区、外部文件复制、安装目录内原路径、附件解析（普通/引号/邮箱）、base64 往返、搜索 artifact JSON。
+
+### 变更
+- `GUIDE_SYSTEM` 说明 `match`/`min_matches`，禁止主观判据用 `must_not_include`。
+- `bench` JSON 增加 `boot_gate_raw`、`boot_gate_trusted`、`boot_gate_status`、`reliability`。
 
 ## [1.2.1-rc.3.6] - 2026-11-25
 

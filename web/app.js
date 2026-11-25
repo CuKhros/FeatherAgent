@@ -31,6 +31,8 @@
   let current = null;
   let sessions = [];
   let pendingConfirm = null;
+  let attachments = [];
+  let attaching = false;
   let ws = null;
   let cfg = null;
   let providers = [];
@@ -245,6 +247,8 @@
     try {
       const v = await rpc("session.resume", { session: id });
       current = id;
+      attachments = [];
+      renderAttachments();
       $("#messages").innerHTML = "";
       const ws = (v && v.workspace) || "default";
       addMessage("system", `已恢复会话 ${id}｜项目 ${ws}｜共 ${v.total || 0} 条事件`);
@@ -311,6 +315,81 @@
     }
   }
 
+
+  function renderAttachments() {
+    const box = $("#attachments");
+    box.innerHTML = "";
+    for (const [i, a] of attachments.entries()) {
+      const chip = document.createElement("span");
+      chip.className = "attachment";
+      chip.title = a.path || "";
+      const name = document.createElement("span");
+      name.textContent = `${a.name || "附件"} (${a.bytes || 0} B)`;
+      const path = document.createElement("span");
+      path.className = "apath";
+      path.textContent = a.path || "";
+      const del = document.createElement("button");
+      del.type = "button";
+      del.textContent = "×";
+      del.onclick = () => { attachments.splice(i, 1); renderAttachments(); };
+      chip.append(name, path, del);
+      box.appendChild(chip);
+    }
+  }
+
+  function readFileBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.onload = () => {
+        const s = String(reader.result || "");
+        const comma = s.indexOf(",");
+        if (comma < 0) reject(new Error("文件编码失败"));
+        else resolve(s.slice(comma + 1));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachFiles(files) {
+    if (!files || !files.length || attaching) return;
+    if (attachments.length + files.length > 8) {
+      $("#hint").textContent = "一次最多 8 个附件";
+      return;
+    }
+    attaching = true;
+    const btn = $("#btn-attach");
+    if (btn) btn.disabled = true;
+    let added = 0;
+    for (const file of files) {
+      if (file.size > 8 * 1024 * 1024) {
+        $("#hint").textContent = `文件 ${file.name} 超过 8 MiB，未上传`;
+        continue;
+      }
+      try {
+        const data = await readFileBase64(file);
+        const v = await httpRpc("file.attach", { name: file.name, data_base64: data }, 60000);
+        attachments.push({ name: file.name, path: v.path, bytes: v.bytes || file.size });
+        added += 1;
+      } catch (e) {
+        $("#hint").textContent = `上传 ${file.name} 失败：${e.message}`;
+      }
+    }
+    attaching = false;
+    if (btn) btn.disabled = false;
+    renderAttachments();
+    if (added) $("#hint").textContent = `已添加 ${added} 个附件；发送时会带上工作区路径`;
+  }
+
+  function outgoingText(text) {
+    let out = text || "";
+    for (const a of attachments) {
+      if (!out) out = "请查看附件。";
+      out += `\n\n[附件] ${a.path}`;
+    }
+    return out;
+  }
+
   async function send() {
     if (!current) {
       $("#hint").textContent = "先新建或选择会话";
@@ -318,20 +397,30 @@
     }
     const box = $("#input");
     const text = box.value.trim();
-    if (!text) return;
+    if (!text && !attachments.length) return;
+    if (attaching) {
+      $("#hint").textContent = "附件上传中，稍等再发送";
+      return;
+    }
+    const outgoing = outgoingText(text);
+    const sentAttachments = attachments.slice();
     box.value = "";
+    attachments = [];
+    renderAttachments();
     const running = ["running", "assembling", "generating", "tool_executing"].includes(curState);
-    addMessage(running ? "user steer" : "user", running ? "引导：" + text : text);
+    addMessage(running ? "user steer" : "user", running ? "引导：" + outgoing : outgoing);
     try {
       if (running) {
-        await rpc("chat.inject", { session: current, text });
+        await rpc("chat.inject", { session: current, text: outgoing });
         $("#hint").textContent = "引导已插入上下文；当前生成会在边界中断后继续";
       } else {
-        await rpc("chat.send", { session: current, text });
+        await rpc("chat.send", { session: current, text: outgoing });
         setState("running");
         $("#hint").textContent = "";
       }
     } catch (e) {
+      attachments = sentAttachments;
+      renderAttachments();
       addMessage("system", "发送失败：" + e.message);
       $("#hint").textContent = e.message;
     }
@@ -965,6 +1054,12 @@
 
   function bindUi() {
     $("#btn-send").onclick = send;
+    $("#btn-attach").onclick = () => $("#file-input").click();
+    $("#file-input").onchange = async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      await attachFiles(files);
+    };
     $("#btn-stop").onclick = cancel;
     $("#btn-compact").onclick = compact;
     $("#btn-fork").onclick = fork;

@@ -720,6 +720,74 @@ impl Kernel {
         Ok(self.paths.workspace.join(name))
     }
 
+    /// 把用户选择的本地文件交给模型。位于安装目录外的文件会复制到默认工作区，
+    /// 返回值里的 path 就是模型应使用的路径。
+    pub fn attach_file_path(&self, source: &Path) -> Result<Value, String> {
+        let src = std::fs::canonicalize(source)
+            .map_err(|e| format!("attachment_not_found: {} ({e})", source.display()))?;
+        if !src.is_file() {
+            return Err(format!("attachment_not_file: {}", src.display()));
+        }
+        let install = std::fs::canonicalize(&self.paths.install_root)
+            .unwrap_or_else(|_| self.paths.install_root.clone());
+        if src.starts_with(&install) {
+            return Ok(json!({
+                "path": src.display().to_string(),
+                "copied": false,
+                "source": src.display().to_string(),
+                "name": src.file_name().and_then(|x| x.to_str()).unwrap_or("attachment"),
+                "bytes": std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0),
+            }));
+        }
+        self.copy_attachment(
+            src.file_name()
+                .and_then(|x| x.to_str())
+                .unwrap_or("attachment"),
+            &src,
+        )
+    }
+
+    /// WebUI 上传的是字节，不依赖浏览器的本地路径；总是落进默认工作区。
+    pub fn attach_file_bytes(&self, name: &str, data: &[u8]) -> Result<Value, String> {
+        if data.is_empty() {
+            return Err("attachment_empty: 文件为空".into());
+        }
+        if data.len() > 8 * 1024 * 1024 {
+            return Err("attachment_too_large: 文件超过 8 MiB".into());
+        }
+        let dir = self.ensure_workspace(DEFAULT_WORKSPACE)?;
+        let target_dir = dir.join("uploads");
+        std::fs::create_dir_all(&target_dir)
+            .map_err(|e| format!("attachment_write_failed: {} ({e})", target_dir.display()))?;
+        let target = target_dir.join(unique_attachment_name(name));
+        std::fs::write(&target, data)
+            .map_err(|e| format!("attachment_write_failed: {} ({e})", target.display()))?;
+        Ok(json!({
+            "path": target.display().to_string(),
+            "copied": true,
+            "source": format!("upload:{name}"),
+            "name": name,
+            "bytes": data.len(),
+        }))
+    }
+
+    fn copy_attachment(&self, name: &str, src: &Path) -> Result<Value, String> {
+        let dir = self.ensure_workspace(DEFAULT_WORKSPACE)?;
+        let target_dir = dir.join("uploads");
+        std::fs::create_dir_all(&target_dir)
+            .map_err(|e| format!("attachment_write_failed: {} ({e})", target_dir.display()))?;
+        let target = target_dir.join(unique_attachment_name(name));
+        let bytes = std::fs::copy(src, &target)
+            .map_err(|e| format!("attachment_copy_failed: {} ({e})", target.display()))?;
+        Ok(json!({
+            "path": target.display().to_string(),
+            "copied": true,
+            "source": src.display().to_string(),
+            "name": name,
+            "bytes": bytes,
+        }))
+    }
+
     /// 列出项目容器下的直接子目录；不把容器根本身当作工作区。
     pub fn workspace_list(&self) -> Vec<Value> {
         let mut out = Vec::new();
@@ -1130,7 +1198,9 @@ impl Kernel {
             let mut format_retries = 0u32;
             let mut crash_retried = false;
             let mut retry_temperature = exec_temperature;
+            let mut model_attempt = 0u32;
             loop {
+                model_attempt += 1;
                 match self.run_model(session, &cfg, &retry_messages, retry_temperature) {
                     Ok(r) => {
                         model_res = Ok(r);
@@ -1236,6 +1306,17 @@ impl Kernel {
             } else {
                 reply.tool_calls.clone()
             };
+            // N8：同一条模型回复里重复的相同调用只执行一次；不同参数仍分别执行。
+            let mut calls = calls;
+            let mut seen_calls = std::collections::HashSet::new();
+            calls.retain(|call| {
+                let key = format!(
+                    "{}:{}",
+                    call.name,
+                    serde_json::to_string(&call.arguments).unwrap_or_default()
+                );
+                seen_calls.insert(key)
+            });
             if calls.is_empty() {
                 if rg.enabled && !review_degraded {
                     if let Some(rubric) = review_rubric.clone() {
@@ -1326,7 +1407,7 @@ impl Kernel {
             }
             *session.state.write() = SessionState::ToolExecuting;
             let mut executed = 0usize;
-            for call in calls {
+            for (call_index, call) in calls.into_iter().enumerate() {
                 let mode = session.interrupt.load(Ordering::SeqCst);
                 if mode != 0 || session.cancel.load(Ordering::SeqCst) {
                     self.emit(
@@ -1342,7 +1423,12 @@ impl Kernel {
                 self.emit(
                     &session.id,
                     EventKind::ToolCall,
-                    json!({"name": call.name, "arguments": call.arguments}),
+                    json!({
+                        "name": call.name,
+                        "arguments": call.arguments,
+                        "attempt": model_attempt,
+                        "call_index": call_index + 1,
+                    }),
                 );
                 match self.authorize(session, &call.name, &call.arguments) {
                     Ok(true) => {}
@@ -2605,7 +2691,47 @@ impl Kernel {
         degrade
     }
 
+    /// 网络结果落盘：把 search/news/fetch 的完整 JSON 写进当前项目工作区的
+    /// `.featheagent/search/`，并在工具结果里回传 artifact 路径；写失败不影响搜索。
+    fn persist_web_result(
+        &self,
+        session: &Arc<Session>,
+        name: &str,
+        args: &Value,
+        mut value: Value,
+    ) -> Value {
+        let ws = PathBuf::from(session_workspace(self, session));
+        match save_web_artifact(&ws, name, args, &value) {
+            Ok(path) => {
+                if let Some(o) = value.as_object_mut() {
+                    o.insert("artifact".into(), json!(path.display().to_string()));
+                    o.insert("artifact_kind".into(), json!(name));
+                }
+            }
+            Err(e) => {
+                if let Some(o) = value.as_object_mut() {
+                    o.insert("persist_error".into(), json!(e));
+                }
+            }
+        }
+        value
+    }
+
     fn execute_web_tool(
+        &self,
+        session: &Arc<Session>,
+        cfg: &Config,
+        name: &str,
+        args: &Value,
+    ) -> Result<Value, ToolExecError> {
+        let value = self.execute_web_tool_inner(cfg, name, args)?;
+        if matches!(name, "web.search" | "web.news" | "web.fetch") {
+            return Ok(self.persist_web_result(session, name, args, value));
+        }
+        Ok(value)
+    }
+
+    fn execute_web_tool_inner(
         &self,
         cfg: &Config,
         name: &str,
@@ -2714,7 +2840,7 @@ impl Kernel {
                 "web.search" | "web.fetch" | "web.news" | "web.suggest" | "web.status"
             )
         {
-            return self.execute_web_tool(cfg, name, args);
+            return self.execute_web_tool(session, cfg, name, args);
         }
         // 未知工具名（例如模型自己拼的 tool.fs / tool.read_file）在这里就纠正：
         // 直接转发给工具插件只会得到一句难懂的 rpc 错误，模型往往继续乱试。
@@ -2780,6 +2906,66 @@ impl Kernel {
     pub fn stop(&self) {
         self.plugins.stop_all();
     }
+}
+
+/// 把一次网络搜索/抓取的完整 JSON 写进 `workspace/.featheagent/search/`。
+/// 返回实际落盘路径；目录或写入失败时返回可读错误。
+pub fn save_web_artifact(
+    workspace: &Path,
+    name: &str,
+    args: &Value,
+    value: &Value,
+) -> Result<PathBuf, String> {
+    let dir = workspace.join(".featheagent").join("search");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("search artifact mkdir failed: {} ({e})", dir.display()))?;
+    let stamp = format!(
+        "{}-{}",
+        crate::proto::types::now_wall_ns() / 1_000_000,
+        crate::util::random_token(4)
+    );
+    let path = dir.join(format!("{stamp}-{}.json", name.replace('.', "-")));
+    let payload = json!({
+        "tool": name,
+        "arguments": args,
+        "result": value,
+        "untrusted": true,
+        "saved_at_unix_ms": crate::util::now_ms(),
+    });
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|e| format!("search artifact encode failed: {e}"))?;
+    std::fs::write(&path, bytes)
+        .map_err(|e| format!("search artifact write failed: {} ({e})", path.display()))?;
+    Ok(path)
+}
+
+fn unique_attachment_name(name: &str) -> String {
+    let raw = std::path::Path::new(name)
+        .file_name()
+        .and_then(|x| x.to_str())
+        .unwrap_or("attachment");
+    let safe: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = safe.trim().trim_matches('.').to_string();
+    let safe = if safe.is_empty() {
+        "attachment".into()
+    } else {
+        safe
+    };
+    format!(
+        "{}-{}-{}",
+        crate::util::now_ms(),
+        crate::util::random_token(4),
+        safe
+    )
 }
 
 fn session_workspace(kernel: &Kernel, session: &Arc<Session>) -> String {
