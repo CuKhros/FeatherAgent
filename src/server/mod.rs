@@ -47,7 +47,7 @@ impl Server {
         // Windows 上实例可能尚未就绪，重试几次；连接本身很快断开是刻意的，
         // accept 侧会把 ERROR_NO_DATA 交回外层检查 stop，不会永久卡住。
         for _ in 0..5 {
-            if let Ok(s) = crate::ipc::connect(&self.socket) {
+            if let Ok(s) = crate::ipc::try_connect(&self.socket) {
                 drop(s);
                 break;
             }
@@ -915,10 +915,11 @@ pub fn spawn_server(
 }
 
 /// 等待 socket 可连接（冷启动测量用）。
+/// 必须用单次探测：带 deadline 的 `connect` 会把 Windows 的重试等待算进冷启动。
 pub fn wait_ready(socket: &Path, timeout: Duration) -> std::io::Result<()> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
-        if crate::ipc::connect(socket).is_ok() {
+        if crate::ipc::try_connect(socket).is_ok() {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(1));

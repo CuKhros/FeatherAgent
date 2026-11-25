@@ -1,0 +1,9 @@
+report,question,type,points_available,bare_score,fa_score,bare_seconds,fa_seconds,bare_chars,fa_chars,notes
+v1.2.1-rc.4.2,Q1,algorithm code,5,5,5,21.2,49.2,,,FA returned tool.fs.write instead of a code block; keyword scoring still awarded full marks
+v1.2.1-rc.4.2,Q2,debugging,3,3,3,19.5,16.0,,,Both identified and fixed the mutable-default bug
+v1.2.1-rc.4.2,Q3,design,3,3,3,65.7,25.4,,,Token bucket vs leaky bucket trade-offs
+v1.2.1-rc.4.2,Q4,probability,2,2,2,51.4,13.8,,,Birthday paradox calculation
+v1.2.1-rc.4.2,Q5,technical translation,4,4,4,50.7,5.4,,,Both retained idempotent and exponential backoff terminology
+v1.2.1-rc.4.2,Q6,distributed systems,4,0,4,61.8,25.6,0,1963,Bare model returned an empty response; FA recovered and answered CAP/PACELC
+v1.2.1-rc.4.2,Q7,summarization,3,0,3,62.0,7.6,0,,Bare model returned an empty response; FA produced three summary lines
+v1.2.1-rc.4.2,total,all,24,17,24,332,143,,,FA total latency 2.3x faster; scores are rule-based coverage

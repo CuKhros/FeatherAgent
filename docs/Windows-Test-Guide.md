@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.2 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.3 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4.2-windows-x64.zip`
-> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.1 retest (N15–N18)
-> Note: v1.2.1-rc.4.2 fixes the four actionable findings from the rc.4.1 retest. N10, N12 and N13 were confirmed fixed; N11's plain-text form worked but the XML-style function/parameter variant still failed the whole turn, so N15 adds parser recovery plus an Ollama stream-error salvage path. N16 adds Windows pipe retries (`ERROR_FILE_NOT_FOUND(2)` / `ERROR_PIPE_NOT_CONNECTED(233)`) and a bounded `bench` connect retry. N17 moves `boot_gate_trusted` from `gates` to `advisory_gates`; it no longer counts in `passed/total`. N18 distinguishes default brevity from list/compare/enumerate tasks that must cover every point. The rc.4/rc.4.1 fixes N5–N14 remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
+> Package under test: `FeatherAgent-1.2.1-rc.4.3-windows-x64.zip`
+> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.2 retest (N19–N22)
+> Note: v1.2.1-rc.4.3 fixes the four findings from the rc.4.2 retest. N19: `serve`'s existing-kernel probe now uses a one-shot `ipc::try_connect`, so a clean install root no longer waits the 3-second pipe retry before starting; real clients keep the bounded retry, so N16 still holds. N20: code/text/plan/translation answers default to the response, and file tools run only on an explicit save/write/create request. N21: first-level list items must map to the requested comparison axes; with no axes, cover mechanism, reliability, performance/overhead and scenarios. N22: explicit write-file tasks give the judge the successful `tool.fs.write` path/content as labelled evidence, and the guide checks the file rather than requiring a verbatim answer. The system prompt also stops repeated post-write reads. The rc.4/rc.4.1/rc.4.2 fixes N5–N18 remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.2\
+D:\FeatherAgent-1.2.1-rc.4.3\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4.2`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.3`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.2
+cd D:\FeatherAgent-1.2.1-rc.4.3
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,14 @@ v1.2.1-rc.4 regression checks:
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
 
+v1.2.1-rc.4.3 regression checks:
+
+1. **N19: cold spawn.** Use a clean install root with no running kernel. `bench --json` must show `metrics.cold_spawn_ms_p50` in normal process-startup range instead of a fixed ~3.18 s, and `gates.cold_spawn_lt_250ms` must be true on the Windows threshold. Repeat five times; report each sample.
+2. **N20: code answer shape.** Ask “implement an O(1) LRU cache and give the code”. The final answer must contain the code block directly; `tool.fs.write` must not be used unless the prompt explicitly asks to save a file.
+3. **N21: comparison axes.** Ask “三个主要区别” for TCP vs UDP. The first-level items must map to the requested axes and must not spend all three slots on synonymous reliability wording; where applicable, include overhead/header cost.
+4. **N22: write-task review and read count.** With review-gate on, ask to write three points to `workspace\notes.txt`. The turn must execute `tool.fs.write`, write the file, and reach `review.status:"approved"` without requiring the final answer to repeat the file body. Count `tool.fs.read`; repeated reads of the same file just to self-check are a finding. Also verify the file content is what the judge saw.
+5. **N18/N15–N17 regression.** Re-run the rc.4.2 checks below; XML recovery, bench connect, advisory split and list coverage must stay green.
+
 v1.2.1-rc.4.2 regression checks:
 
 1. **N15: XML-style call recovery.** With review-gate on and a 4B exec, repeat the write task until the model emits a function/parameter-style call. The turn must execute `tool.fs.write`, write `workspace\notes.txt`, and finish successfully instead of `status=failed`; the raw XML must not leak into the final answer. If the model mixes prose and a call, record whether the parser recovered it.
@@ -261,13 +269,13 @@ v1.2.1 additional checks:
 - N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.4.2 did not run Wine; passing Wine does not equal passing Windows.
+- Wine smoke: `version` starts; five `bench --json` runs complete with no `[bench:rpc_connect]` failure and cold spawn **442–507 ms**, but `cold_spawn_lt_250ms` is red because Wine's process startup is much slower. A temporary `bcryptprimitives.dll` stub was used for Wine only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.3-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

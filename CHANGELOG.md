@@ -1,6 +1,17 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.2` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.3` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.3] - 2026-11-25
+
+### Fixed
+- N19: `serve` used the retrying `ipc::connect` to detect an existing kernel, so a clean install root waited the full 3-second pipe-retry deadline before starting and appeared as a fixed ~3.18 s cold spawn. Added one-shot `ipc::try_connect`; `serve`, `wait_ready`, the smoke probe and `Server::stop` use it, while normal clients keep the bounded retry. Test: `try_connect_does_not_enter_the_retry_deadline`.
+- N20: the system prompt now distinguishes content answers from file creation. Code, text, plans and translations go in the response by default; file tools run only when the user explicitly asks to save, write or create a file. Test: `system_prompt_separates_content_output_from_file_creation`.
+- N21: list/comparison answers must map their first-level items to the requested axes; when the user gives no axes, cover mechanism, reliability, performance/overhead and scenarios instead of repeating one dimension with synonyms. Test: `system_prompt_distinguishes_brevity_from_coverage`.
+- N22: explicit write-file tasks now give review-gate the successful `tool.fs.write` path and content as labelled evidence, so the judge checks the file instead of demanding a verbatim final answer. The prompt also stops repeated post-write reads. Tests: `review_file_evidence_is_only_for_explicit_write_tasks`, `review_answer_includes_written_file_content_before_final_answer`, `review_gate_validates_written_file_content_instead_of_answer_wording`.
+
+### Added
+- `docs/model-test-reports/`: nine curated Windows real-machine reports with reusable local-model data, plus CSVs for the rc.4.1 four-task comparison, the rc.4.2 seven-question exam and the rc.2 → rc.4 review-gate milestones.
 
 ## [1.2.1-rc.4.2] - 2026-11-25
 

@@ -527,6 +527,68 @@ fn review_gate_subjective_criterion_is_advisory() {
 }
 
 #[test]
+fn review_gate_validates_written_file_content_instead_of_answer_wording() {
+    let (h, conn) = start("review-write", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sreviewwrite"}))
+        .unwrap();
+    let payload = r#"REVIEW_WRITE 请把要点写入 workspace/notes.txt TOOL:{"name":"tool.fs.write","arguments":{"path":"notes.txt","content":"- 内存管理要点 A\n- 内存管理要点 B"}}"#;
+    conn.client
+        .call(
+            "chat.send",
+            json!({"session": "sreviewwrite", "text": payload}),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut seen = Vec::new();
+    let mut token = None;
+    while Instant::now() < deadline {
+        match conn.events.recv_timeout(Duration::from_millis(200)) {
+            Ok(v) => {
+                if v.get("method").and_then(|m| m.as_str()) == Some("tool.confirm_request") {
+                    token = v
+                        .pointer("/params/token")
+                        .and_then(|x| x.as_str())
+                        .map(|x| x.to_string());
+                    seen.push(v);
+                    break;
+                }
+                if is_kind(&v, "chat.finished", "sreviewwrite") {
+                    seen.push(v);
+                    break;
+                }
+                seen.push(v);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(_) => break,
+        }
+    }
+    let tok = token.expect("写文件应请求确认");
+    conn.client
+        .call("tool.confirm", json!({"token": tok, "allow": true}))
+        .unwrap();
+    let seen = send_and_wait_after(&conn, "sreviewwrite", seen);
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "{seen:?}"
+    );
+    let file = h.kernel.paths.workspace.join("default").join("notes.txt");
+    let body = std::fs::read_to_string(&file).unwrap();
+    assert!(body.contains("内存管理要点 A"), "{body}");
+    assert!(body.contains("内存管理要点 B"), "{body}");
+}
+
+#[test]
 fn review_gate_unapproved_is_reflected_in_chat_status() {
     let (_h, conn) = start("reviewbad", |cfg| {
         cfg.review_gate.enabled = true;

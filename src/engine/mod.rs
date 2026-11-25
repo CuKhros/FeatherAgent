@@ -1105,6 +1105,7 @@ impl Kernel {
         let mut review_round = 0u32;
         let mut review_approved = false;
         let mut review_degraded = false;
+        let mut written_files: Vec<(String, String)> = Vec::new();
         let mut exec_temperature = if rg.enabled {
             cfg.model = rg.exec.effective_model(&cfg.model);
             cfg.temperature = rg.exec.temperature;
@@ -1320,13 +1321,18 @@ impl Kernel {
             if calls.is_empty() {
                 if rg.enabled && !review_degraded {
                     if let Some(rubric) = review_rubric.clone() {
+                        let review_answer = if task_requests_file_write(&text) {
+                            review_answer_with_written_files(&reply.text, &written_files)
+                        } else {
+                            reply.text.clone()
+                        };
                         match self.review_judge(
                             session,
                             &cfg,
                             &rg,
                             ReviewJudgeInput {
                                 input: &text,
-                                answer: &reply.text,
+                                answer: &review_answer,
                                 rubric: &rubric,
                             },
                         ) {
@@ -1430,6 +1436,23 @@ impl Kernel {
                         "call_index": call_index + 1,
                     }),
                 );
+                let write_payload = if call.name == "tool.fs.write" {
+                    let path = call
+                        .arguments
+                        .get("path")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let content = call
+                        .arguments
+                        .get("content")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some((path, content))
+                } else {
+                    None
+                };
                 match self.authorize(session, &call.name, &call.arguments) {
                     Ok(true) => {}
                     Ok(false) => {
@@ -1479,6 +1502,21 @@ impl Kernel {
                 }
                 match self.execute_tool(session, &cfg, &call.name, &call.arguments) {
                     Ok(v) => {
+                        if let Some((requested_path, content)) = write_payload {
+                            let resolved = v
+                                .get("path")
+                                .and_then(|x| x.as_str())
+                                .filter(|x| !x.trim().is_empty())
+                                .unwrap_or(&requested_path)
+                                .to_string();
+                            if let Some(existing) =
+                                written_files.iter_mut().find(|(p, _)| *p == resolved)
+                            {
+                                existing.1 = content;
+                            } else {
+                                written_files.push((resolved, content));
+                            }
+                        }
                         self.emit(
                             &session.id,
                             EventKind::ToolResult,
@@ -1825,7 +1863,7 @@ impl Kernel {
         }
     }
 
-    fn review_environment(&self, session: &Arc<Session>) -> String {
+    fn review_environment(&self, session: &Arc<Session>, input: &str) -> String {
         let ws = self
             .workspace_path(&session.workspace.read())
             .map(|p| p.display().to_string())
@@ -1839,7 +1877,7 @@ impl Kernel {
                     .map(|s| s.to_string())
             })
             .collect();
-        format!(
+        let mut out = format!(
             "项目工作区: {ws}\n可用工具: {}\n平台: {} {}",
             if tools.is_empty() {
                 "(无)".to_string()
@@ -1848,7 +1886,15 @@ impl Kernel {
             },
             std::env::consts::OS,
             std::env::consts::ARCH
-        )
+        );
+        if task_requests_file_write(input) {
+            out.push_str(
+                "\n任务类型: 写文件。判据应核对 tool.fs.write 是否成功、目标路径与写入内容；\
+                 内核会把本轮成功写入的文件内容附在待审答案前。不要要求最终答复逐字复述文件全文，\
+                 也不要要求用户可见答复包含文件的每一行。",
+            );
+        }
+        out
     }
 
     fn review_model_call(
@@ -1986,7 +2032,7 @@ impl Kernel {
     ) -> Result<Value, String> {
         let gate = self.plugins.get(plugin).map_err(|e| e.to_string())?;
         let model = rg.guide.effective_model(&cfg.model);
-        let environment = self.review_environment(session);
+        let environment = self.review_environment(session, input);
         let mut last = String::new();
         for attempt in 1..=REVIEW_GUIDE_ATTEMPTS {
             // rc.3 复测 I2：两次重试原来发的是同一个 prompt，7B 于是稳定地错两次。
@@ -3255,6 +3301,79 @@ struct ReviewJudgeInput<'a> {
     rubric: &'a Value,
 }
 
+/// 只有“明确要求把内容落到文件”的任务才启用文件内容作为验收证据。
+/// 代码/方案类问题仍以用户可见答复为主，避免把 N20 的工具误用掩盖过去。
+fn task_requests_file_write(input: &str) -> bool {
+    const ACTIONS: &[&str] = &[
+        "写入",
+        "写到",
+        "写进",
+        "保存到",
+        "保存为",
+        "存到",
+        "存为",
+        "落盘",
+        "生成文件",
+        "创建文件",
+        "输出到文件",
+        "write to",
+        "write into",
+        "write the",
+        "write this",
+        "write these",
+        "write a file",
+        "save to",
+        "save as",
+        "save the",
+        "create a file",
+        "create file",
+        "output to file",
+    ];
+    const TARGETS: &[&str] = &[
+        "文件",
+        "workspace/",
+        ".txt",
+        ".md",
+        ".json",
+        ".csv",
+        ".log",
+        ".yaml",
+        ".yml",
+        ".toml",
+    ];
+    ACTIONS.iter().any(|a| input.contains(a)) && TARGETS.iter().any(|t| input.contains(t))
+}
+
+/// review-gate 只审最终答复，写文件任务却应该审“文件里到底写了什么”。
+/// 把本轮成功写入的内容附在待审答案前，并明确标成验收证据，避免模型为了
+/// 让 judge 看到内容而在最终答复里复述全文。
+fn review_answer_with_written_files(answer: &str, files: &[(String, String)]) -> String {
+    const TOTAL_MAX_CHARS: usize = 8_000;
+    const PER_FILE_MAX_CHARS: usize = 6_000;
+    if files.is_empty() {
+        return answer.to_string();
+    }
+    let mut out = String::from("[本轮成功写入的文件，供验收核对，不属于用户可见答复]\n");
+    let mut budget = TOTAL_MAX_CHARS;
+    for (path, content) in files {
+        if budget == 0 {
+            break;
+        }
+        let cap = budget.min(PER_FILE_MAX_CHARS);
+        let total = content.chars().count();
+        let kept: String = content.chars().take(cap).collect();
+        out.push_str(&format!("\n--- {path} ---\n{kept}"));
+        if total > cap {
+            out.push_str(&format!("\n…（文件内容已截断，共 {total} 字符）"));
+        }
+        out.push('\n');
+        budget = budget.saturating_sub(cap);
+    }
+    out.push_str("\n[最终答复]\n");
+    out.push_str(answer);
+    out
+}
+
 /// 把一次工具调用整理成权限弹窗里能直接读到的一段话。
 /// shell 给命令行原文，写文件给路径，其余给缩进 JSON；超过 4KB 截断并标注原始长度。
 fn confirm_preview(_tool: &str, arguments: &Value) -> String {
@@ -3451,6 +3570,34 @@ fn tool_format_correction() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_file_evidence_is_only_for_explicit_write_tasks() {
+        assert!(task_requests_file_write(
+            "请用工具把三条要点写入 workspace/notes.txt"
+        ));
+        assert!(task_requests_file_write("把结果保存到 report.md"));
+        assert!(task_requests_file_write(
+            "write the notes to workspace/notes.txt"
+        ));
+        assert!(!task_requests_file_write(
+            "请用 Python 实现一个 LRU 缓存类，并给出代码"
+        ));
+        assert!(!task_requests_file_write("解释一下内存管理"));
+    }
+
+    #[test]
+    fn review_answer_includes_written_file_content_before_final_answer() {
+        let files = vec![(
+            "workspace/notes.txt".to_string(),
+            "- 使用堆进行动态分配\n- 注意内存泄漏".to_string(),
+        )];
+        let text = review_answer_with_written_files("已写入 workspace/notes.txt。", &files);
+        assert!(text.contains("[本轮成功写入的文件"), "{text}");
+        assert!(text.contains("使用堆进行动态分配"), "{text}");
+        assert!(text.contains("[最终答复]"), "{text}");
+        assert!(text.ends_with("已写入 workspace/notes.txt。"), "{text}");
+    }
 
     #[test]
     fn review_feedback_uses_prose_labels_and_forbids_ids_in_answer() {

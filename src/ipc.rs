@@ -69,6 +69,12 @@ mod imp {
             inner: UnixStream::connect(path)?,
         })
     }
+
+    /// 单次探测：不等待、不重连。启动存在性检查与 wait_ready 必须用它，
+    /// 否则 Windows 的 3 秒重试会被计入冷启动耗时。
+    pub fn try_connect(path: &Path) -> io::Result<Stream> {
+        connect(path)
+    }
 }
 
 #[cfg(windows)]
@@ -350,58 +356,73 @@ mod imp {
         }
     }
 
+    fn connect_once(name: &[u16]) -> io::Result<Stream> {
+        let h = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED,
+                0,
+            )
+        };
+        if h != INVALID_HANDLE_VALUE && h != 0 {
+            return Ok(Stream {
+                inner: Arc::new(PipeHandle { handle: h }),
+            });
+        }
+        Err(io::Error::last_os_error())
+    }
+
+    /// 单次探测：不等待命名管道重建窗口。所有“判断是否已有内核”的场景
+    /// 都必须走这里，不能复用带 3 秒 deadline 的 connect。
+    pub fn try_connect(path: &Path) -> io::Result<Stream> {
+        connect_once(&wide(&pipe_name(path)))
+    }
+
     pub fn connect(path: &Path) -> io::Result<Stream> {
         let name = wide(&pipe_name(path));
         // WebUI/TUI 不应无限等待：3s 内没有可用实例就明确失败，交给上层打印。
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let h = unsafe {
-                CreateFileW(
-                    name.as_ptr(),
-                    GENERIC_READ | GENERIC_WRITE,
-                    0,
-                    std::ptr::null(),
-                    OPEN_EXISTING,
-                    FILE_FLAG_OVERLAPPED,
-                    0,
-                )
-            };
-            if h != INVALID_HANDLE_VALUE && h != 0 {
-                return Ok(Stream {
-                    inner: Arc::new(PipeHandle { handle: h }),
-                });
-            }
-            let err = unsafe { GetLastError() };
-            if err == ERROR_PIPE_BUSY
-                || err == ERROR_FILE_NOT_FOUND
-                || err == ERROR_PIPE_NOT_CONNECTED
-            {
-                let now = Instant::now();
-                if now >= deadline {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("named pipe unavailable: win32={err}"),
-                    ));
+            match connect_once(&name) {
+                Ok(stream) => return Ok(stream),
+                Err(e) => {
+                    let err = e.raw_os_error().unwrap_or(0) as u32;
+                    if err == ERROR_PIPE_BUSY
+                        || err == ERROR_FILE_NOT_FOUND
+                        || err == ERROR_PIPE_NOT_CONNECTED
+                    {
+                        let now = Instant::now();
+                        if now >= deadline {
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                format!("named pipe unavailable: win32={err}"),
+                            ));
+                        }
+                        if err == ERROR_PIPE_BUSY {
+                            let wait = (deadline - now).as_millis().max(1) as u32;
+                            unsafe { WaitNamedPipeW(name.as_ptr(), wait) };
+                        } else {
+                            // Windows 命名管道在监听端创建/重建的窗口里会短暂返回
+                            // ERROR_FILE_NOT_FOUND(2) 或 ERROR_PIPE_NOT_CONNECTED(233)；
+                            // 与 busy 一样退避重试，避免 bench 的 wait_ready 与 connect 之间漏接。
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        continue;
+                    }
+                    return Err(e);
                 }
-                if err == ERROR_PIPE_BUSY {
-                    let wait = (deadline - now).as_millis().max(1) as u32;
-                    unsafe { WaitNamedPipeW(name.as_ptr(), wait) };
-                } else {
-                    // Windows 命名管道在监听端创建/重建的窗口里会短暂返回
-                    // ERROR_FILE_NOT_FOUND(2) 或 ERROR_PIPE_NOT_CONNECTED(233)；
-                    // 与 busy 一样退避重试，避免 bench 的 wait_ready 与 connect 之间漏接。
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                continue;
             }
-            return Err(io::Error::from_raw_os_error(err as i32));
         }
     }
 }
 
 #[cfg(windows)]
 pub use imp::pipe_name;
-pub use imp::{connect, Listener, Stream};
+pub use imp::{connect, try_connect, Listener, Stream};
 
 /// 前端可读的实际端点：Unix 是 socket 路径，Windows 是 `\\.\pipe\...`。
 pub fn endpoint(path: &Path) -> String {
@@ -412,5 +433,33 @@ pub fn endpoint(path: &Path) -> String {
     #[cfg(unix)]
     {
         path.to_string_lossy().into_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn try_connect_does_not_enter_the_retry_deadline() {
+        let dir = std::env::temp_dir().join(format!(
+            "featheragent-ipc-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("missing.sock");
+        let start = Instant::now();
+        assert!(try_connect(&path).is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "单次探测不应等待重试 deadline: {:?}",
+            start.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

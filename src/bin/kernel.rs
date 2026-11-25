@@ -440,7 +440,7 @@ fn serve(args: &featheragent::util::Args) -> Result<(), String> {
         "msgpack" | "" => Codec::MsgPack,
         other => return Err(format!("未知 --codec {other}；可用: msgpack | json")),
     };
-    if featheragent::ipc::connect(&socket).is_ok() {
+    if featheragent::ipc::try_connect(&socket).is_ok() {
         return Err(format!(
             "同一端点已有内核在运行（{}）；请先停止旧进程，或换 --socket",
             socket.display()
@@ -715,7 +715,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     // 避免 Windows 命名管道冲突被翻译成裸 os error 2。
     let probe_paths = paths_from(args)?;
     let ready_path = ipc_ready_path(&probe_paths.socket());
-    if ready_path.exists() && featheragent::ipc::connect(&probe_paths.socket()).is_ok() {
+    if ready_path.exists() && featheragent::ipc::try_connect(&probe_paths.socket()).is_ok() {
         let pid = std::fs::read(&ready_path)
             .ok()
             .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())

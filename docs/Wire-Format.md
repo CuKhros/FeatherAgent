@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.4.2** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.4.3** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.2","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.3","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -349,6 +349,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 A local file inside the install root returns `copied:false` and its canonical path; an outside file is copied to the default workspace. Browser bytes always land in the default workspace. The model receives only `result.path`, never the browser path or the outside source.
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.4.3: no new frame, endpoint, event kind, or error code. The review-gate file-content evidence for explicit write tasks is internal engine/plugin input, not a wire payload; `ipc::try_connect` and the cold-spawn measurement fix are internal. All external methods, events and status values are unchanged.
 - 1.2.1-rc.4.2: no new frame, endpoint, event kind, or error code. `bench --json` moves `boot_gate_trusted` out of `gates` and into a top-level `advisory_gates` object with `boot_gate_status` and `reliability`; `metrics` keeps the diagnostic field. The context parser also recovers XML-style function/parameter calls, and the Ollama provider can salvage them from accumulated stream text; this is provider-side compatibility, not a wire change. All additive.
 - 1.2.1-rc.4.1: no new frame, endpoint, event kind, or error code. Tool results for `web.search|news|fetch` add `audit_artifact` beside `artifact` / `artifact_kind` (the audit file lives under `<data>/web-artifacts/<session>/`); `review.guide` adds `final_artifact` pointing at `<data>/review-artifacts/<session>/<ms>-rubric-final.json`. `review.guide` keeps `artifact` for the accepted attempt. Plain-text `tool_call <name> {...}` in a model answer is a compatibility fallback inside the context parser, not a wire change; standard providers should still send structured `tool_calls`. All additive.
 - 1.2.1-rc.4: `file.attach` / `file.prepare` are additive methods on the same HTTP RPC `/rpc` endpoint used by WebUI; request `{path}` or `{name,data_base64}`, response `{path,copied,source,name,bytes}`. Errors use `-32602` with `attachment_not_found|attachment_not_file|attachment_empty|attachment_too_large|attachment_write_failed|attachment_copy_failed|attachment_invalid_base64`. No new frame, endpoint, or event kind. Tool results for `web.search|news|fetch` may add `artifact` / `artifact_kind`; bench JSON adds `boot_gate_raw`, `boot_gate_trusted`, `boot_gate_status`, and `reliability`; `tool.call` adds `attempt` and `call_index`. `must_include` adds `match` / `min_matches`. All additive; prompt text and plugin internals only otherwise.

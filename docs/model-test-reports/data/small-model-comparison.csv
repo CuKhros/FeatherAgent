@@ -1,0 +1,6 @@
+report,category,points_available,bare_score,fa_score,bare_seconds,fa_seconds,bare_chars,fa_chars,notes
+v1.2.1-rc.4.1,code,4,3,4,34.7,9.0,543,934,FA added type annotations and more complete assertions
+v1.2.1-rc.4.1,design,4,4,4,23.0,26.0,3775,3082,Bare answer longer; both covered tables/fields/indexes
+v1.2.1-rc.4.1,translation,4,4,4,24.5,5.9,126,91,Both preserved meaning; FA shorter and faster
+v1.2.1-rc.4.1,qa,4,4,3,22.1,8.1,201,167,FA omitted the ordering keyword in the scoring rubric
+v1.2.1-rc.4.1,total,16,15,15,104,49,,,FA total latency 2.1x faster

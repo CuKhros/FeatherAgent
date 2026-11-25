@@ -1,0 +1,11 @@
+report,date,exec_model,guide_judge_model,scenario,runs,approved,unapproved,degraded,notes
+v1.2.1-rc.2,2026-11-24,qwen3.5:4b,qwen3.5:4b,all roles use 4B,3,0,0,3,"Three degraded attempts: two empty responses, one rubric missing criterion/check"
+v1.2.1-rc.2,2026-11-24,qwen3.5:4b,qwen2.5-coder:7b,7B guide and judge plus 4B exec,1,0,1,0,"Ran three revision rounds; judge repeatedly reported c2/c3 with no evidence"
+v1.2.1-rc.2.1,2026-11-24,qwen3.5:4b,qwen2.5-coder:7b,7B guide and judge plus 4B exec,1,1,0,0,"Approved in 2 rounds; whole-sentence must_include made the gate reward copying"
+v1.2.1-rc.3,2026-11-24,qwen3.5:4b,qwen2.5-coder:7b,stricter rubric schema,4,0,0,4,"4/4 degraded; 7B guide never produced a compliant hard criterion"
+v1.2.1-rc.3.1,2026-11-24,qwen3.5:4b,qwen2.5-coder:7b,7B guide and judge plus 4B exec,3,1,2,0,"First balanced run; two failures came from coarse min_points counting"
+v1.2.1-rc.3.5,2026-11-25,qwen3.5:4b,qwen2.5-coder:7b,TCP task a2,2,2,0,0,"Both approved in round 1; hardcheck only, judge not called"
+v1.2.1-rc.3.5,2026-11-25,qwen3.5:4b,qwen2.5-coder:7b,S3 tool-read task t6,5,4,0,0,"Four of five turns made exactly one tool.fs.read call; latency and model variance remain"
+v1.2.1-rc.3.6,2026-11-25,qwen3.5:4b,qwen2.5-coder:7b,malformed-call retry,4,3,0,0,"Three of four recovered through model.retry; one exhausted the budget after repeated empty responses"
+v1.2.1-rc.4,2026-11-25,qwen3.5:4b,qwen2.5-coder:7b,review-gate OFF multitask,2,0,0,0,"Task completion 3/4 then 1/4; no review events because the gate was off"
+v1.2.1-rc.4,2026-11-25,qwen3.5:4b,qwen2.5-coder:7b,review-gate ON multitask,2,0,0,0,"Both runs 0/4; ON was 3.2-4.2x slower than OFF and exposed tool-call text in answers"

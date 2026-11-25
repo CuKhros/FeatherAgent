@@ -1,6 +1,17 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.2` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.3` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.3] - 2026-11-25
+
+### 修复
+- N19：`serve` 用带重试的 `ipc::connect` 判断旧内核，干净安装根会先等满 3 秒管道 deadline 才启动，表现为固定约 3.18 s 冷启动。新增单次探测 `ipc::try_connect`；`serve`、`wait_ready`、冒烟探测与 `Server::stop` 改用它，正常客户端保留有界重试。测试：`try_connect_does_not_enter_the_retry_deadline`。
+- N20：系统提示区分内容回答与文件创建。代码、文本、方案、译文默认写在答复里；只有用户明确要求保存、写入或创建文件时才调用文件工具。测试：`system_prompt_separates_content_output_from_file_creation`。
+- N21：列举/比较类答复的第一层条目必须对应用户要求的对比轴；用户未给轴时覆盖机制、可靠性、性能与开销、适用场景，不要用同一维度的近义表述占位。测试：`system_prompt_distinguishes_brevity_from_coverage`。
+- N22：明确的写文件任务把成功 `tool.fs.write` 的路径与内容作为带标签证据交给 review-gate，judge 检查文件而不是要求最终答复逐字复述；提示词同时禁止写成功后反复读取。测试：`review_file_evidence_is_only_for_explicit_write_tasks`、`review_answer_includes_written_file_content_before_final_answer`、`review_gate_validates_written_file_content_instead_of_answer_wording`。
+
+### 新增
+- `docs/model-test-reports/`：收录 9 份含可复核本地模型数据的 Windows 真机报告，附 rc.4.1 四类任务对照、rc.4.2 七题试卷、rc.2 → rc.4 review-gate 里程碑三份 CSV。
 
 ## [1.2.1-rc.4.2] - 2026-11-25
 

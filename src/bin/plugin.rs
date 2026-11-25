@@ -295,6 +295,15 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                         0,
                     ));
                 }
+                if last_user.contains("REVIEW_WRITE") {
+                    return Ok((
+                        json!({"rubric":[
+                            {"id":"c1","criterion":"写入文件并覆盖两个要点","check":"核对 notes.txt 与内存管理内容","must_include":["notes.txt","内存管理"],"match":"all"}
+                        ]})
+                        .to_string(),
+                        0,
+                    ));
+                }
                 if last_user.contains("REVIEW_M1") {
                     return Ok((
                         json!({"rubric":[

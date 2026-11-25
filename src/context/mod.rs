@@ -231,7 +231,7 @@ impl ContextEngine {
 
         // ---- 稳定前缀 ----
         let mut system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。默认简洁、工具优先、不要臆造；用户要求列举、比较、穷举或说明全部要点时，必须覆盖全部要点，不要因简洁而省略。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。默认简洁、工具优先、不要臆造；工具优先只用于获取或变更必要信息。用户要代码、文本、方案或译文时，默认直接写在回答里，不要为了展示工具能力而写入文件；只有用户明确要求保存、写入或生成文件时才调用文件工具。用户要求列举、比较、穷举或说明全部要点时，必须覆盖全部要点；先确认用户要求的数量与维度，第一层条目直接对齐这些维度；未指定维度时优先覆盖机制、可靠性/一致性、性能与开销、适用场景，不要用同一维度的近义表述凑数。文件工具成功返回后不要反复读取同一文件自检，最终答复报告路径或结果即可。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
             profile.name
         );
         if let Some(note) = &self.cfg.workspace_note {
@@ -822,6 +822,23 @@ mod tests {
         let prompt = &a.messages[0].content;
         assert!(prompt.contains("列举"), "{prompt}");
         assert!(prompt.contains("覆盖全部要点"), "{prompt}");
+        assert!(prompt.contains("第一层条目直接对齐这些维度"), "{prompt}");
+        assert!(prompt.contains("性能与开销"), "{prompt}");
+    }
+
+    #[test]
+    fn system_prompt_separates_content_output_from_file_creation() {
+        let engine = ContextEngine::default();
+        let profile = ModelProfile {
+            context_window: 4096,
+            max_output: 128,
+            ..Default::default()
+        };
+        let a = engine.assemble(&[], &profile, &[], &[], &[]).unwrap();
+        let prompt = &a.messages[0].content;
+        assert!(prompt.contains("默认直接写在回答里"), "{prompt}");
+        assert!(prompt.contains("明确要求保存、写入或生成文件"), "{prompt}");
+        assert!(prompt.contains("不要反复读取同一文件自检"), "{prompt}");
     }
 
     #[test]

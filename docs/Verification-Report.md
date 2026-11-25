@@ -1,12 +1,27 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.2)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.3)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.2 summary (current candidate)
+## v1.2.1-rc.4.3 summary (current candidate)
 
-The rc.4.1 retest confirmed N10, N12 and N13. N11's plain-text fallback worked, but an XML-style function/parameter call still ended the whole turn with `status=failed`; N16 kept about 1/2 bench failures; N17 inflated the gate count with `boot_gate_trusted`; N18 showed a coverage gap from “concise” prompt wording. This patch addresses N15–N18.
+The rc.4.2 retest confirmed N15's XML-style recovery, removed the `[bench:rpc_connect]` failures (0/5), and confirmed the `advisory_gates` split. It left four findings: N19 cold spawn fixed at about 3.18 s, N20 code answers written to a file instead of the response, N21 missing comparison axes, and N22 a write task unapproved plus four repeated reads. This patch addresses N19–N22 and adds the curated model-report archive.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N19 cold spawn stuck at ~3.18 s | `serve`'s old-kernel probe used the retrying `ipc::connect`, so a clean root waited the full 3 s N16 deadline before creating the pipe. Added one-shot `ipc::try_connect`; serve/`wait_ready`/stop probes use it, while real clients keep the bounded retry | Unit `try_connect_does_not_enter_the_retry_deadline`; Linux cold-spawn P50 5.848/5.376/5.556 ms; Windows retest required |
+| N20 code task wrote a file instead of answering | Prompt separates content output from file creation: code/text/plan/translation defaults to the response; file tools only on explicit save/write/create | Unit `system_prompt_separates_content_output_from_file_creation` |
+| N21 list missed overhead/header size | Prompt requires first-level items to follow the requested comparison axes; with no axes, cover mechanism, reliability, performance/overhead and scenarios | Updated `system_prompt_distinguishes_brevity_from_coverage` |
+| N22 write task stayed `unapproved` | Engine records successful `tool.fs.write` path/content and gives the judge labelled file evidence for explicit write tasks; guide checks the file, not verbatim answer wording; prompt stops repeated post-write reads | Unit `review_file_evidence_is_only_for_explicit_write_tasks`, `review_answer_includes_written_file_content_before_final_answer`; integration `review_gate_validates_written_file_content_instead_of_answer_wording` |
+
+Linux full suite: **189 tests, 188 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 73 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 36 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,564,584 B (2.45 MiB)**; warm P50 **1.220 / 1.339 / 1.231 ms**, P90 **1.597 / 1.353 / 1.557 ms**; cold **5.848 / 5.376 / 5.556 ms**; RSS **1,920 / 1,920 / 1,792 KiB**; write P95 **8.924 / 8.796 / 7.704 µs**; assemble P95 **0.177 / 0.124 / 0.120 ms**; RPC P95 **0.048 / 0.071 / 0.042 ms**; all release gates true, `advisory_gates.boot_gate_trusted=true`, `reliability:"high"`.
+
+Not verified: v1.2.1-rc.4.3 Windows real hardware (N19 cold spawn, N20 code-answer shape, N21 comparison coverage, N22 write-task approval/read count, N5–N18 regression, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
+
+## v1.2.1-rc.4.2 summary (historical, released)
+
+The rc.4.1 retest confirmed N10, N12 and N13. N11's plain-text fallback worked, but an XML-style function/parameter call still ended the whole turn with `status=failed`; N16 kept about 1/2 bench failures; N17 inflated the gate count with `boot_gate_trusted`; N18 showed a coverage gap from “concise” prompt wording. This patch addressed N15–N18.
 
 | Item | Treatment | Verification |
 |---|---|---|
@@ -17,7 +32,7 @@ The rc.4.1 retest confirmed N10, N12 and N13. N11's plain-text fallback worked, 
 
 Linux full suite: **184 test executions, 183 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 69 lib, 31 plugin ×2, 2 kernel, 5 TUI, 4 WebUI ×2, 2 golden, 36 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,557,784 B (2.44 MiB)**; warm P50 **1.140 / 1.137 / 1.136 ms**, P90 **1.159 / 1.144 / 1.146 ms**; cold **2.891 / 2.085 / 2.140 ms**; RSS **3,456 / 3,584 / 3,584 KiB**; write P95 **2.684 / 2.684 / 2.564 µs**; assemble P95 **0.125 / 0.119 / 0.121 ms**; RPC P95 **0.023 / 0.024 / 0.028 ms**; all release gates true, `advisory_gates.boot_gate_trusted=true`, `reliability:"high"`.
 
-Not verified: v1.2.1-rc.4.2 Windows real hardware (N15 XML recovery with a live 4B, N16 repeated bench, N17 advisory output, N18 coverage, N5–N14 regression, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
+At release time, the rc.4.2 Windows hardware items were still pending (N15 XML recovery with a live 4B, N16 repeated bench, N17 advisory output, N18 coverage); the subsequent rc.4.2 retest covered them and found N19–N22 instead. Other unverified areas: medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine is only a startup smoke test.
 
 ## v1.2.1-rc.4.1 summary (historical, released)
 

@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.2 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4.3 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.4.2-windows-x64.zip`
-> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.1 复测（N15–N18）
-> 说明：v1.2.1-rc.4.2 修复 rc.4.1 复测的四条问题。真机已确认 N10、N12、N13；N11 的纯文本形式可用，但 XML 风格 function/parameter 调用仍会让整轮失败，因此 N15 增加解析器恢复与 Ollama 流错误抢救。N16 增加 Windows 命名管道重试（`ERROR_FILE_NOT_FOUND(2)` / `ERROR_PIPE_NOT_CONNECTED(233)`）与 bench 有界连接重试。N17 把 `boot_gate_trusted` 从 `gates` 移到 `advisory_gates`，不再计入 `passed/total`。N18 区分默认简洁与列举/比较/穷举类任务，后者必须覆盖全部要点。rc.4/rc.4.1 的 N5–N14 修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
+> 被测包：`FeatherAgent-1.2.1-rc.4.3-windows-x64.zip`
+> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.2 复测（N19–N22）
+> 说明：v1.2.1-rc.4.3 修复 rc.4.2 复测的四条问题。N19：`serve` 的旧内核探测改用单次 `ipc::try_connect`，干净安装根不再先等满 3 秒命名管道重试；真实客户端仍保留有界重试，N16 保护不变。N20：代码/文本/方案/译文默认写进答复，文件工具只在明确要求保存/写入/创建文件时调用。N21：列举第一层条目必须对应用户要求的对比轴；未给轴时覆盖机制、可靠性、性能与开销、适用场景。N22：明确写文件任务把成功 `tool.fs.write` 的路径与内容作为带标签证据交给 judge，guide 核对文件而不是要求答复逐字复述；系统提示同时禁止写成功后反复读取。rc.4/rc.4.1/rc.4.2 的 N5–N18 修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.2\
+D:\FeatherAgent-1.2.1-rc.4.3\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.4.2\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.4.2` 后再操作。
+看到 `serve ready: 1.2.1-rc.4.3` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.2
+cd D:\FeatherAgent-1.2.1-rc.4.3
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,14 @@ v1.2.1-rc.4 回归核对：
 7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
 8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
 
+v1.2.1-rc.4.3 回归核对：
+
+1. **N19：冷启动。** 用干净安装根（无正在运行的内核）跑 `bench --json`，`metrics.cold_spawn_ms_p50` 必须回到正常进程启动区间，而不是固定的约 3.18 s；Windows 门限下 `gates.cold_spawn_lt_250ms` 必须为 true。连续跑 5 次，逐次记录样本。
+2. **N20：代码答复形态。** 问“实现一个 O(1) 的 LRU 缓存并给出代码”。最终答复必须直接包含代码块；除非提示明确要求保存文件，不得调用 `tool.fs.write`。
+3. **N21：对比维度。** 问 TCP 与 UDP 的“三个主要区别”。第一层条目必须对应用户要求的维度，不能三个槽位都用来讲可靠性的近义表述；适用时应覆盖开销/头部大小。
+4. **N22：写文件 review 与读取次数。** review-gate 开启，要求把三条要点写入 `workspace\notes.txt`。整轮必须执行 `tool.fs.write`、写入文件，并达到 `review.status:"approved"`，且不要求最终答复复述文件正文。统计 `tool.fs.read`；为自检反复读取同一文件记为问题。同时核对 judge 看到的文件内容与实际文件一致。
+5. **N18/N15–N17 回归。** 重跑下方 rc.4.2 核对；XML 恢复、bench 连接、建议项拆分与列举覆盖面必须保持通过。
+
 v1.2.1-rc.4.2 回归核对：
 
 1. **N15：XML 风格调用恢复。** review-gate 开启、4B exec，重复写文件任务直到模型输出 function/parameter 风格调用。整轮必须执行 `tool.fs.write`、写入 `workspace\notes.txt` 并以成功结束，而不是 `status=failed`；原始 XML 不得进入最终答案。若模型把散文与调用混在一起，记录解析器是否能恢复。
@@ -252,13 +260,13 @@ v1.2.1 追加核对：
 - N14：4B 在多任务长流程上会漂移；建议用 ≥7B exec，并对基线多次取样。单次 4B 结果只作观测。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.4.2 未跑 Wine；Wine 通过也不等于 Windows 通过。
+- Wine 冒烟：`version` 可启动；连续 5 次 `bench --json` 均完成，无 `[bench:rpc_connect]` 失败，冷启动 **442–507 ms**，但 `cold_spawn_lt_250ms` 因 Wine 进程启动开销而判红。Wine 使用临时 `bcryptprimitives.dll` stub，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.3-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。
