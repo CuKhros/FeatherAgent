@@ -1,6 +1,23 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.2` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.3.3` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.3.3] - 2026-11-25
+
+### Fixed
+- K1: criteria are routed before the judge. `must_include` / `must_not_include` / `min_points` / `pattern` / `regex` are settled by `review.hardcheck`; only description items go to `review.judge`, so a passing negative criterion no longer needs “answer text” that cannot exist.
+- K2: an incomplete judge verdict is reinjected with the full item-id list and retried inside the same vote; one omitted item no longer degrades the whole round.
+- K3: `bench --json` adds `boot_ms_p90` and `boot_sample_count`; the gate still uses the median, but the tail is visible.
+- K4: `metrics.env` reports `mem_load_pct` on Linux too, plus `reliability` and a `note` when memory load is ≥85%; gates stay green, the reading is annotated.
+
+### Added
+- `review` criterion `regex` with `min_matches` (1–50, 200-character pattern limit), validated during guide.
+- `hardcheck.pattern_engine` (`glob` default / `regex`), `criteria_routing` (`auto` default / `hardcheck_only` / `judge_only`).
+- Serial `judge.votes` (1 or 3), `majority` aggregation, `early_stop_on_agreement`; temperatures base / +0.05 / +0.10 capped at 0.2; peak model concurrency remains 1.
+
+### Changed
+- `plugins/review-gate/plugin.json` declares 14 settings fields (was 9); TUI and WebUI render them generically.
+- `review.warn` text for `min_points` now says the item is accepted as a soft criterion, and `hardcheck_only` warns how many description items were not evaluated.
 
 ## [1.2.1-rc.3.2] - 2026-11-24
 

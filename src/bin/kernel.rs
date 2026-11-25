@@ -904,7 +904,9 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
         "boot_mode": "warm_in_process_same_install_root",
         "boot_warmup_discarded_ms": boot_warmup_ms,
         "boot_samples_ms": boot_ms,
+        "boot_sample_count": boot_ms.len(),
         "boot_ms_p50": percentile(&boot_ms, 0.5),
+        "boot_ms_p90": percentile(&boot_ms, 0.9),
         "cold_spawn_mode": "real_process_spawn",
         "cold_spawn_ms_p50": percentile(&spawn_ms, 0.5),
         "cold_spawn_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
@@ -993,9 +995,11 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
             size_bytes as f64 / 1_048_576.0
         );
         println!(
-            "  热启动 P50       {:.2} ms   (< {:.0} ms；预热 {:.2} ms 已丢弃)",
+            "  热启动 P50/P90   {:.2} / {:.2} ms   (< {:.0} ms；{} 次样本，预热 {:.2} ms 已丢弃)",
             percentile(&boot_ms, 0.5),
+            percentile(&boot_ms, 0.9),
             boot_limit,
+            boot_ms.len(),
             boot_warmup_ms
         );
         println!(
@@ -1088,6 +1092,42 @@ fn env_fingerprint() -> serde_json::Value {
                 obj["mem_load_pct"] = serde_json::json!(ms.dwMemoryLoad);
             }
             obj["uptime_s"] = serde_json::json!(GetTickCount64() / 1000);
+        }
+    }
+    // K4：整机内存压力只做“读数可信度”标注，不参与门禁。Windows 用 dwMemoryLoad；
+    // Linux 用 (MemTotal - MemAvailable) / MemTotal 近似，便于跨平台对照。
+    if let Some(o) = obj.as_object_mut() {
+        if !o.contains_key("mem_load_pct") {
+            if let (Some(total), Some(avail)) = (
+                o.get("mem_total_kb").and_then(|x| x.as_u64()),
+                o.get("mem_available_kb").and_then(|x| x.as_u64()),
+            ) {
+                if total > 0 {
+                    let used = total.saturating_sub(avail);
+                    o.insert(
+                        "mem_load_pct".into(),
+                        serde_json::json!((used as f64 / total as f64 * 100.0).round() as u64),
+                    );
+                }
+            }
+        }
+        let load = o.get("mem_load_pct").and_then(|x| x.as_u64());
+        let reliability = match load {
+            Some(p) if p >= 85 => "low",
+            Some(p) if p >= 70 => "medium",
+            Some(_) => "high",
+            None => "unknown",
+        };
+        o.insert("reliability".into(), serde_json::json!(reliability));
+        if let Some(p) = load {
+            if p >= 85 {
+                o.insert(
+                    "note".into(),
+                    serde_json::json!(format!(
+                        "整机内存占用 {p}%，启动/写入读数可能偏高，仅作参考、不作门禁失败"
+                    )),
+                );
+            }
         }
     }
     obj

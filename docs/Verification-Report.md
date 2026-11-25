@@ -1,10 +1,26 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.2)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.3.3)
 
-> Date: 2026-11-24 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.2` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.3.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.3.2 summary (current candidate)
+## v1.2.1-rc.3.3 summary (current candidate)
+
+The rc.3.2 real-hardware retest re-verified J1–J3: `review.warn` carried `min_points 机器计数不足…`, answers had no `cN` leakage across three runs, and `metrics.env` showed the earlier slow numbers came from a host at 87–90% memory (1.5–2 GB free of 16 GB). Windows bench was 7/7 twice (warm 38.1 / 85.5 ms, cold 181.8 / 204.0 ms, write P95 4,079 / 5,041 µs, RPC P95 0.312 / 0.320 ms, binary 2.141 MB, RSS 10,584–10,588 KB). The gate still approved only **1/3**, now because K1/K2 were criteria and judge-stability problems rather than mechanism problems.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| K1 negative/count criteria vs evidence rule | `must_include` / `must_not_include` / `min_points` / `pattern` / new `regex` are settled by `review.hardcheck`; only description items go to `review.judge`; evidence-verbatim applies only to judge items | Unit `review_rubric_accepts_regex_and_rejects_invalid_one`, hardcheck covers five kinds; integration `review_gate_routes_negative_criterion_to_hardcheck` (a negative item that would return non-answer evidence never reaches the judge, round approved) |
+| K2 judge omission | Missing/invalid verdict is reinjected inside the same vote with the full item-id list and retried once per vote | Integration `review_gate_missing_description_item_is_reinjected`: mock omits the last item, `review.warn` reports the missing item, retry approves |
+| K3 warm tail | `bench --json` adds `boot_ms_p90` and `boot_sample_count`; human output prints P50/P90; gate remains P50 | Three release runs: warm P50 1.180/1.148/1.151 ms, P90 1.183/1.140/1.145 ms, 5 samples each |
+| K4 memory reliability | `metrics.env` adds Linux `mem_load_pct`, `reliability`, and a `note` at ≥85%; no gate change | Three release runs: `mem_load_pct` 16–17, `reliability: high`, no note; Windows path already reports `dwMemoryLoad` |
+| Routing/votes config | `criteria_routing`, `hardcheck.pattern_engine`, `judge.votes` 1/3, `judge.aggregation=majority`, `judge.early_stop_on_agreement`; serial votes, peak concurrency 1 | `plugin_settings_are_relayed_and_validated`: 14 declared fields, `votes=2` rejected, 3 and enums round-trip; integration review suite passes |
+
+Linux has **118 tests: 117 passed, 1 ignored by default** (62 lib, 17 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 29 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy --locked --all-targets` pass. Release bench (3 consecutive runs): kernel **2,516,416 B (2.400 MiB)**; warm **1.180 / 1.148 / 1.151 ms**; cold **3.391 / 3.294 / 2.940 ms**; RSS max **3,584 KiB**; write P95 **4.220 / 2.678 / 3.216 µs**; assemble P95 **0.152 / 0.176 / 0.138 ms**; RPC P95 **0.053 / 0.049 / 0.038 ms**; all gates true; `env.mem_load_pct` 16–17, `reliability:high`.
+
+Not verified: v1.2.1-rc.3.3 Windows real hardware (K1 negative/regex routing with a live 7B, K2 missing-item reinjection, optional 3-vote behaviour and model-call overlap, K3 P90 on Windows, K4 ≥85% note, plus pending live-Ollama dropdowns, ConPTY Enter-save, Windows Terminal permission popup and S3 t6 single call), high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine was not run. Bench numbers above are from this VM at the recorded `metrics.env`; they are not a Windows baseline.
+
+## v1.2.1-rc.3.2 summary (historical, released)
 
 The rc.3.1 real-hardware retest confirmed that the review gate now works: with real 7B models it approved **1/3** and rejected **2/3**, the guide succeeded on the first attempt (`attempts:1`), description-only rubrics fell back to judge-only with `review.warn`, answers were 252-character structured text written by the exec, and judge evidence was a verbatim window of the answer. It also exposed three new issues (J1–J3): `min_points` false kills from counting only list markers, rubric ids `c1/c2/c3` copied into answers because feedback used bare `c1:` labels, and bench numbers that could not be compared across runs because the host had drifted into a degraded state.
 

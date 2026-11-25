@@ -97,6 +97,59 @@ impl Default for ReviewRoleConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewHardcheckConfig {
+    /// `glob`（默认，兼容旧判据）或 `regex`（把 `pattern` 按正则解释）。
+    #[serde(default = "default_pattern_engine")]
+    pub pattern_engine: String,
+}
+
+impl Default for ReviewHardcheckConfig {
+    fn default() -> Self {
+        Self {
+            pattern_engine: default_pattern_engine(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewJudgeConfig {
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_judge_temperature")]
+    pub temperature: f64,
+    /// 1 或 3；>1 时串行投票，按 majority 聚合。
+    #[serde(default = "default_judge_votes")]
+    pub votes: u32,
+    /// 当前仅支持 majority（禁止 all/AND）。
+    #[serde(default = "default_judge_aggregation")]
+    pub aggregation: String,
+    #[serde(default = "default_bool_true")]
+    pub early_stop_on_agreement: bool,
+}
+
+impl Default for ReviewJudgeConfig {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            temperature: default_judge_temperature(),
+            votes: default_judge_votes(),
+            aggregation: default_judge_aggregation(),
+            early_stop_on_agreement: true,
+        }
+    }
+}
+
+impl ReviewJudgeConfig {
+    pub fn effective_model(&self, global: &str) -> String {
+        if self.model.trim().is_empty() {
+            global.to_string()
+        } else {
+            self.model.trim().to_string()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewGateConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -106,8 +159,14 @@ pub struct ReviewGateConfig {
     pub guide: ReviewRoleConfig,
     #[serde(default = "default_exec_role")]
     pub exec: ReviewRoleConfig,
-    #[serde(default = "default_judge_role")]
-    pub judge: ReviewRoleConfig,
+    #[serde(default)]
+    pub judge: ReviewJudgeConfig,
+    /// `auto`（默认，确定性判据走 hardcheck、描述型走 judge）|
+    /// `hardcheck_only`（完全不用模型 judge）| `judge_only`（旧行为，全部交 judge）。
+    #[serde(default = "default_criteria_routing")]
+    pub criteria_routing: String,
+    #[serde(default)]
+    pub hardcheck: ReviewHardcheckConfig,
     /// 当前仅支持 return_last_with_flag。
     #[serde(default = "default_review_on_exhausted")]
     pub on_exhausted: String,
@@ -120,7 +179,9 @@ impl Default for ReviewGateConfig {
             max_rounds: default_review_max_rounds(),
             guide: default_guide_role(),
             exec: default_exec_role(),
-            judge: default_judge_role(),
+            judge: ReviewJudgeConfig::default(),
+            criteria_routing: default_criteria_routing(),
+            hardcheck: ReviewHardcheckConfig::default(),
             on_exhausted: default_review_on_exhausted(),
         }
     }
@@ -157,11 +218,23 @@ fn default_exec_role() -> ReviewRoleConfig {
         temperature: 0.7,
     }
 }
-fn default_judge_role() -> ReviewRoleConfig {
-    ReviewRoleConfig {
-        model: String::new(),
-        temperature: 0.1,
-    }
+fn default_judge_temperature() -> f64 {
+    0.1
+}
+fn default_judge_votes() -> u32 {
+    1
+}
+fn default_judge_aggregation() -> String {
+    "majority".into()
+}
+fn default_bool_true() -> bool {
+    true
+}
+fn default_pattern_engine() -> String {
+    "glob".into()
+}
+fn default_criteria_routing() -> String {
+    "auto".into()
 }
 
 impl Default for Config {
@@ -1880,121 +1953,305 @@ impl Kernel {
             .plugins
             .get(&cfg.review_gate_plugin)
             .map_err(|e| e.to_string())?;
-        // 先做确定的字面判据，避免 guide/exec/judge 对自由文本 check 的理解漂移。
-        let hard = gate
-            .call(
-                "review.hardcheck",
-                json!({"answer": req.answer, "rubric": req.rubric}),
-            )
-            .map_err(|e| e.to_string())?;
-        if !hard.get("pass").and_then(|x| x.as_bool()).unwrap_or(false) {
-            let mut items = hard
-                .get("failed")
+        let routing = rg.criteria_routing.trim();
+        let routing = if matches!(routing, "auto" | "hardcheck_only" | "judge_only") {
+            routing
+        } else {
+            "auto"
+        };
+        let rubric_items: Vec<Value> = req.rubric.as_array().cloned().unwrap_or_default();
+        let description_items: Vec<Value> = rubric_items
+            .iter()
+            .filter(|item| item.get("judge_only").and_then(|x| x.as_bool()) == Some(true))
+            .cloned()
+            .collect();
+        // 判据分流：auto 只把描述型条目交给 judge；hardcheck_only 完全不用模型；
+        // judge_only 保留旧行为（全部交 judge，仅用于对照/调试）。
+        let judge_items: Vec<Value> = match routing {
+            "judge_only" => rubric_items.clone(),
+            "hardcheck_only" => Vec::new(),
+            _ => description_items.clone(),
+        };
+        let model = rg.judge.effective_model(&cfg.model);
+
+        if routing != "judge_only" {
+            // 先做确定性检查；负向/计数/正则判据在这里终结，不进 judge，
+            // 从根上消除 K1“负向判据没有答案原文 evidence”的死结。
+            let hard = gate
+                .call(
+                    "review.hardcheck",
+                    json!({
+                        "answer": req.answer,
+                        "rubric": req.rubric,
+                        "pattern_engine": rg.hardcheck.pattern_engine,
+                    }),
+                )
+                .map_err(|e| e.to_string())?;
+            let soft = hard
+                .get("soft")
                 .and_then(|x| x.as_array())
                 .cloned()
                 .unwrap_or_default();
-            let mut failed = Vec::new();
-            for item in &mut items {
-                if let Some(obj) = item.as_object_mut() {
-                    obj.insert("pass".into(), json!(false));
-                }
-                if let Some(id) = item.get("id") {
-                    failed.push(id.clone());
-                }
-            }
-            let evidence = items
-                .first()
-                .and_then(|x| x.get("evidence"))
-                .and_then(|x| x.as_str())
-                .unwrap_or("硬性字面判据未通过")
-                .to_string();
-            let model = rg.judge.effective_model(&cfg.model);
-            return Ok(json!({
-                "pass": false,
-                "items": items,
-                "failed": failed,
-                "evidence": evidence,
-                "model": model,
-                "attempts": 0,
-                "source": "hardcheck",
-            }));
-        }
-        // rc.3.1 复测 J1：min_points 是形态判据，中文答案的分号/加粗小标题常被漏数。
-        // 硬检查不再直接判死，而是把“机器计数不足”作为提示交给 judge 复核。
-        let soft = hard
-            .get("soft")
-            .and_then(|x| x.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let mut judge_input = req.input.to_string();
-        if !soft.is_empty() {
-            let mut notes = Vec::new();
             for item in &soft {
                 let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("?");
-                let criterion = item.get("criterion").and_then(|x| x.as_str()).unwrap_or("");
                 let points = item.get("points").and_then(|x| x.as_u64()).unwrap_or(0);
                 let need = item.get("need").and_then(|x| x.as_u64()).unwrap_or(0);
-                notes.push(format!(
-                    "〔{id}〕{criterion}（机器计数 {points}/{need} 个要点）"
-                ));
+                self.emit(
+                    &session.id,
+                    EventKind::ReviewWarn,
+                    json!({
+                        "text": format!(
+                            "min_points 机器计数不足，按软判据接受（确定性判据，不交 judge）：〔{id}〕{points}/{need} 个要点"
+                        ),
+                        "model": model,
+                        "items": [id],
+                    }),
+                );
             }
-            self.emit(
-                &session.id,
-                EventKind::ReviewWarn,
-                json!({
-                    "text": format!(
-                        "min_points 机器计数不足，交 judge 复核：{}",
-                        notes.join("；")
-                    ),
-                    "model": rg.judge.effective_model(&cfg.model),
-                    "items": soft.iter().filter_map(|x| x.get("id").cloned()).collect::<Vec<_>>(),
-                }),
-            );
-            judge_input.push_str(&format!(
-                "\n\n[机器计数提示] 下列形态判据的确定性计数不足，但中文常把要点写在分号或加粗小标题里。请按答案实际内容逐条复核，不要只按列表符号判断：\n{}",
-                notes.join("\n")
-            ));
+            if !hard.get("pass").and_then(|x| x.as_bool()).unwrap_or(false) {
+                let mut items = hard
+                    .get("failed")
+                    .and_then(|x| x.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let mut failed = Vec::new();
+                for item in &mut items {
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.insert("pass".into(), json!(false));
+                    }
+                    if let Some(id) = item.get("id") {
+                        failed.push(id.clone());
+                    }
+                }
+                let evidence = items
+                    .first()
+                    .and_then(|x| x.get("evidence"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("硬性判据未通过")
+                    .to_string();
+                return Ok(json!({
+                    "pass": false,
+                    "items": items,
+                    "failed": failed,
+                    "evidence": evidence,
+                    "model": model,
+                    "attempts": 0,
+                    "votes": 0,
+                    "source": "hardcheck",
+                    "routing": routing,
+                }));
+            }
         }
+
+        if judge_items.is_empty() {
+            if routing == "hardcheck_only" && !description_items.is_empty() {
+                self.emit(
+                    &session.id,
+                    EventKind::ReviewWarn,
+                    json!({
+                        "text": format!(
+                            "hardcheck_only：{} 条描述型判据未评估（确定性判据全部通过）",
+                            description_items.len()
+                        ),
+                        "model": model,
+                    }),
+                );
+            }
+            // 全部由确定性判据决定，不再花一次模型调用（§10.3 短路）。
+            return Ok(json!({
+                "pass": true,
+                "items": [],
+                "failed": [],
+                "evidence": "确定性判据全部通过",
+                "model": model,
+                "attempts": 0,
+                "votes": 0,
+                "source": "hardcheck",
+                "routing": routing,
+            }));
+        }
+
+        let judge_rubric = Value::Array(judge_items.clone());
         let prompt = gate
             .call(
                 "review.judge",
-                json!({"input": judge_input, "answer": req.answer, "rubric": req.rubric}),
+                json!({
+                    "input": req.input,
+                    "answer": req.answer,
+                    "rubric": judge_rubric,
+                }),
             )
             .map_err(|e| e.to_string())?;
-        let messages = prompt
+        let base_messages = prompt
             .get("messages")
             .cloned()
             .ok_or("review.judge 未返回 messages")?;
-        let model = rg.judge.effective_model(&cfg.model);
-        let mut last = String::new();
-        for attempt in 1..=2u32 {
-            let raw = self.review_model_call(
-                session,
-                cfg,
-                &model,
-                rg.judge.temperature,
-                messages.clone(),
-                Duration::from_secs(180),
-            )?;
-            match gate.call(
-                "review.parse_verdict",
-                json!({"text": raw, "rubric": req.rubric, "answer": req.answer}),
-            ) {
-                Ok(verdict) => {
-                    return Ok(json!({
-                        "pass": verdict.get("pass").cloned().unwrap_or(json!(false)),
-                        "items": verdict.get("items").cloned().unwrap_or(json!([])),
-                        "failed": verdict.get("failed").cloned().unwrap_or(json!([])),
-                        "evidence": verdict.get("evidence").cloned().unwrap_or(json!("")),
-                        "model": model,
-                        "attempts": attempt,
-                        "source": "judge",
-                    }));
+        let expected_ids: Vec<String> = judge_items
+            .iter()
+            .filter_map(|x| x.get("id").and_then(|y| y.as_str()).map(|s| s.to_string()))
+            .collect();
+
+        let votes_wanted = rg.judge.votes.clamp(1, 3);
+        let mut vote_verdicts: Vec<Value> = Vec::new();
+        let mut attempts_total = 0u32;
+        for vote in 1..=votes_wanted {
+            let temperature = judge_vote_temperature(rg.judge.temperature, vote);
+            let mut messages = base_messages.clone();
+            let mut got: Option<Value> = None;
+            let mut last = String::new();
+            for attempt in 1..=2u32 {
+                attempts_total += 1;
+                let raw = self.review_model_call(
+                    session,
+                    cfg,
+                    &model,
+                    temperature,
+                    messages.clone(),
+                    Duration::from_secs(180),
+                )?;
+                match gate.call(
+                    "review.parse_verdict",
+                    json!({"text": raw, "rubric": judge_rubric, "answer": req.answer}),
+                ) {
+                    Ok(verdict) => {
+                        got = Some(verdict);
+                        break;
+                    }
+                    Err(e) => {
+                        last = e.to_string();
+                        self.emit(
+                            &session.id,
+                            EventKind::ReviewWarn,
+                            json!({
+                                "text": format!(
+                                    "第 {vote} 票第 {attempt} 次审批不合格：{last}"
+                                ),
+                                "model": model,
+                                "vote": vote,
+                                "attempts": attempts_total,
+                                "retry": attempt < 2,
+                            }),
+                        );
+                        // K2：把缺项/不合格原因明确回注，只让 judge 补这一票，
+                        // 而不是原样重发；每次都必须逐项返回全部描述型条目。
+                        let note = json!({
+                            "role": "user",
+                            "content": format!(
+                                "[审批结果不合格] {last}\n必须逐项返回全部验收项，id 一个都不能少：{}。每条 evidence 必须是答案中连续 ≥10 字原文。",
+                                expected_ids.join(", ")
+                            )
+                        });
+                        if let Some(arr) = messages.as_array_mut() {
+                            arr.push(note);
+                        }
+                    }
                 }
-                Err(e) => last = e.to_string(),
+            }
+            let Some(verdict) = got else {
+                return Err(format!("judge 第 {vote} 票连续 2 次未产出合规审批：{last}"));
+            };
+            vote_verdicts.push(verdict);
+            // 前两票逐项一致就收敛，省掉第三票。
+            if rg.judge.early_stop_on_agreement
+                && votes_wanted > 1
+                && vote_verdicts.len() == 2
+                && judge_items.iter().all(|item| {
+                    let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                    let pass_of = |v: &Value| {
+                        v.get("items")
+                            .and_then(|x| x.as_array())
+                            .and_then(|a| {
+                                a.iter()
+                                    .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id))
+                            })
+                            .and_then(|x| x.get("pass"))
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(false)
+                    };
+                    pass_of(&vote_verdicts[0]) == pass_of(&vote_verdicts[1])
+                })
+            {
+                break;
             }
         }
-        Err(format!("judge 连续 2 次未产出合规审批：{last}"))
+
+        // majority 聚合：任一票 fail 也把票投完，只有多数 pass 才算通过。
+        let mut items = Vec::new();
+        let mut failed = Vec::new();
+        for item in &judge_items {
+            let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let criterion = item.get("criterion").cloned().unwrap_or(json!(""));
+            let check = item.get("check").cloned().unwrap_or(json!(""));
+            let mut yes = 0usize;
+            let mut no = 0usize;
+            let mut evidence = String::new();
+            let mut fail_evidence = String::new();
+            for verdict in &vote_verdicts {
+                if let Some(vi) = verdict
+                    .get("items")
+                    .and_then(|x| x.as_array())
+                    .and_then(|a| {
+                        a.iter()
+                            .find(|x| x.get("id").and_then(|y| y.as_str()) == Some(id))
+                    })
+                {
+                    let pass = vi.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
+                    let ev = vi.get("evidence").and_then(|x| x.as_str()).unwrap_or("");
+                    if pass {
+                        yes += 1;
+                        if evidence.is_empty() {
+                            evidence = ev.to_string();
+                        }
+                    } else {
+                        no += 1;
+                        if !ev.is_empty() {
+                            fail_evidence = ev.to_string();
+                        }
+                    }
+                }
+            }
+            let pass = yes > no;
+            if pass {
+                if evidence.is_empty() {
+                    evidence = fail_evidence;
+                }
+            } else {
+                failed.push(json!(id));
+                evidence = fail_evidence;
+            }
+            items.push(json!({
+                "id": id,
+                "pass": pass,
+                "evidence": evidence,
+                "criterion": criterion,
+                "check": check,
+            }));
+        }
+        let pass = failed.is_empty();
+        let evidence = items
+            .iter()
+            .find(|x| x.get("pass").and_then(|y| y.as_bool()) == Some(false))
+            .and_then(|x| x.get("evidence"))
+            .and_then(|x| x.as_str())
+            .or_else(|| {
+                vote_verdicts
+                    .first()
+                    .and_then(|v| v.get("evidence"))
+                    .and_then(|x| x.as_str())
+            })
+            .unwrap_or("")
+            .to_string();
+        Ok(json!({
+            "pass": pass,
+            "items": items,
+            "failed": failed,
+            "evidence": evidence,
+            "model": model,
+            "attempts": attempts_total,
+            "votes": vote_verdicts.len(),
+            "source": "judge",
+            "routing": routing,
+        }))
     }
 
     fn run_model(
@@ -2606,6 +2863,26 @@ fn validate_config(cfg: &Config, plugins: &PluginHost) -> Result<(), String> {
         0.0,
         0.2,
     )?;
+    if !matches!(rg.judge.votes, 1 | 3) {
+        return Err(format!(
+            "review_gate.judge.votes={} 只允许 1 或 3（规避 2 票平局）",
+            rg.judge.votes
+        ));
+    }
+    if rg.judge.aggregation != "majority" {
+        return Err("review_gate.judge.aggregation 只支持 majority".into());
+    }
+    if !matches!(
+        rg.criteria_routing.as_str(),
+        "auto" | "hardcheck_only" | "judge_only"
+    ) {
+        return Err(
+            "review_gate.criteria_routing 只能是 auto / hardcheck_only / judge_only".into(),
+        );
+    }
+    if !matches!(rg.hardcheck.pattern_engine.as_str(), "glob" | "regex") {
+        return Err("review_gate.hardcheck.pattern_engine 只能是 glob 或 regex".into());
+    }
     if rg.on_exhausted != "return_last_with_flag" {
         return Err("review_gate.on_exhausted 只支持 return_last_with_flag".into());
     }
@@ -2661,6 +2938,16 @@ fn confirm_preview(_tool: &str, arguments: &Value) -> String {
         format!("{cut}…（已截断，共 {total} 字符，完整参数见 arguments 字段）")
     } else {
         out.trim_end().to_string()
+    }
+}
+
+/// 串行投票的温度：第一票用配置值，后续票小幅上调到 0.2 封顶。
+/// 温度只制造差异，不负责“放宽”；上限保持 0.2，避免 7B 输出格式崩坏。
+fn judge_vote_temperature(base: f64, vote: u32) -> f64 {
+    if vote <= 1 {
+        base
+    } else {
+        (base + 0.05 * f64::from(vote - 1)).min(0.2)
     }
 }
 

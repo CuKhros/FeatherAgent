@@ -517,7 +517,7 @@ fn review_gate_min_points_soft_falls_back_to_judge() {
             v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
                 && v.pointer("/params/payload/text")
                     .and_then(|x| x.as_str())
-                    .map(|t| t.contains("min_points 机器计数不足"))
+                    .map(|t| t.contains("min_points 机器计数不足") && t.contains("按软判据接受"))
                     .unwrap_or(false)
         }),
         "min_points 不足应留下 review.warn: {seen:?}"
@@ -532,6 +532,75 @@ fn review_gate_min_points_soft_falls_back_to_judge() {
             .and_then(|x| x.as_str()),
         Some("approved"),
         "judge 复核通过后应 approved: {finished:?}"
+    );
+}
+
+#[test]
+fn review_gate_routes_negative_criterion_to_hardcheck() {
+    let (_h, conn) = start("review-k1", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sk1"}))
+        .unwrap();
+    // c1 是 must_not_include，若被送进 judge，mock 会返回“答案中没有…”这种非原文 evidence，
+    // 必触发 degraded。正确路由下 judge 只看到描述型 c3，整轮应 approved。
+    let seen = send_and_wait(&conn, "sk1", "REVIEW_K1", Duration::from_secs(20));
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.finished"))
+        .expect("应有 review.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "负向判据应留在 hardcheck，不应拖垮 judge: {seen:?}"
+    );
+    assert!(!seen.iter().any(|v| v
+        .pointer("/params/payload/text")
+        .and_then(|x| x.as_str())
+        .map(|t| t.contains("evidence 不是答案原文"))
+        .unwrap_or(false)));
+}
+
+#[test]
+fn review_gate_missing_description_item_is_reinjected() {
+    let (_h, conn) = start("review-k2", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sk2"}))
+        .unwrap();
+    // mock judge 第一次漏掉 c4；内核应把“缺少验收项 c4”回注后补投，而不是整轮 degraded。
+    let seen = send_and_wait(
+        &conn,
+        "sk2",
+        "REVIEW_MISSING_FIRST",
+        Duration::from_secs(20),
+    );
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("缺少验收项"))
+                    .unwrap_or(false)
+        }),
+        "漏项应触发 review.warn 回注: {seen:?}"
+    );
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.finished"))
+        .expect("应有 review.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "补投后应 approved: {finished:?}"
     );
 }
 
@@ -1405,8 +1474,8 @@ fn plugin_settings_are_relayed_and_validated() {
     assert_eq!(entry["settings"]["root"], "review_gate");
     assert_eq!(
         entry["settings"]["fields"].as_array().unwrap().len(),
-        9,
-        "review-gate 声明 9 个字段"
+        14,
+        "review-gate 声明 14 个字段（新增路由/投票 5 项）"
     );
 
     // 2) plugin.settings 返回声明 + 当前值；内核不解释语义。
@@ -1447,6 +1516,41 @@ fn plugin_settings_are_relayed_and_validated() {
         .call("plugin.settings", json!({"name": "review-gate"}))
         .unwrap();
     assert_eq!(s2["values"]["max_rounds"], 3);
+
+    // 5b) rc.3.3 新字段：votes 只允许 1/3，路由枚举与正则引擎可按声明写入。
+    let err = conn
+        .client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.judge.votes", "value": 2}),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("judge.votes"), "{err}");
+    conn.client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.judge.votes", "value": 3}),
+        )
+        .unwrap();
+    conn.client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.criteria_routing", "value": "hardcheck_only"}),
+        )
+        .unwrap();
+    conn.client
+        .call(
+            "config.set",
+            json!({"path": "review_gate.hardcheck.pattern_engine", "value": "regex"}),
+        )
+        .unwrap();
+    let s3 = conn
+        .client
+        .call("plugin.settings", json!({"name": "review-gate"}))
+        .unwrap();
+    assert_eq!(s3["values"]["judge.votes"], 3);
+    assert_eq!(s3["values"]["criteria_routing"], "hardcheck_only");
+    assert_eq!(s3["values"]["hardcheck.pattern_engine"], "regex");
 
     // 6) 未声明的键不能借 plugin_settings 命名空间写入。
     let err = conn

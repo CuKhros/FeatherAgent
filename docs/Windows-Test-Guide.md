@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.2 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.3.3 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.3.2-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.3.3-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.3.2 fixes the rc.3.1 retest findings J1–J3: `min_points` is now a soft check handed to the judge (with a broader Chinese-aware point count and `review.warn`), review feedback no longer uses bare `c1:` ids that were copied into answers, and `bench --json` carries a `metrics.env` fingerprint. It also builds on v1.2.1-rc.3.1, which fixed the rc.3 real-hardware finding that a real 7B guide made every review `degraded`: the guide now gets a literal JSON schema, its validation error is reinjected into retries, and a description-only rubric falls back to judge-only evaluation with a `review.warn` event instead of degrading. Plugin settings gained a model dropdown fed by `provider.models` (manual entry still allowed), the TUI plugin page saves on Enter from any field, permission prompts show the full command on both front ends, and the product display is **FeatherAgent** (binaries and paths unchanged). v1.2.1-rc.3 made plugin settings a declaration: a plugin states its schema in `plugin.json`, the kernel relays it via `plugin.settings`, and the TUI and WebUI render it generically. It also fixes the rc.2.1 retest findings H1–H4: phrase-only rubrics (2–5 items, `must_include` ≤20 characters, at least one non-substring criterion), a hardcheck covering literal/banned/point-count/glob, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that require exactly one tool call. **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
+> Note: v1.2.1-rc.3.3 fixes the rc.3.2 retest findings K1–K4. K1: literal/negative/count/glob/regex criteria are settled by `review.hardcheck`; only description items reach the judge, and evidence-verbatim applies only there. K2: a judge that omits an item gets the full id list reinjected and retries inside the same vote instead of degrading the round. K3: `bench --json` adds warm P90 and sample count. K4: `metrics.env` adds a memory-load `reliability` note that annotates a busy host without turning a gate red. It builds on rc.3.2 (J1 soft `min_points`, J2 `〔1〕` labels, J3 `metrics.env`) and keeps the earlier fixes: plugin-declared settings rendered generically on both front ends, model dropdowns from `provider.models`, Enter-to-save on the TUI plugin page, full commands in permission prompts, and the display name **FeatherAgent** (binaries and paths unchanged). **Windows conclusions must come from your real-hardware retest**; Wine only verifies basic startup and does not prove named-pipe concurrency, ConPTY, proxy behavior, or real kill timing.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.2\
+D:\FeatherAgent-1.2.1-rc.3.3\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.3.2`, then continue.
+Wait for `serve ready: 1.2.1-rc.3.3`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.3.2
+cd D:\FeatherAgent-1.2.1-rc.3.3
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -130,7 +130,7 @@ Expected: bench conflict prints "kernel already running (pid N)" and `exit=2`, n
 
 R1 checks (kernel stopped, release build):
 
-- `metrics.boot_mode` is `warm_in_process_same_install_root`; `boot_samples_ms` has 5 numbers; `boot_warmup_discarded_ms` is present.
+- `metrics.boot_mode` is `warm_in_process_same_install_root`; `boot_samples_ms` has 5 numbers, `boot_sample_count` is 5, `boot_ms_p90` is present; `boot_warmup_discarded_ms` is present.
 - `gates.boot_lt_100ms` is true for **warm** startup.
 - `metrics.cold_spawn_ms_p50` is present and `gates.cold_spawn_lt_250ms` is true. Cold spawn is real `serve` process startup, not the in-process number.
 - Run bench 3 times; the warm result should stay under 100 ms without the 130–175 ms outliers from the old gate.
@@ -183,6 +183,16 @@ v1.2.1-rc.3.2 regression checks:
 3. **J3: bench fingerprint.** `featheragent.exe bench --json` must include `metrics.env` with `cpu_count`, `mem_total_kb`, `mem_available_kb`, `mem_load_pct` and `uptime_s`; the human-readable run must print one “环境指纹” line. Record it next to every bench number.
 4. **Display name.** `featheragent.exe version`, `featheragent-tui.exe version`, `featheragent-webui.exe version` must print `FeatherAgent …` (TUI/WebUI included), while binary names remain lowercase.
 
+v1.2.1-rc.3.3 regression checks:
+
+1. **K1: negative criterion stays in hardcheck.** Enable review-gate with a real 7B. Send a task whose rubric contains `must_not_include` (e.g. “no TODO/FIXME”) plus one description item. The round must not produce `evidence 不是答案原文`; the negative item must be settled by `review.hardcheck` and only the description item may appear in `review.verdict`.
+2. **K1: regex criterion.** A rubric item with `regex` and `min_matches` must be accepted by guide; an invalid regex must be rejected before the exec round. Set `hardcheck.pattern_engine=regex` and confirm a `pattern` item is interpreted as a regular expression.
+3. **K2: missing item reinjected.** Force a judge omission (e.g. a 4B judge or a three-item description rubric). `review.warn` must say `第 1 票第 1 次审批不合格：…缺少验收项…`, the retry must list every id, and a compliant retry must end `approved` rather than `degraded`.
+4. **Votes.** Set `judge.votes=3`, enable review-gate, and run three rounds. Approval must stay stable; the system must never run two model calls at once (watch the provider log timestamps). With `judge.early_stop_on_agreement=true`, two identical votes should skip the third.
+5. **K3: warm tail.** `bench --json` must include `boot_ms_p90` and `boot_sample_count=5`; the human-readable line must print P50/P90. The gate still uses P50.
+6. **K4: memory note.** `metrics.env` must include `mem_load_pct` and `reliability`. Under ≥85% memory load it must include the `note`; gates must not turn red because of it.
+7. **Settings coverage.** The review-gate page must show 14 fields; `judge.votes=2` must be rejected, while 1/3, `criteria_routing`, and `pattern_engine` must save and reload on both TUI and WebUI.
+
 v1.2.1 additional checks:
 
 1. Settings shows `provider-llamacpp`, `provider-ninfer`, `provider-lmstudio`, `provider-vllm`, and `provider-openai`; changing provider fills the corresponding default base URL unless a custom URL is already present.
@@ -196,13 +206,13 @@ v1.2.1 additional checks:
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.3 did not run Wine; neither did v1.2.1-rc.3.1 or v1.2.1-rc.3.2; passing Wine does not equal passing Windows.
+- v1.2.1-rc.3.3 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.3.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.3.3-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All five exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

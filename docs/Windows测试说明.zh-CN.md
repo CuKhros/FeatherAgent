@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.3.2 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.3.3 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.3.2-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.3.3-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.3.2 修 rc.3.1 复测的 J1–J3：`min_points` 改为软判据交 judge 复核（同时放宽中文要点计数并打 `review.warn`），review feedback 不再用会被抄进答案的裸 `c1:`，`bench --json` 增加 `metrics.env` 环境指纹。它也延续 v1.2.1-rc.3.1 的修复：rc.3 真机暴露的“真实 7B guide 全量 degraded”：guide 现在拿到明确的 JSON schema，校验错误会回注进重试，只有描述项的判据改为 judge-only 评估并打 `review.warn`，不再整轮降级。插件设置新增由 `provider.models` 填充的模型下拉（仍可手动输入），TUI 插件页任意字段 Enter 保存，两端权限申请显示完整命令，产品显示名统一为 **FeatherAgent**（二进制与路径不变）。rc.3 把插件设置改成声明式——插件在 `plugin.json` 里写清 schema，内核通过 `plugin.settings` 原样转述，TUI 与 WebUI 通用渲染，装新插件不用改前端。同时修掉 rc.2.1 复测的 H1–H4：判据为 2–5 条短语（`must_include` ≤20 字、至少一条非子串判据）、judge 前硬校验覆盖字面/禁词/要点数/glob、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”、S3 t5/t6 强制只调用一次工具。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
+> 说明：v1.2.1-rc.3.3 修 rc.3.2 复测的 K1–K4。K1：字面/禁词/计数/glob/正则判据交给 `review.hardcheck`，只有描述型判据进 judge，evidence 必须是答案原文的规则只作用于 judge。K2：judge 漏项时回注完整 id 清单并同票补投，不再整轮 degraded。K3：`bench --json` 增加热启动 P90 与样本数。K4：`metrics.env` 增加内存压力 `reliability` 注记，压力机只标注、不判红。它延续 rc.3.2 的 J1 软 `min_points`、J2 `〔1〕` 序号与 J3 环境指纹，并保留更早的修复：插件自述设置在两端通用渲染、`provider.models` 模型下拉、TUI 插件页 Enter 保存、权限弹窗完整命令、显示名 **FeatherAgent**（二进制与路径不变）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动，不证明命名管道并发、ConPTY、代理或真实杀掉时序。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.3.2\
+D:\FeatherAgent-1.2.1-rc.3.3\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,7 +20,7 @@ D:\FeatherAgent-1.2.1-rc.3.2\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.3.2` 后再操作。
+看到 `serve ready: 1.2.1-rc.3.3` 后再操作。
 
 ```powershell
 cd D:\FeatherAgent-1.2.1-rc.3.2
@@ -128,7 +128,7 @@ echo "bench exit=$LASTEXITCODE"
 
 R1 核对（内核停止、Release 包）：
 
-- `metrics.boot_mode` 为 `warm_in_process_same_install_root`；`boot_samples_ms` 有 5 个数；`boot_warmup_discarded_ms` 存在。
+- `metrics.boot_mode` 为 `warm_in_process_same_install_root`；`boot_samples_ms` 有 5 个数，`boot_sample_count` 为 5，`boot_ms_p90` 存在；`boot_warmup_discarded_ms` 存在。
 - `gates.boot_lt_100ms` 检查的是**热启动**。
 - `metrics.cold_spawn_ms_p50` 存在，`gates.cold_spawn_lt_250ms` 为 true；冷启动是真实 `serve` 进程，不是进程内数字。
 - 连续跑 3 次 bench，热启动应稳定低于 100 ms，不再出现旧的 130–175 ms 尖峰。
@@ -181,6 +181,16 @@ v1.2.1-rc.3.2 回归核对：
 3. **J3：bench 环境指纹。** `featheragent.exe bench --json` 必须含 `metrics.env`：`cpu_count`、`mem_total_kb`、`mem_available_kb`、`mem_load_pct`、`uptime_s`；人类可读输出要有“环境指纹”一行。每次记 bench 数字时一并记录该指纹。
 4. **显示名。** `featheragent.exe version`、`featheragent-tui.exe version`、`featheragent-webui.exe version` 都必须打印 `FeatherAgent …`（含 TUI/WebUI），二进制名仍保持小写。
 
+v1.2.1-rc.3.3 回归核对：
+
+1. **K1：负向判据留在 hardcheck。** 用真实 7B 开启 review-gate，发一条含 `must_not_include`（如禁 TODO/FIXME）加一条描述型的任务。回合不得出现“evidence 不是答案原文”；负向项必须由 `review.hardcheck` 结案，`review.verdict` 里只能出现描述型项。
+2. **K1：正则判据。** 带 `regex` 与 `min_matches` 的判据必须被 guide 接受；非法正则必须在 exec 轮之前被拒。把 `hardcheck.pattern_engine` 设为 `regex`，确认 `pattern` 项按正则解释。
+3. **K2：漏项回注。** 构造一次 judge 漏项（如 4B judge，或三条描述型判据）。`review.warn` 必须写明“第 1 票第 1 次审批不合格：…缺少验收项…”，补投消息要列全 id；补投合规后应为 `approved`，不是 `degraded`。
+4. **投票。** 设 `judge.votes=3` 开 review-gate 连跑三轮：通过率要稳定；provider 日志时间戳不得出现两个模型调用重叠。`judge.early_stop_on_agreement=true` 时，前两票逐项一致应跳过第三票。
+5. **K3：热启动尾部。** `bench --json` 必须含 `boot_ms_p90` 与 `boot_sample_count=5`；人类可读行要打印 P50/P90。门禁仍看 P50。
+6. **K4：内存注记。** `metrics.env` 必须含 `mem_load_pct` 与 `reliability`；整机内存 ≥85% 时必须带 `note`，且门禁不得因此转红。
+7. **设置覆盖。** review-gate 页必须显示 14 个字段；`judge.votes=2` 必须被拒，1/3、`criteria_routing`、`pattern_engine` 必须在 TUI 与 WebUI 都能保存并回读。
+
 v1.2.1 追加核对：
 
 1. 设置页应出现 `provider-llamacpp`、`provider-ninfer`、`provider-lmstudio`、`provider-vllm`、`provider-openai`；切换 provider 时，如果 Base URL 为空或仍是某个默认值，应自动填对应默认端口。
@@ -194,7 +204,7 @@ v1.2.1 追加核对：
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.3.1 与 v1.2.1-rc.3.2 均未跑 Wine；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.3.3 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验

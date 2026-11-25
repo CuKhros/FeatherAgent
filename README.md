@@ -66,7 +66,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.3.2 pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with five exes | **tested** (v1.1.9 real hardware; v1.2.1-rc.3.3 pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -114,7 +114,7 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.3.2-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.3.3-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
 .\featheragent.exe help                       # command table
@@ -126,7 +126,7 @@ Unzip `FeatherAgent-1.2.1-rc.3.2-windows-x64.zip` into a writable directory (not
 
 The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.3.2)
+## Platform gate differences (v1.2.1-rc.3.3)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
@@ -138,7 +138,7 @@ The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runt
 | Context assembly P95 | < 30 ms | < 30 ms | shared |
 | RPC P95 | < 1 ms | < 1 ms | shared |
 
-`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; Windows is not hard-coded as a failure.
+`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `boot_sample_count`, `boot_ms_p50`/`boot_ms_p90`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; `metrics.env` carries `mem_load_pct`, `reliability`, and a `note` when the host is above 85% memory. Windows is not hard-coded as a failure.
 
 ## Contributing and license
 
@@ -155,6 +155,7 @@ The five exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runt
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.3.3 Changes](docs/v1.2.1-rc.3.3-Changes.md)** — criterion routing (hard/negative/count/regex to hardcheck; only description items to judge), regex criteria, missing-item reinjection, serial majority voting, warm P90/sample count, memory-load reliability note ([中文](docs/v1.2.1-rc.3.3-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.2 Changes](docs/v1.2.1-rc.3.2-Changes.md)** — `min_points` soft fallback with `review.warn` + judge review, Chinese semicolon/bold-heading point counting, feedback labels `〔1〕` instead of bare `c1:` ids, bench `metrics.env` fingerprint ([中文](docs/v1.2.1-rc.3.2-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3.1 Changes](docs/v1.2.1-rc.3.1-Changes.md)** — guide schema + error reinjection + tolerant judge-only rubric with `review.warn`, model-name dropdowns from `provider.models`, Enter-saves-anywhere on the TUI plugin page, full command in permission prompts, display name **FeatherAgent** ([中文](docs/v1.2.1-rc.3.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.3 Changes](docs/v1.2.1-rc.3-Changes.md)** — plugin-declared settings (`manifest.settings` + `plugin.settings`), generic TUI/WebUI forms, phrase-only rubrics with four criterion kinds, answer-verbatim judge evidence, unknown-tool correction ([中文](docs/v1.2.1-rc.3-变更说明.zh-CN.md))
@@ -171,12 +172,14 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
-`v1.2.1-rc.3.2` fixes the three findings from the rc.3.1 real-hardware retest without touching the architecture: `min_points` is no longer a hard rejection but a soft item handed to the judge (with a broader Chinese-aware point count and a `review.warn`), review feedback uses `〔1〕` labels instead of the bare `c1:` prefixes the exec model copied into answers, and `bench --json` carries a `metrics.env` fingerprint so numbers can be compared across runs.
+`v1.2.1-rc.3.3` implements the routing and voting design from §10 of the rc.3.2 retest. Literal, negative, count, glob and regex criteria are settled by `review.hardcheck` with zero model calls; only description items reach the judge, so a passing negative criterion no longer has to invent “answer text” as evidence (K1). An incomplete judge verdict is reinjected with the full item-id list instead of degrading the round (K2). Optional 3-vote serial majority is available (`judge.votes`, early stop on agreement, peak model concurrency 1), and `bench` now reports warm P90/sample count plus a memory-load `reliability` note that annotates a loaded host without turning a gate red (K3/K4).
+
+`v1.2.1-rc.3.2` fixed the three findings from the rc.3.1 real-hardware retest without touching the architecture: `min_points` became a soft item handed to the judge (with a broader Chinese-aware point count and a `review.warn`), review feedback used `〔1〕` labels instead of the bare `c1:` prefixes the exec model copied into answers, and `bench --json` carried a `metrics.env` fingerprint so numbers can be compared across runs.
 
 `v1.2.1-rc.3.1` keeps the rc.3 architecture and fixes what the real-hardware retest found: the guide now gets a literal JSON schema plus a few-shot, its validation error is reinjected into retries instead of resending the same prompt, and a rubric with only descriptions is retried once and then evaluated judge-only with a `review.warn` event rather than degrading the whole round. Plugin settings gained `options_source`, so model fields show a real dropdown fed by the local model service while still accepting a typed name; the TUI plugin page saves on Enter from any field; permission prompts now show the full command/arguments on both front ends; and the product display is **FeatherAgent** (binaries and paths unchanged).
 
 `v1.2.1-rc.3` made plugin settings a declaration: a plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. It also closed the review-gate and S3 findings H1–H4 from the rc.2.1 retest: phrase-only rubrics with four criterion kinds and a pre-judge hardcheck, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that ask for a single tool call.
 
-Linux automation has **116 tests: 115 passed, 1 ignored by default** (62 lib, 16 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 27 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (the review-gate page opens with the model hint “本地模型 1 个；←/→ 选择”, and Enter on a value row persisted `max_rounds` 2→3 into `config.json`), and the WebUI bridge over WebSocket (`plugin.settings` returns the three model fields with `options_source:"models"`, and a `tool.shell` confirm request arrived with `arguments` + a `$ echo hi` preview that could be denied).
+Linux automation has **118 tests: 117 passed, 1 ignored by default** (62 lib, 17 plugin, 2 kernel, 3 TUI, 3 WebUI, 2 golden, 29 integration); the ignored network-dependent test passes when run separately. `fmt` and `clippy -D warnings` pass. Settings pages were verified on both front ends: TUI through a PTY (the review-gate page opens with the model hint “本地模型 1 个；←/→ 选择”, and Enter on a value row persisted `max_rounds` 2→3 into `config.json`), and the WebUI bridge over WebSocket (`plugin.settings` returns the three model fields with `options_source:"models"`, and a `tool.shell` confirm request arrived with `arguments` + a `$ echo hi` preview that could be denied).
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus the rc.2 retest that verified the provider body, temperature rejection, banner, R1 gates, and review-gate mechanism. The v1.2.1-rc.3.2 Windows package is cross-compiled and its automation runs only on Linux; the rc.3.1 retest confirmed that the review gate now rejects as well as approves (1/3 approved, 2/3 unapproved; guide `attempts:1`; answer-verbatim evidence), and that run also exposed J1/J2/J3, which this candidate fixes. J1/J2/J3 plus the previous model dropdowns, Enter-to-save and permission popup still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, plus retests through rc.3.2 that verified the provider body, temperature rejection, banner, R1 gates, and review-gate mechanism. The rc.3.2 retest re-verified J1–J3 (soft `min_points` with `review.warn`, no `cN` leakage, `metrics.env` explaining the 87–90% memory slowdown) but still approved only 1/3, exposing K1/K2; this candidate fixes those. The v1.2.1-rc.3.3 Windows package is cross-compiled and its automation runs only on Linux. K1–K4 plus the previous model dropdowns, Enter-to-save, permission popup and S3 t6 single call still need a real-hardware retest. Wine is only a startup smoke test; boot/RSS numbers under Wine are not Windows conclusions.

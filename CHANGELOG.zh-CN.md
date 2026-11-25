@@ -1,6 +1,23 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.2` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.3.3` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.3.3] - 2026-11-25
+
+### 修复
+- K1：判据先分流。`must_include` / `must_not_include` / `min_points` / `pattern` / `regex` 交给 `review.hardcheck`；只有描述型判据进入 `review.judge`，负向判据通过时不再需要“答案原文”这种不可能存在的证据。
+- K2：judge 审批缺项时，把完整验收项 id 清单回注并在同一票内补投；漏一项不再整轮 degraded。
+- K3：`bench --json` 增加 `boot_ms_p90` 与 `boot_sample_count`；门禁仍看中位，但尾部可见。
+- K4：`metrics.env` 在 Linux 也输出 `mem_load_pct`，并增加 `reliability`；内存 ≥85% 时附 `note`，门禁不转红，只标注读数可信度。
+
+### 新增
+- 判据键 `regex` + `min_matches`（1–50，正则最长 200 字符），guide 阶段即编译校验。
+- `hardcheck.pattern_engine`（默认 `glob` / `regex`）、`criteria_routing`（默认 `auto` / `hardcheck_only` / `judge_only`）。
+- 串行 `judge.votes`（1 或 3）、`majority` 聚合、`early_stop_on_agreement`；温度 base / +0.05 / +0.10 封顶 0.2；峰值模型并发仍为 1。
+
+### 变更
+- `plugins/review-gate/plugin.json` 声明 14 个设置字段（原 9 个），TUI 与 WebUI 通用渲染。
+- `min_points` 的 `review.warn` 文本改为“按软判据接受…”，`hardcheck_only` 会提示有多少条描述型判据未评估。
 
 ## [1.2.1-rc.3.2] - 2026-11-24
 

@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "review-gate",
-    "version": "1.2.1-rc.3.2",
+    "version": "1.2.1-rc.3.3",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "loop.review-gate",
@@ -88,6 +88,56 @@
           "min": 0.0,
           "max": 0.2,
           "step": 0.05
+        },
+        {
+          "key": "criteria_routing",
+          "label": "判据分流",
+          "type": "enum",
+          "default": "auto",
+          "options": [
+            "auto",
+            "hardcheck_only",
+            "judge_only"
+          ],
+          "description": "auto：字面/禁词/计数/正则判据由 hardcheck 判定，只有描述型判据交 judge；hardcheck_only：完全不用模型 judge；judge_only：旧行为，全部交 judge（调试用）。"
+        },
+        {
+          "key": "hardcheck.pattern_engine",
+          "label": "pattern 引擎",
+          "type": "enum",
+          "default": "glob",
+          "options": [
+            "glob",
+            "regex"
+          ],
+          "description": "glob 兼容旧判据；regex 把 pattern 按正则解释。独立的 regex 判据始终按正则执行。"
+        },
+        {
+          "key": "judge.votes",
+          "label": "Judge 票数",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 3,
+          "step": 2,
+          "description": "1 或 3。大于 1 时串行投票，按 majority 聚合；峰值模型并发仍为 1。"
+        },
+        {
+          "key": "judge.aggregation",
+          "label": "票数聚合",
+          "type": "enum",
+          "default": "majority",
+          "options": [
+            "majority"
+          ],
+          "description": "只支持 majority（禁止 all/AND）；多数票通过才算通过。"
+        },
+        {
+          "key": "judge.early_stop_on_agreement",
+          "label": "两票一致即收敛",
+          "type": "bool",
+          "default": true,
+          "description": "开启时前两票逐项一致就跳过第三票，节省调用。"
         },
         {
           "key": "on_exhausted",
