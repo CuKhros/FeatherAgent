@@ -46,7 +46,15 @@ pub fn extract(text: &str) -> Vec<ToolCall> {
         }
     }
 
-    // 4) 正则回退：`name` + `arguments` 手工抽取
+    // 4) 纯文本工具调用：小模型常把调用写成正文
+    // `tool_call tool.fs.write {"path":"..."}`，没有 name/arguments 包装。
+    if out.is_empty() {
+        if let Some(c) = plain_tool_line(text) {
+            out.push(c);
+        }
+    }
+
+    // 5) 正则回退：`name` + `arguments` 手工抽取
     if out.is_empty() {
         if let Some(c) = regex_fallback(text) {
             out.push(c);
@@ -307,6 +315,50 @@ fn quote_bare_keys(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// N11：解析 `tool_call <name> <json>` / `tool_call: <name> <json>` 这类纯文本调用；
+/// 它没有 `"name"`/`"arguments"` 包装，正则回退看不到，容易被当成最终答案。
+fn plain_tool_line(text: &str) -> Option<ToolCall> {
+    let mut rest = text;
+    while let Some(pos) = rest.find("tool_call") {
+        let mut after = &rest[pos + "tool_call".len()..];
+        after = after.trim_start();
+        after = after.strip_prefix(':').unwrap_or(after).trim_start();
+        let name_end = after.find(char::is_whitespace)?;
+        let name = after[..name_end].trim();
+        let args = after[name_end..].trim_start();
+        if name.is_empty() || !args.starts_with('{') {
+            rest = after;
+            continue;
+        }
+        let end = balanced_end(args, 0)?;
+        let raw = &args[..end];
+        let value = serde_json::from_str::<Value>(raw)
+            .or_else(|_| serde_json::from_str::<Value>(&repair(raw)))
+            .ok();
+        if let Some(value) = value {
+            return Some(ToolCall {
+                name: alias_name(name, &value),
+                arguments: value,
+            });
+        }
+        rest = after;
+    }
+    None
+}
+
+fn alias_name(name: &str, args: &Value) -> String {
+    match name.trim() {
+        "tool_fs_read" => "tool.fs.read".into(),
+        "tool_fs_write" => "tool.fs.write".into(),
+        "tool_fs_list" => "tool.fs.list".into(),
+        "tool_shell" => "tool.shell".into(),
+        // 保留裸 `tool.fs` 作为未知工具，交给既有纠错提示；只有带 content 时才明确是写。
+        "tool.fs" | "tool_fs" if args.get("content").is_some() => "tool.fs.write".into(),
+        "tool_fs" => "tool.fs.read".into(),
+        other => other.to_string(),
+    }
+}
+
 fn regex_fallback(text: &str) -> Option<ToolCall> {
     let name = find_string_after(text, "\"name\"")?;
     if name.is_empty() {
@@ -352,11 +404,15 @@ fn find_string_after(text: &str, key: &str) -> Option<String> {
 fn dedup(calls: Vec<ToolCall>) -> Vec<ToolCall> {
     let mut out: Vec<ToolCall> = Vec::new();
     for c in calls {
+        let name = alias_name(&c.name, &c.arguments);
         if !out
             .iter()
-            .any(|x| x.name == c.name && x.arguments == c.arguments)
+            .any(|x| x.name == name && x.arguments == c.arguments)
         {
-            out.push(c);
+            out.push(ToolCall {
+                name,
+                arguments: c.arguments,
+            });
         }
     }
     out
@@ -428,6 +484,24 @@ mod tests {
     fn garbage_returns_empty() {
         assert!(extract("我今天不想调用工具，只想聊聊。").is_empty());
         assert!(extract("{\"name\": \"tool.fs.read\", \"arguments\": {").is_empty());
+    }
+
+    #[test]
+    fn plain_text_tool_call_line_is_extracted() {
+        let text = "tool_call tool.fs.write {\"path\":\"workspace/notes.txt\",\"content\":\"- a\"}";
+        let c = extract(text);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].name, "tool.fs.write");
+        assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
+    }
+
+    #[test]
+    fn plain_text_tool_call_aliases_are_normalized() {
+        let text = "调用：\ntool_call: tool_fs_read {\"path\":\"workspace/notes.txt\"}";
+        let c = extract(text);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].name, "tool.fs.read");
+        assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.4** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.4.1** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.1","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -349,6 +349,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 A local file inside the install root returns `copied:false` and its canonical path; an outside file is copied to the default workspace. Browser bytes always land in the default workspace. The model receives only `result.path`, never the browser path or the outside source.
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.4.1: no new frame, endpoint, event kind, or error code. Tool results for `web.search|news|fetch` add `audit_artifact` beside `artifact` / `artifact_kind` (the audit file lives under `<data>/web-artifacts/<session>/`); `review.guide` adds `final_artifact` pointing at `<data>/review-artifacts/<session>/<ms>-rubric-final.json`. `review.guide` keeps `artifact` for the accepted attempt. Plain-text `tool_call <name> {...}` in a model answer is a compatibility fallback inside the context parser, not a wire change; standard providers should still send structured `tool_calls`. All additive.
 - 1.2.1-rc.4: `file.attach` / `file.prepare` are additive methods on the same HTTP RPC `/rpc` endpoint used by WebUI; request `{path}` or `{name,data_base64}`, response `{path,copied,source,name,bytes}`. Errors use `-32602` with `attachment_not_found|attachment_not_file|attachment_empty|attachment_too_large|attachment_write_failed|attachment_copy_failed|attachment_invalid_base64`. No new frame, endpoint, or event kind. Tool results for `web.search|news|fetch` may add `artifact` / `artifact_kind`; bench JSON adds `boot_gate_raw`, `boot_gate_trusted`, `boot_gate_status`, and `reliability`; `tool.call` adds `attempt` and `call_index`. `must_include` adds `match` / `min_matches`. All additive; prompt text and plugin internals only otherwise.
 - 1.2.1-rc.3.6: no new wire message, frame, endpoint, or error code. Bench JSON adds `boot_percentiles_consistent` (P50 ≤ P90 from the same sorted samples) and `gates.metrics_consistent`; both are additive. `review.warn` may now report a fixture item dropped because its `must_not_include` contained `REVIEW-FINAL` / `REVIEW-START` / `<...>` / `__FILL` / `{{` / `}}`. `must_include` is interpreted as whitespace/punctuation-separated terms during hardcheck; prompt text changed, not the wire contract. The English `-en` binaries use the same protocol.
 - 1.2.1-rc.3.5: no new wire message, frame, endpoint, or error code. `review.parse_rubric` adds `advisory` (ids of subjective items excluded from hardcheck and judge); `review.warn` may report dropped placeholder/example items (`已丢弃占位符/示例判据 …`) and subjective downgrades. `must_include` accepts a string array and hardcheck requires every phrase. A rubric with no executable criterion after retries now fails `review_prepare` instead of proceeding. `GUIDE_SYSTEM` placeholder tokens changed to `__FILL_*__`; this affects prompt text only, not the wire contract.

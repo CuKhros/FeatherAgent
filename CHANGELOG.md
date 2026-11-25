@@ -1,6 +1,17 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.1` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.1] - 2026-11-25
+
+### Fixed
+- N10: path/file `must_include` values use a 64-character limit (`PATH_MUST_INCLUDE_MAX_CHARS`) while ordinary terms keep 12; `workspace/notes.txt` is accepted, an overlong path is rejected with a `pattern/regex` suggestion.
+- N11: plain-text `tool_call <name> <json>` output is recovered by the context parser; `tool_fs_read`/`tool_fs_write`/`tool_fs_list`/`tool_shell` aliases normalize to standard names, and review feedback carries a tool-format guard.
+- N12: search/news/fetch results are also written to `data/web-artifacts/<session>/` as `audit_artifact`; workspace `artifact` remains.
+- N13: an accepted rubric is written to `data/review-artifacts/<session>/<ms>-rubric-final.json` with the normalized `match`/`min_matches`; `review.guide` gains `final_artifact`.
+
+### Changed
+- Documentation records N14: multi-task long flows need a ≥7B exec model and repeated sampling; 4B results are observational, not a regression gate.
 
 ## [1.2.1-rc.4] - 2026-11-25
 

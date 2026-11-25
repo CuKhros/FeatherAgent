@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4.1 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.4-windows-x64.zip`
+> 被测包：`FeatherAgent-1.2.1-rc.4.1-windows-x64.zip`
 > 基线：v1.1.9 真机复测报告（Q1/Q2）
-> 说明：v1.2.1-rc.4 修复 rc.3.6 复测的 N5–N9，并加入文件附件与搜索落盘。N5：`must_include` 支持 `match:any|all|min`；多术语默认 `min`（至少 ceil(n/2) 项），协议类硬约束显式 `all`。N6：主观判据不能用 `must_not_include`；禁词已出现在用户输入中也会判 guide 不合格；N4 的 fixture 整条丢弃继续覆盖。N7：bench 每次唯一临时目录；失败返回带路径的 `artifact_missing`/`bench_failed` JSON。N8：同一回复内相同工具调用去重；`tool.call` 带 `attempt`/`call_index`。N9：`reliability` 非 `high` 时启动门禁标为 `advisory`，保留 `boot_gate_status` 与 `boot_gate_raw`。WebUI/TUI 附件在安装目录外时复制到 `workspace/default/uploads/`；search/news/fetch 结果写入 `workspace/<项目>/.featheagent/search/`。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
+> 说明：v1.2.1-rc.4.1 修复 rc.4 复测的 N10–N13，并记录 N14。N10：路径/文件型 `must_include` 用 64 字上限（`workspace/notes.txt` 可通过），普通术语仍为 12 字。N11：正文里的 `tool_call <name> {...}` 会被兜底执行，`tool_fs_write` 等别名归一化为 `tool.fs.write`，review feedback 增加工具格式守卫。N12：search/news/fetch 结果同时写入项目工作区与 `data/web-artifacts/<session>/`（`audit_artifact`）。N13：被接受的 rubric 落为 `data/review-artifacts/<session>/*-rubric-final.json`（`final_artifact`）。N14：多任务长流程需 ≥7B exec 模型并多次取样。rc.4 的 N5–N9、附件与工作区搜索落盘继续保留。N5：`must_include` 支持 `match:any|all|min`；多术语默认 `min`（至少 ceil(n/2) 项），协议类硬约束显式 `all`。N6：主观判据不能用 `must_not_include`；禁词已出现在用户输入中也会判 guide 不合格；N4 的 fixture 整条丢弃继续覆盖。N7：bench 每次唯一临时目录；失败返回带路径的 `artifact_missing`/`bench_failed` JSON。N8：同一回复内相同工具调用去重；`tool.call` 带 `attempt`/`call_index`。N9：`reliability` 非 `high` 时启动门禁标为 `advisory`，保留 `boot_gate_status` 与 `boot_gate_raw`。WebUI/TUI 附件在安装目录外时复制到 `workspace/default/uploads/`；search/news/fetch 结果写入 `workspace/<项目>/.featheagent/search/`。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4\
+D:\FeatherAgent-1.2.1-rc.4.1\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.4\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.4` 后再操作。
+看到 `serve ready: 1.2.1-rc.4.1` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4
+cd D:\FeatherAgent-1.2.1-rc.4.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,14 @@ v1.2.1-rc.4 回归核对：
 7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
 8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
 
+v1.2.1-rc.4.1 回归核对：
+
+1. **N10：路径判据。** 跑 rc.4 原始写文件任务（要求写入 `workspace/notes.txt`）。guide 必须接受 `must_include:["workspace/notes.txt"]`（64 字路径上限），exec 正常执行，回合能进入 `review.hardcheck`/judge，而不是三次 guide 失败。构造一个超过 64 字的路径，必须按 64 字拒绝并提示 `pattern/regex`。
+2. **N11：纯文本兜底。** review-gate 开启、exec 用 4B，让它写文件。若 answer 里出现 `tool_call tool.fs.write {...}`，必须按 `tool.fs.write` 执行，而不是当最终答案返回；`tool_fs_read` / `tool_fs_write` / `tool_shell` 别名必须归一化。feedback 文本必须带工具格式守卫。这是兜底而非保证；仍无法识别的工具名要如实记录。
+3. **N12：审计产物。** 跑 `web.search` / `web.news` / `web.fetch` 后，同时检查 `workspace\<项目>\.featheagent\search\` 与 `data\web-artifacts\<session>\`。工具结果必须带 `artifact` 与 `audit_artifact`，两份文件都应是合法 JSON 且含 `untrusted:true`。把 `data/` 设为只读时必须出现 `persist_error`，搜索本身不得失败。
+4. **N13：最终 rubric。** guide 成功后，`data\review-artifacts\<session>\` 必须有 `*-rubric-final.json`，含 `role:"rubric-final"` 与规范化后的 `match`/`min_matches`；`review.guide.final_artifact` 指向它。若 guide 全部失败，则不应有 `rubric-final`，但保留 `guide-aN`。
+5. **N14：模型边界。** 同一多任务提示用 4B 跑两次、≥7B 跑两次，记录每次得分、调用数与耗时；单次 4B 漂移不得当作内核回归门禁。
+
 v1.2.1-rc.3.5 回归核对：
 
 1. **L1：guide 写任务判据，不抄 schema。** 用真实 7B，输入普通任务 `用三句话说明什么是操作系统`（不含 `REVIEW_*` 令牌）。`review.guide` 必须成功；rubric 不得出现 `这项检查什么`、`怎么核对`、`REVIEW-FINAL` 或字面 `<...>`。回合不得每次都挂在 `c1`。
@@ -233,15 +241,16 @@ v1.2.1 追加核对：
 ## 7. 已知边界
 
 - N2 只是增加 `[init]` 进度，**没有消除**首次杀毒扫描耗时。
+- N14：4B 在多任务长流程上会漂移；建议用 ≥7B exec，并对基线多次取样。单次 4B 结果只作观测。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- v1.2.1-rc.4 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
+- v1.2.1-rc.4.1 未跑 Wine（rc.3、rc.3.1、rc.3.2 也未跑）；Wine 通过也不等于 Windows 通过。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.1-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

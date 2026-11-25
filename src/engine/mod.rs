@@ -2065,6 +2065,24 @@ impl Kernel {
                         continue;
                     }
                     if count > 0 {
+                        // N13：guide 失败时不会进 judge；把最终采用的 rubric 单独落盘，
+                        // 这样“这一轮到底被哪几条判据卡住”不必按 attempt 手工挑。
+                        let final_artifact = self.persist_review_artifact(
+                            &session.id,
+                            "rubric-final",
+                            &json!({
+                                "role": "rubric-final",
+                                "session": session.id,
+                                "model": model,
+                                "temperature": rg.guide.temperature,
+                                "attempt": attempt,
+                                "at_unix_ms": now_ms(),
+                                "input": input,
+                                "rubric": rubric.clone(),
+                                "hard_items": hard_items,
+                                "judge_only": parsed.get("judge_only").cloned().unwrap_or(json!([])),
+                            }),
+                        );
                         self.emit(
                             &session.id,
                             EventKind::ReviewGuide,
@@ -2075,6 +2093,7 @@ impl Kernel {
                                 "tokens_approx": raw.chars().count() / 4,
                                 "attempts": attempt,
                                 "artifact": artifact.clone().unwrap_or_default(),
+                                "final_artifact": final_artifact.unwrap_or_default(),
                             }),
                         );
                         // 宽容降级：只有描述、没有硬判据的条目交给 judge，但要明说，
@@ -2692,7 +2711,8 @@ impl Kernel {
     }
 
     /// 网络结果落盘：把 search/news/fetch 的完整 JSON 写进当前项目工作区的
-    /// `.featheagent/search/`，并在工具结果里回传 artifact 路径；写失败不影响搜索。
+    /// `.featheagent/search/` 与 `data/web-artifacts/<session>/`，并在工具结果里
+    /// 回传 artifact/audit_artifact 路径；写失败不影响搜索。
     fn persist_web_result(
         &self,
         session: &Arc<Session>,
@@ -2701,17 +2721,32 @@ impl Kernel {
         mut value: Value,
     ) -> Value {
         let ws = PathBuf::from(session_workspace(self, session));
-        match save_web_artifact(&ws, name, args, &value) {
-            Ok(path) => {
-                if let Some(o) = value.as_object_mut() {
+        let workspace_path = save_web_artifact(&ws, name, args, &value);
+        // N12：除工作区镜像外，再写一份内核数据目录的审计副本；
+        // 这样 `data/web-artifacts/<session>/` 可直接检查，不必解码 msgpack 会话日志。
+        let audit_dir = self
+            .paths
+            .data
+            .join("web-artifacts")
+            .join(sanitize_artifact_name(&session.id));
+        let audit_path = save_web_artifact_at(&audit_dir, name, args, &value);
+        let mut errors = Vec::new();
+        if let Some(o) = value.as_object_mut() {
+            match workspace_path {
+                Ok(path) => {
                     o.insert("artifact".into(), json!(path.display().to_string()));
                     o.insert("artifact_kind".into(), json!(name));
                 }
+                Err(e) => errors.push(e),
             }
-            Err(e) => {
-                if let Some(o) = value.as_object_mut() {
-                    o.insert("persist_error".into(), json!(e));
+            match audit_path {
+                Ok(path) => {
+                    o.insert("audit_artifact".into(), json!(path.display().to_string()));
                 }
+                Err(e) => errors.push(e),
+            }
+            if !errors.is_empty() {
+                o.insert("persist_error".into(), json!(errors.join("; ")));
             }
         }
         value
@@ -2916,8 +2951,22 @@ pub fn save_web_artifact(
     args: &Value,
     value: &Value,
 ) -> Result<PathBuf, String> {
-    let dir = workspace.join(".featheagent").join("search");
-    std::fs::create_dir_all(&dir)
+    save_web_artifact_at(
+        &workspace.join(".featheagent").join("search"),
+        name,
+        args,
+        value,
+    )
+}
+
+/// 把搜索 JSON 写到指定目录；工作区镜像与 `data/web-artifacts` 审计副本共用。
+pub fn save_web_artifact_at(
+    dir: &Path,
+    name: &str,
+    args: &Value,
+    value: &Value,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir)
         .map_err(|e| format!("search artifact mkdir failed: {} ({e})", dir.display()))?;
     let stamp = format!(
         "{}-{}",

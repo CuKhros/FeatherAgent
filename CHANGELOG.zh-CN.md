@@ -1,6 +1,17 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.1` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.1] - 2026-11-25
+
+### 修复
+- N10：路径/文件型 `must_include` 使用 64 字上限（`PATH_MUST_INCLUDE_MAX_CHARS`），普通术语仍为 12 字；`workspace/notes.txt` 通过，超长路径按 64 字拒绝并提示改用 `pattern/regex`。
+- N11：上下文解析器兜底识别正文里的 `tool_call <name> <json>`；`tool_fs_read`/`tool_fs_write`/`tool_fs_list`/`tool_shell` 归一化为标准工具名，review feedback 增加工具格式守卫。
+- N12：search/news/fetch 结果除工作区 `artifact` 外，再写 `data/web-artifacts/<session>/` 审计副本，工具结果带 `audit_artifact`。
+- N13：被接受的 rubric 落为 `data/review-artifacts/<session>/<ms>-rubric-final.json`，含规范化后的 `match`/`min_matches`；`review.guide` 新增 `final_artifact`。
+
+### 变更
+- 文档记录 N14：多任务长流程需 ≥7B exec 模型并多次取样；4B 结果只作观测，不作为回归门禁。
 
 ## [1.2.1-rc.4] - 2026-11-25
 

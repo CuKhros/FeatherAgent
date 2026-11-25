@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.1 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4-windows-x64.zip`
+> Package under test: `FeatherAgent-1.2.1-rc.4.1-windows-x64.zip`
 > Baseline: v1.1.9 real-hardware retest report (Q1/Q2)
-> Note: v1.2.1-rc.4 fixes the rc.3.6 retest findings N5–N9 and adds file attachments plus search-result artifacts. N5: `must_include` supports `match:any|all|min`; multi-term items default to `min` with `ceil(n/2)` matches, and `all` is explicit for protocol constraints. N6: subjective criteria cannot use `must_not_include`, and a banned word already present in the user input rejects the guide; N4's fixture-item drop remains covered. N7: bench uses a unique temp directory per run, and errors return `artifact_missing`/`bench_failed` JSON with the path. N8: identical tool calls in one reply are de-duplicated; `tool.call` carries `attempt`/`call_index`. N9: when `reliability` is not `high`, the boot gate is `advisory` with `boot_gate_status` and `boot_gate_raw`. WebUI/TUI attachments are copied to `workspace/default/uploads/` when outside the install root; search/news/fetch results are written under `workspace/<project>/.featheagent/search/`. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
+> Note: v1.2.1-rc.4.1 fixes the rc.4 retest findings N10–N13 and records N14. N10: path/file `must_include` values use 64 characters (`workspace/notes.txt` passes) while ordinary terms keep 12. N11: plain-text `tool_call <name> {...}` is recovered and aliases such as `tool_fs_write` normalize to `tool.fs.write`; review feedback adds a tool-format guard. N12: search/news/fetch results are written both to the project workspace and to `data/web-artifacts/<session>/` (`audit_artifact`). N13: an accepted rubric is recorded as `data/review-artifacts/<session>/*-rubric-final.json` (`final_artifact`). N14: multi-task long flows need a ≥7B exec model and repeated sampling. rc.4's N5–N9 fixes, attachments and workspace search artifacts remain. N5: `must_include` supports `match:any|all|min`; multi-term items default to `min` with `ceil(n/2)` matches, and `all` is explicit for protocol constraints. N6: subjective criteria cannot use `must_not_include`, and a banned word already present in the user input rejects the guide; N4's fixture-item drop remains covered. N7: bench uses a unique temp directory per run, and errors return `artifact_missing`/`bench_failed` JSON with the path. N8: identical tool calls in one reply are de-duplicated; `tool.call` carries `attempt`/`call_index`. N9: when `reliability` is not `high`, the boot gate is `advisory` with `boot_gate_status` and `boot_gate_raw`. WebUI/TUI attachments are copied to `workspace/default/uploads/` when outside the install root; search/news/fetch results are written under `workspace/<project>/.featheagent/search/`. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4\
+D:\FeatherAgent-1.2.1-rc.4.1\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.1`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4
+cd D:\FeatherAgent-1.2.1-rc.4.1
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,14 @@ v1.2.1-rc.4 regression checks:
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
 
+v1.2.1-rc.4.1 regression checks:
+
+1. **N10: path `must_include`.** Run the rc.4 write task that asks for `workspace/notes.txt`. The guide must accept `must_include:["workspace/notes.txt"]` (64-character path limit), the exec must run, and the round must reach `review.hardcheck`/judge instead of three guide failures. An intentionally overlong path (>64 characters) must be rejected with the `pattern/regex` hint.
+2. **N11: plain-text fallback.** With review-gate on and a 4B exec, ask it to write a file. If it emits `tool_call tool.fs.write {...}` in the answer, the call must be executed as `tool.fs.write` rather than shown as final prose; `tool_fs_read` / `tool_fs_write` / `tool_shell` aliases must normalize. Feedback text must include the tool-format guard. This is a recovery path, not a guarantee; record any still-unrecognized name as a finding.
+3. **N12: audit artifact.** After `web.search` / `web.news` / `web.fetch`, check both `workspace\<project>\.featheagent\search\` and `data\web-artifacts\<session>\`. The tool result must carry `artifact` and `audit_artifact`; both files must be valid JSON with `untrusted:true`. A deliberately read-only `data/` must produce `persist_error`, not fail the search.
+4. **N13: final rubric.** After a guide succeeds, `data\review-artifacts\<session>\` must contain a `*-rubric-final.json` with `role:"rubric-final"` and normalized `match`/`min_matches`; `review.guide.final_artifact` must point at it. If all guide attempts fail, `rubric-final` must be absent while `guide-aN` files remain.
+5. **N14: model boundary.** Run the multi-task prompt with a 4B model twice and a ≥7B model twice. Record per-run scores, call counts and wall time; do not treat a single 4B drift run as a kernel regression gate.
+
 v1.2.1-rc.3.5 regression checks:
 
 **M1/M3/M4 first:**
@@ -242,15 +250,16 @@ v1.2.1 additional checks:
 ## 7. Known boundaries
 
 - N2 adds `[init]` progress but **does not remove** the first-run antivirus scan time.
+- N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- v1.2.1-rc.4 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
+- v1.2.1-rc.4.1 did not run Wine (rc.3, rc.3.1 and rc.3.2 did not either); passing Wine does not equal passing Windows.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.1-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

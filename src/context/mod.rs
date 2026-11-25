@@ -470,7 +470,12 @@ fn events_to_messages(events: &[Event]) -> Vec<Message> {
                     .get("text")
                     .and_then(|x| x.as_str())
                     .unwrap_or("请修正上一版答案未通过的验收项。");
-                out.push(Message::new("system", format!("[review_feedback]\n{text}")));
+                out.push(Message::new(
+                    "system",
+                    format!(
+                        "[review_feedback]\n{text}\n\n[tool_format] 需要调用工具时，只通过 API 的 tool_calls 返回；不要把 `tool_call`、工具名和参数写进最终答案正文。"
+                    ),
+                ));
             }
             EventKind::ToolCall => {
                 let name = e

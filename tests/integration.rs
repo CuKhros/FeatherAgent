@@ -420,7 +420,7 @@ fn ollama_native_chat_without_key_still_sends_body() {
 
 #[test]
 fn review_gate_drops_placeholder_meta_item_and_approves() {
-    let (_h, conn) = start("review-m1", |cfg| {
+    let (h, conn) = start("review-m1", |cfg| {
         cfg.review_gate.enabled = true;
         cfg.review_gate.max_rounds = 1;
     });
@@ -456,6 +456,30 @@ fn review_gate_drops_placeholder_meta_item_and_approves() {
         }),
         "应留下丢弃占位符判据的 warn: {seen:?}"
     );
+    let guide = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("review.guide"))
+        .expect("缺少 review.guide");
+    let final_artifact = guide
+        .pointer("/params/payload/final_artifact")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    assert!(
+        final_artifact.ends_with("-rubric-final.json"),
+        "{final_artifact}"
+    );
+    let path = Path::new(final_artifact);
+    assert!(path.is_file(), "{path:?}");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(v["role"], "rubric-final");
+    assert!(v["rubric"].is_array(), "{v}");
+    assert_eq!(v["session"], "sm1");
+    assert!(h
+        .root
+        .join("data")
+        .join("review-artifacts")
+        .join("sm1")
+        .is_dir());
 }
 
 #[test]
@@ -1540,6 +1564,25 @@ fn web_search_artifact_is_persisted_under_project_workspace() {
     assert_eq!(v["tool"], "web.search");
     assert_eq!(v["untrusted"], true);
     assert_eq!(v["result"]["results"][0]["title"], "Rust");
+}
+
+#[test]
+fn web_search_artifact_audit_copy_is_written() {
+    let d = tempfile::tempdir().unwrap();
+    let path = featheragent::engine::save_web_artifact_at(
+        &d.path().join("data").join("web-artifacts").join("s1"),
+        "web.search",
+        &json!({"query":"rust"}),
+        &json!({"results":[{"title":"Rust"}]}),
+    )
+    .unwrap();
+    assert!(
+        path.starts_with(d.path().join("data").join("web-artifacts").join("s1")),
+        "{path:?}"
+    );
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(v["tool"], "web.search");
+    assert_eq!(v["untrusted"], true);
 }
 
 #[test]

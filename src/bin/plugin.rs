@@ -1295,6 +1295,28 @@ const RUBRIC_MIN_ITEMS: usize = 1;
 const RUBRIC_MAX_ITEMS: usize = 5;
 /// 单条字面判据上限：超过就是“把答案写进判据”。
 const MUST_INCLUDE_MAX_CHARS: usize = 12;
+const PATH_MUST_INCLUDE_MAX_CHARS: usize = 64;
+
+/// N10：路径/文件名（含 `/`、`\` 或带扩展名的点号形式）允许更长；
+/// 这不是放宽普通术语，而是把“文件产出”与“答案原句”区分开。
+fn path_like(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.contains('/') || t.contains('\\') {
+        return true;
+    }
+    match t.rsplit_once('.') {
+        Some((stem, ext)) => {
+            !stem.is_empty()
+                && !ext.is_empty()
+                && ext.len() <= 8
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        }
+        None => false,
+    }
+}
 const MUST_NOT_INCLUDE_MAX_CHARS: usize = 20;
 const PATTERN_MAX_CHARS: usize = 120;
 /// 正则判据上限：太长的正则会拖慢 hardcheck，也不好审。
@@ -1582,9 +1604,21 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
             }
         }
         for lit in &must_include_values {
-            if lit.chars().count() > MUST_INCLUDE_MAX_CHARS {
+            // N10：文件名/路径不是“答案原句”，12 字上限会把 workspace/notes.txt 误伤。
+            // 路径/文件名放宽到 64 字；普通术语仍保持 12 字。
+            let limit = if path_like(lit) {
+                PATH_MUST_INCLUDE_MAX_CHARS
+            } else {
+                MUST_INCLUDE_MAX_CHARS
+            };
+            if lit.chars().count() > limit {
+                let hint = if path_like(lit) {
+                    "路径/文件名最多 64 字；如果真正要核对的是文件产出，建议改用 pattern/regex 或 criterion/check"
+                } else {
+                    "判据只能是短语，不能是答案原句"
+                };
                 return Err(format!(
-                    "验收项 {} 的 must_include 超过 {MUST_INCLUDE_MAX_CHARS} 字（{} 字）：判据只能是短语，不能是答案原句",
+                    "验收项 {} 的 must_include 超过 {limit} 字（{} 字）：{hint}",
                     i + 1,
                     lit.chars().count()
                 ));
@@ -2280,6 +2314,25 @@ mod tests {
         )
         .unwrap_err();
         assert!(long.contains("12"), "{long}");
+    }
+
+    #[test]
+    fn review_rubric_allows_file_path_must_include() {
+        let v = parse_rubric(
+            "{\"rubric\":[
+                {\"id\":\"c1\",\"criterion\":\"写入 notes.txt\",\"check\":\"文件存在\",\"must_include\":[\"workspace/notes.txt\"]}
+            ]}",
+        )
+        .unwrap();
+        assert_eq!(v["rubric"][0]["must_include"], "workspace/notes.txt");
+        assert_eq!(v["rubric"][0]["match"], "all");
+        let long_path = format!("{}/{}", "a".repeat(60), "notes.txt");
+        let err = parse_rubric(&format!(
+            "{{\"rubric\":[{{\"id\":\"c1\",\"criterion\":\"写入文件\",\"check\":\"文件存在\",\"must_include\":[\"{long_path}\"]}}]}}"
+        ))
+        .unwrap_err();
+        assert!(err.contains("64"), "{err}");
+        assert!(err.contains("pattern/regex"), "{err}");
     }
 
     #[test]

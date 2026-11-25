@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；v1.2.1-rc.4 双语包待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；v1.2.1-rc.4.1 双语包待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -113,7 +113,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.4-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.4.1-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 中文命令表
@@ -128,7 +128,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 10 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.4）
+## 平台门禁差异（v1.2.1-rc.4.1）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -157,6 +157,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.4.1 变更说明](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md)** —— 路径/文件型 `must_include` 豁免、纯文本工具调用兜底与别名归一化、`data/web-artifacts` 可审计副本、`rubric-final` 留档；并注明 4B 长流程边界（[English](docs/v1.2.1-rc.4.1-Changes.md)）
 - **[v1.2.1-rc.4 变更说明](docs/v1.2.1-rc.4-变更说明.zh-CN.md)** —— `must_include` 匹配模式、主观判据/禁词校验、bench 唯一临时目录与结构化错误、reliability 感知启动门禁、重复工具调用抑制、搜索落盘、WebUI/TUI 文件附件（[English](docs/v1.2.1-rc.4-Changes.md)）
 - **[v1.2.1-rc.3.6 变更说明](docs/v1.2.1-rc.3.6-变更说明.zh-CN.md)** —— `must_include` 只收术语并按词项匹配、percentile 内部排序且 bench P50/P90 同源、空响应/工具格式重试与纠错、fixture 禁词整条丢弃、全部顶层二进制英文版（[English](docs/v1.2.1-rc.3.6-Changes.md)）
 - **[v1.2.1-rc.3.5 变更说明](docs/v1.2.1-rc.3.5-变更说明.zh-CN.md)** —— 占位符元判据自动丢弃、主观判据降级为 advisory 且不进 judge、数组 `must_include`、S3 t6 工具调用提示强化（[English](docs/v1.2.1-rc.3.5-Changes.md)）
@@ -182,6 +183,8 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 状态
 
+`v1.2.1-rc.4.1` 修复 rc.4 复测的四条可执行问题。`workspace/notes.txt` 这类路径/文件型 `must_include` 改用 64 字上限，不再被 12 字短语上限误杀。正文里的 `tool_call <name> {...}` 有兼容兜底解析，常见别名会归一化，review feedback 也加了工具格式守卫。search/news/fetch 结果同时写入项目工作区与 `data/web-artifacts/<session>/`，被接受的 rubric 落为 `data/review-artifacts/<session>/rubric-final.json`。N14 仅文档：多任务长流程需 ≥7B exec 模型并多次取样。
+
 `v1.2.1-rc.4` 修复 rc.3.6 复测的五条问题，并加入附件与搜索落盘能力。`must_include` 支持 `match: any|all|min`；多术语默认 `min`（至少 ceil(n/2) 项），hardcheck 报告覆盖了几项。主观判据禁止使用 `must_not_include`；禁词若出现在用户输入中，guide 会被判不合格。bench 每次使用唯一临时目录，失败返回 `artifact_missing` / `bench_failed` JSON；`reliability` 非 high 时启动门禁标为 `advisory`，同时保留 `boot_gate_raw`。同一模型回复里相同的工具调用只执行一次，每条 `tool.call` 带 `attempt` 与 `call_index`。搜索/新闻/抓取结果落盘为 JSON artifact；WebUI/TUI 附件在安装目录外时复制到默认工作区。
 
 `v1.2.1-rc.3.6` 修复 rc.3.5 复测的四条问题，并为全部顶层二进制增加英文版。`must_include` 改为只收术语（2–12 字，禁止 `和/与/及/是/的` 等概念连接词或整句），hardcheck 不再要求整串连续子串，而是按空白/标点拆词项并要求每个词项出现；概念性写法在 guide 阶段被拒并重试。`percentile` 内部排序，bench 只算一次 P50/P90，JSON 与门禁新增 `boot_percentiles_consistent` / `metrics_consistent`。空响应最多两次升温重试，Ollama 畸形工具调用最多两次重试并回注 JSON 格式纠错，均发 `model.retry`；插件崩溃仍重启一次。`must_not_include` 命中 `REVIEW-FINAL`、`REVIEW-START`、`<...>`、`__FILL`、`{{`、`}}` 时整条丢弃并打 `review.warn`。五个中文可执行文件保持原名，`featheragent-en`、`featheragent-tui-en`、`featheragent-webui-en`、`feather-plugin-en`、`feather-storage-en` 与它们一起进入每个 Release 资产包。
@@ -194,6 +197,6 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **162 次测试执行：161 通过、1 个默认 ignored**（63 lib、26 plugin ×2、2 kernel、3 TUI、4 WebUI ×2、2 golden、31 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例单独运行通过。`fmt` 与 `clippy -D warnings` 通过。设置页两端都实测：TUI 用 PTY（review-gate 页出现“本地模型 1 个；←/→ 选择”，值字段 Enter 保存后 `config.json` 的 `max_rounds` 由 2 变 3）；WebUI 走 WebSocket 复测桥层（`plugin.settings` 返回三个 `options_source:"models"` 的模型字段，`tool.shell` 确认请求带 `arguments` 与 `$ echo hi` 的 preview，拒绝成功）。
+Linux 自动化共 **181 次测试执行：180 通过、1 个默认 ignored**（66 lib、31 plugin ×2、2 kernel、5 TUI、4 WebUI ×2、2 golden、35 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 2,554,208 B（2.44 MiB）；热启动 P50 1.159/1.188/1.200 ms；门禁全绿、`reliability:"high"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.3.4 复测确认 provider body、温度拒绝、banner、R1 门禁、review-gate 分流、判据真实化、生成物与无泄漏 feedback。rc.3.4 复测通过 2/5、degraded 1/5：a2 的 guide 持续写关于 `<...>` 占位符的判据，三次原样重试后降级（M1）；a1 的「简洁明了」让 judge 三轮摇摆成 unapproved（M3）。本候选版修复 N5–N9，把搜索结果落为 JSON artifact，并为 WebUI/TUI 加入经内核复核的附件路径。v1.2.1-rc.4 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N1–N9、附件路径与搜索落盘仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.3.4 复测确认 provider body、温度拒绝、banner、R1 门禁、review-gate 分流、判据真实化、生成物与无泄漏 feedback。rc.3.4 复测通过 2/5、degraded 1/5：a2 的 guide 持续写关于 `<...>` 占位符的判据，三次原样重试后降级（M1）；a1 的「简洁明了」让 judge 三轮摇摆成 unapproved（M3）。本候选版还修复 N10–N13，并记录 N14 的模型边界：路径/文件型 `must_include` 豁免、纯文本工具调用兜底、`data/web-artifacts` 审计副本与 `rubric-final` 留档。v1.2.1-rc.4.1 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N1–N14、附件路径、搜索落盘与新增审计/rubric 文件仍需真机复测。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
