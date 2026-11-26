@@ -2367,7 +2367,11 @@ fn wrap_display(prefix: &str, text: &str, width: usize) -> Vec<String> {
     out
 }
 
-fn draw(f: &mut Frame, app: &App) {
+fn clamp_chat_scroll(scroll: usize, max_scroll: usize) -> usize {
+    scroll.min(max_scroll)
+}
+
+fn draw(f: &mut Frame, app: &mut App) {
     if app.plugins.is_some() {
         draw_plugins(f, app);
         if let Some(c) = &app.confirm {
@@ -2481,7 +2485,9 @@ fn draw(f: &mut Frame, app: &App) {
     }
     let h = cols[1].height.saturating_sub(2) as usize;
     let max_scroll = lines.len().saturating_sub(h);
-    let scroll = max_scroll.saturating_sub(app.chat_scroll.min(max_scroll));
+    // 在顶部继续按 Up 时把状态夹紧，否则向下翻要先抵消掉多余的虚拟增量。
+    app.chat_scroll = clamp_chat_scroll(app.chat_scroll, max_scroll);
+    let scroll = max_scroll.saturating_sub(app.chat_scroll);
     let visible: Vec<Line> = lines.into_iter().skip(scroll).take(h).collect();
     f.render_widget(
         Paragraph::new(visible).block(Block::default().borders(Borders::ALL).title(
@@ -3195,6 +3201,15 @@ mod tests {
         let (clean, paths) = split_at_attachments("mail a@b.com");
         assert_eq!(clean, "mail a@b.com");
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn chat_scroll_is_clamped_after_overscrolling_at_top() {
+        assert_eq!(clamp_chat_scroll(usize::MAX, 8), 8);
+        assert_eq!(clamp_chat_scroll(8, 8), 8);
+        // 到顶后再按一次 Down，必须立刻回一行，而不是先抵消溢出量。
+        assert_eq!(clamp_chat_scroll(8, 8).saturating_sub(1), 7);
+        assert_eq!(clamp_chat_scroll(0, 8).saturating_sub(1), 0);
     }
 
     #[test]

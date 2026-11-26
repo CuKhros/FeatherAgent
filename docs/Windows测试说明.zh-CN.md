@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.3 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4.4 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.4.3-windows-x64.zip`
-> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.2 复测（N19–N22）
-> 说明：v1.2.1-rc.4.3 修复 rc.4.2 复测的四条问题。N19：`serve` 的旧内核探测改用单次 `ipc::try_connect`，干净安装根不再先等满 3 秒命名管道重试；真实客户端仍保留有界重试，N16 保护不变。N20：代码/文本/方案/译文默认写进答复，文件工具只在明确要求保存/写入/创建文件时调用。N21：列举第一层条目必须对应用户要求的对比轴；未给轴时覆盖机制、可靠性、性能与开销、适用场景。N22：明确写文件任务把成功 `tool.fs.write` 的路径与内容作为带标签证据交给 judge，guide 核对文件而不是要求答复逐字复述；系统提示同时禁止写成功后反复读取。rc.4/rc.4.1/rc.4.2 的 N5–N18 修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 只验证基本启动。
+> 被测包：`FeatherAgent-1.2.1-rc.4.4-windows-x64.zip`
+> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.3 复测（N23–N27）
+> 说明：v1.2.1-rc.4.4 修复 rc.4.3 复测的 N23–N27，并修复 TUI 长对话到顶后的滚动延迟。N23：bench 服务停止改为 3 秒有界唤醒，join 改为 5 秒 deadline，超时返回明确错误；N24：写文件任务全部判据交 judge，证据带 tool.fs.write 成功记录与文件正文，不再被 guide 自造词卡死；N25：function 开标签漏 > 时按换行或参数前截断；N26：对比题按对比轴逐维展开；N27：bench 临时目录用 Drop 清理并清 24 小时前残留。TUI 到顶后夹紧 chat_scroll，中英同步。N28 为测试侧粗体标题识别限制。rc.4/rc.4.1/rc.4.2/rc.4.3 的既有修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 在临时 `bcryptprimitives` stub 下验证 `version` 与三次 `bench --json`，冷启动/RSS 受 Wine 开销影响，不作 Windows 结论。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.3\
+D:\FeatherAgent-1.2.1-rc.4.4\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.4.3\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.4.3` 后再操作。
+看到 `serve ready: 1.2.1-rc.4.4` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.3
+cd D:\FeatherAgent-1.2.1-rc.4.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,17 @@ v1.2.1-rc.4 回归核对：
 7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
 8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
 
+v1.2.1-rc.4.4 回归核对：
+
+1. **N23：bench 不卡死。** 用干净安装根连续跑 `bench --json` 至少 5 次；每次必须在 90 秒内结束并输出完整 JSON，不能出现 0 字节或停在 `bench[2/6]`。若失败，保留 `[bench:boot_stop]` / `[bench:rpc_stop]` 错误与临时目录路径。
+2. **N24：写文件任务。** review-gate 开启，要求“把三条内存管理要点写入 `workspace
+otes2.txt`，写完不用读回”。整轮必须 `tool.fs.write` 成功、`review.status:"approved"`，judge `votes>0`；最终答复不必出现文件正文的具体词。另用会输出畸形 XML 的模型重复一次，文件已写成功后不得再整轮 `failed`。
+3. **N25：XML 恢复。** 让 4B exec 输出漏掉 function 开标签 `>` 的调用（开标签后直接换行接 parameter）。必须恢复为 `tool.fs.write` 并成功，不得出现 `element ... closed by parameter`。
+4. **N26：对比轴。** 问 TCP 与 UDP 的三个主要区别。答案必须覆盖机制/连接、可靠性/一致性、性能与开销、典型场景中用户要求的三个不同维度，不能三句都讲可靠性；记录字数。
+5. **N27：临时目录。** 连续跑 bench 后检查 `%TEMP%a-bench-*` 无新增残留；如人为放入一个两天前的旧目录，下一次 bench 应清除它，但不得删除其他进程的新目录。
+6. **TUI：到顶回翻。** 在中英 TUI 打开一个长对话，按 Up 到顶后继续按 10 次，再按 Down 一次；画面必须立刻向下移动一行，而不是先抵消 10 次虚拟增量。
+7. **N20/N21/N22 回归。** rc.4.3 已确认 N20，N21 仍只部分通过、N22 未通过；本版重跑 N21/N22 并保留 N20 回归。N28 的 Q7 粗体标题属测试规则，不计产品失败。
+
 v1.2.1-rc.4.3 回归核对：
 
 1. **N19：冷启动。** 用干净安装根（无正在运行的内核）跑 `bench --json`，`metrics.cold_spawn_ms_p50` 必须回到正常进程启动区间，而不是固定的约 3.18 s；Windows 门限下 `gates.cold_spawn_lt_250ms` 必须为 true。连续跑 5 次，逐次记录样本。
@@ -260,13 +271,13 @@ v1.2.1 追加核对：
 - N14：4B 在多任务长流程上会漂移；建议用 ≥7B exec，并对基线多次取样。单次 4B 结果只作观测。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- Wine 冒烟：`version` 可启动；连续 5 次 `bench --json` 均完成，无 `[bench:rpc_connect]` 失败，冷启动 **442–507 ms**，但 `cold_spawn_lt_250ms` 因 Wine 进程启动开销而判红。Wine 使用临时 `bcryptprimitives.dll` stub，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
+- Wine 冒烟：`version` 可启动；三次源码目录 `bench --json` 完成，无 `[bench:rpc_connect]` 失败；热启动 P50 **80.1 / 82.7 / 99.6 ms**，冷启动 **523–568 ms**、RSS **18,560 KiB** 因 Wine 进程开销判红；解压后的包内 `version` / `help` / `bench --json` 也通过（包内热启动 P50 81.8 ms）。Wine 使用临时 `bcryptprimitives.dll` stub，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.3-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.4-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

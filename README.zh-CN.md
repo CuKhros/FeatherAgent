@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2 已复测；v1.2.1-rc.4.3 包待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2/rc.4.3 已复测；v1.2.1-rc.4.4 包待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -113,7 +113,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.4.3-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.4.4-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 中文命令表
@@ -128,7 +128,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 10 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.4.3）
+## 平台门禁差异（v1.2.1-rc.4.4）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -157,8 +157,9 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.4.4 变更说明](docs/v1.2.1-rc.4.4-变更说明.zh-CN.md)** —— bench 停止/join 有界、临时目录清理、写文件判据交 judge、XML 开标签恢复、对比轴覆盖与 TUI 到顶滚动夹紧（[English](docs/v1.2.1-rc.4.4-Changes.md)）
 - **[v1.2.1-rc.4.3 变更说明](docs/v1.2.1-rc.4.3-变更说明.zh-CN.md)** —— 冷启动单次 IPC 探测、代码与文件输出区分、对比轴覆盖、写文件 review 证据，以及精选模型报告归档（[English](docs/v1.2.1-rc.4.3-Changes.md)）
-- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 9 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV（[English](docs/model-test-reports/README.md)）
+- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 10 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV（[English](docs/model-test-reports/README.md)）
 - **[v1.2.1-rc.4.2 变更说明](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md)** —— XML 风格工具调用恢复、Windows bench RPC 连接重试、`advisory_gates` 拆分、简洁与覆盖的提示词区分（[English](docs/v1.2.1-rc.4.2-Changes.md)）
 - **[v1.2.1-rc.4.1 变更说明](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md)** —— 路径/文件型 `must_include` 豁免、纯文本工具调用兜底与别名归一化、`data/web-artifacts` 可审计副本、`rubric-final` 留档；并注明 4B 长流程边界（[English](docs/v1.2.1-rc.4.1-Changes.md)）
 - **[v1.2.1-rc.4 变更说明](docs/v1.2.1-rc.4-变更说明.zh-CN.md)** —— `must_include` 匹配模式、主观判据/禁词校验、bench 唯一临时目录与结构化错误、reliability 感知启动门禁、重复工具调用抑制、搜索落盘、WebUI/TUI 文件附件（[English](docs/v1.2.1-rc.4-Changes.md)）
@@ -186,6 +187,8 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 状态
 
+`v1.2.1-rc.4.4` 修复 rc.4.3 复测的 N23–N27，并修掉 TUI 长对话到顶后的虚拟滚动延迟。`Server::stop` 改为 3 秒总预算重试命名管道唤醒，bench 的两处 join 改为 5 秒 deadline 并返回明确错误；bench 临时目录用 `Drop` 统一清理，启动时清掉超过 24 小时的旧 `fa-bench-*`。明确的写文件任务把 guide 判据全部转给 judge，证据带 `tool.fs.write path=... status=success` 与文件正文，不再因答案没有复述 guide 自造词而失败；文件已写入后模型返回畸形 XML 时用确定性收尾，不再整轮 failed。XML function 开标签漏 `>` 时按换行或参数前截断；对比题按机制/连接、可靠性/一致性、性能与开销、典型场景四轴逐维展开；中英 TUI 在 `draw` 里先把 `chat_scroll` 夹到 `max_scroll`，到顶后多按 Up 不再积累虚拟增量。N23–N27 仍需真机确认；N28 是测试侧粗体标题识别限制。
+
 `v1.2.1-rc.4.3` 修复 rc.4.2 复测的四条问题。`serve` 的旧内核探测改用单次 `ipc::try_connect`，干净安装根不再先等满 3 秒管道重试；正常客户端仍保留有界重试。代码/文本/方案/译文默认留在答复里，只有明确要求保存或写入文件才调用文件工具。列举与比较的第一层条目对应用户要求的对比轴；用户未给轴时覆盖性能与开销。明确的写文件任务会把成功写入的路径与内容作为带标签证据交给 review-gate，检查文件而不是要求答复逐字复述；提示词也禁止写成功后反复读取。N15–N18 已由 rc.4.2 复测确认。
 
 `v1.2.1-rc.4.2` 修复 rc.4.1 复测的四条问题。XML 风格的 function/parameter 工具调用改由上下文解析器恢复，Ollama provider 在流式报错时会先尝试从已累计文本抢救调用，而不是整轮 failed。bench 显式创建 RPC 目录，并跨过 Windows 命名管道创建窗口重试连接；`boot_gate_trusted` 移入 `advisory_gates`，低可信度主机不再被算成发布门禁失败。系统提示区分“默认简洁”和“列举/比较/穷举必须覆盖全部要点”。真机已确认 N10、N12、N13；N15–N18 仍需下一轮 Windows 复测。
@@ -202,6 +205,6 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **189 项测试：188 通过、1 个默认 ignored**（73 lib、31 plugin ×2、2 kernel、5 TUI、4 WebUI ×2、2 golden、36 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench 的内核体积与三连跑数字记录在 rc.4.3 变更说明；发布门禁全绿、`reliability:"high"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
+Linux 自动化共 **198 项测试：197 通过、1 个默认 ignored**（76 lib、33 plugin ×2、2 kernel、6 TUI、1 TUI-en、4 WebUI ×2、2 golden、37 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,568,520 B（2.45 MiB）**；热启动 P50 **1.221 / 1.198 / 1.174 ms**；冷启动 P50 **3.567 / 3.060 / 3.099 ms**；七项发布门禁全绿、`reliability:"high"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2 两轮复测。rc.4.2 报告确认 N15、N16、N17，并发现 N19–N22：冷启动固定约 3.18 s、代码题被写成文件、对比少一个轴、写文件任务仍 unapproved 且重复读取。本候选版修复这四条。v1.2.1-rc.4.3 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N19–N22 仍需真机确认。Wine 只作启动冒烟，boot/RSS 受 Wine 开销影响不作 Windows 结论。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2、rc.4.3 三轮复测。rc.4.3 报告确认 N20，并发现 N23–N27：bench 第二步后卡死、写文件任务仍被 guide 自造词卡死、XML 恢复回归、TCP/UDP 只覆盖两轴、超时 bench 留下临时目录。本候选版修复这五条与 TUI 到顶后虚拟滚动。v1.2.1-rc.4.4 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N23–N27 仍需真机确认。Wine 6.0.3 在临时 `bcryptprimitives` stub 下通过 `version` 与三次 `bench --json`；冷启动/RSS 受 Wine 开销影响，不作 Windows 基线。

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -44,14 +44,18 @@ impl Server {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         // 触发一次连接，唤醒阻塞中的 accept（Unix: connect UDS；Windows: 连命名管道）。
-        // Windows 上实例可能尚未就绪，重试几次；连接本身很快断开是刻意的，
-        // accept 侧会把 ERROR_NO_DATA 交回外层检查 stop，不会永久卡住。
-        for _ in 0..5 {
+        // N23：Windows 上实例可能尚未重建，旧实现只给 5×50ms 一次性窗口；
+        // 窗口内全部失败会让 handle.join() 永久卡住。改为 3 秒总预算短间隔重试。
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
             if let Ok(s) = crate::ipc::try_connect(&self.socket) {
                 drop(s);
                 break;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 

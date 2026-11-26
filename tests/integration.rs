@@ -535,7 +535,7 @@ fn review_gate_validates_written_file_content_instead_of_answer_wording() {
     conn.client
         .call("session.create", json!({"id": "sreviewwrite"}))
         .unwrap();
-    let payload = r#"REVIEW_WRITE 请把要点写入 workspace/notes.txt TOOL:{"name":"tool.fs.write","arguments":{"path":"notes.txt","content":"- 内存管理要点 A\n- 内存管理要点 B"}}"#;
+    let payload = r#"REVIEW_WRITE 请把内存管理要点写入 workspace/notes.txt TOOL:{"name":"tool.fs.write","arguments":{"path":"notes.txt","content":"- 引用计数回收循环引用\n- 标记清除处理不可达对象\n- 分代回收区分新生代与老年代"}}"#;
     conn.client
         .call(
             "chat.send",
@@ -582,10 +582,22 @@ fn review_gate_validates_written_file_content_instead_of_answer_wording() {
         Some("approved"),
         "{seen:?}"
     );
+    let verdict = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|x| x.as_str()) == Some("review.verdict"))
+        .expect("缺少 review.verdict");
+    assert!(
+        verdict
+            .pointer("/params/payload/votes")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0)
+            > 0,
+        "写文件任务必须让 judge 参与: {verdict:?}"
+    );
     let file = h.kernel.paths.workspace.join("default").join("notes.txt");
     let body = std::fs::read_to_string(&file).unwrap();
-    assert!(body.contains("内存管理要点 A"), "{body}");
-    assert!(body.contains("内存管理要点 B"), "{body}");
+    assert!(body.contains("引用计数"), "{body}");
+    assert!(body.contains("标记清除"), "{body}");
 }
 
 #[test]

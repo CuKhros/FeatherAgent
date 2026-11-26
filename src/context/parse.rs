@@ -328,22 +328,37 @@ fn quote_bare_keys(s: &str) -> String {
 fn xml_tool_call(text: &str) -> Option<ToolCall> {
     const PARAM_CLOSE: &str = concat!("</", "parameter>");
     let start = text.find("<function")?;
-    let tag_end = start + text[start..].find('>')?;
-    let tag = &text[start..=tag_end];
+    let tail = &text[start..];
+    // N25：小模型偶尔漏掉开标签的 `>`（`<function=tool.fs.write` 后直接换行）。
+    // 旧实现会把第一个参数标签的 `>` 当成开标签结尾，连参数值一起吞进 tag。
+    // 边界取 `>`、换行、`<parameter` 三者的最早位置。
+    let boundary = [tail.find('>'), tail.find('\n'), tail.find("<parameter")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(tail.len());
+    let close = boundary + usize::from(tail.as_bytes().get(boundary) == Some(&b'>'));
+    let tag = &text[start..start + close];
     let name = xml_attr(tag, "function")?;
     let name = name.trim();
     if name.is_empty() {
         return None;
     }
-    let body = &text[tag_end + 1..];
+    let body = &text[start + close..];
     let mut args = serde_json::Map::new();
     let mut rest = body;
     while let Some(pos) = rest.find("<parameter") {
         let part = &rest[pos..];
-        let open_end = part.find('>')?;
-        let open = &part[..=open_end];
+        // 参数开标签也容忍漏 `>`：同样在 `>` 或换行处截断。
+        let boundary = [part.find('>'), part.find('\n')]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(part.len().saturating_sub(1));
+        let close_open = boundary + usize::from(part.as_bytes().get(boundary) == Some(&b'>'));
+        let open = &part[..close_open];
         let key = xml_attr(open, "parameter")?;
-        let after = &part[open_end + 1..];
+        let after = &part[close_open..];
         let close = after.find(PARAM_CLOSE);
         let next_param = after.find("<parameter");
         let stop = match (close, next_param) {
@@ -619,6 +634,20 @@ mod tests {
         assert_eq!(c[0].name, "tool.fs.write");
         assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
         assert_eq!(c[0].arguments["content"], "done");
+    }
+
+    #[test]
+    fn malformed_xml_function_open_without_gt_is_recovered() {
+        let pclose = concat!("</", "parameter>");
+        let text = format!(
+            "<function=tool.fs.write\n<parameter=path>workspace/notes2.txt{pclose}\n<parameter=content>引用计数、标记清除、分代回收{pclose}\n{closeparen}",
+            closeparen = concat!("</", "function>")
+        );
+        let c = extract(&text);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].name, "tool.fs.write");
+        assert_eq!(c[0].arguments["path"], "workspace/notes2.txt");
+        assert_eq!(c[0].arguments["content"], "引用计数、标记清除、分代回收");
     }
 
     #[test]

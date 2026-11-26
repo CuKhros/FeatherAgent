@@ -723,6 +723,61 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     }
 }
 
+/// N27: always clean the bench temp dir on success, error, or panic.
+struct BenchTempDir {
+    path: std::path::PathBuf,
+}
+
+impl Drop for BenchTempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Remove stale fa-bench-* dirs older than 24h; leave fresh dirs alone.
+fn cleanup_stale_bench_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("fa-bench-") {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .map(|d| d > Duration::from_secs(24 * 60 * 60))
+            .unwrap_or(false);
+        if old {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// N23: never join the server thread forever; time out with a readable error.
+fn wait_server_stop(
+    handle: thread::JoinHandle<()>,
+    socket: &std::path::Path,
+    step: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{step} server thread did not exit within 5s: {}",
+                socket.display()
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let _ = handle.join();
+    Ok(())
+}
+
 fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     let json_only = args.has("--json");
     // NEW-K：bench 会自行拉起内核实例；同一安装根已有 serve 时先明确拒绝，
@@ -759,8 +814,10 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         std::process::id(),
         featheragent::util::random_token(6)
     ));
+    cleanup_stale_bench_dirs();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("[bench:temp_dir] {}: {e}", dir.display()))?;
+    let dir_guard = BenchTempDir { path: dir.clone() };
 
     if !json_only {
         eprintln!("bench[1/6] binary size");
@@ -810,7 +867,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             boot_ms.push(ms);
         }
         srv.stop();
-        let _ = handle.join();
+        wait_server_stop(handle, &socket, "[bench:boot_stop]")?;
         k.stop();
     }
 
@@ -954,9 +1011,9 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     rpc.sort_by(|a, b| a.partial_cmp(b).unwrap());
     drop(conn);
     srv.stop();
-    let _ = handle.join();
+    wait_server_stop(handle, &socket, "[bench:rpc_stop]")?;
     k.stop();
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(dir_guard);
 
     let fingerprint = env_fingerprint();
     let boot_p50 = percentile(&boot_ms, 0.5);

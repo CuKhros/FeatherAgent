@@ -1,6 +1,21 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.3` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.4` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.4] - 2026-11-26
+
+### Fixed
+- N23: `Server::stop` now retries the wake connection for a 3 s budget at 20 ms intervals, and bench warm/RPC joins poll `is_finished` with a 5 s deadline instead of joining forever. `scripts/ci.sh` wraps `bench --json` in `timeout 90` and validates the seven release gates.
+- N24: explicit write-file tasks route all guide criteria to the judge, strip deterministic keys, and carry `tool.fs.write` success plus file content as evidence. A successful write followed by malformed XML/empty output falls back to a deterministic written-path answer instead of `failed`. Tests: `review_rubric_moves_file_task_terms_to_judge`, `review_rubric_keeps_hard_items_for_code_tasks`, `write_fallback_names_the_file_without_claiming_missing_content`; integration requires judge `votes>0`.
+- N25: XML function open tags missing `>` are cut at the newline or parameter marker, and parameter open tags tolerate the same omission. Test: `malformed_xml_function_open_without_gt_is_recovered`.
+- N26: comparison answers must cover each requested axis across mechanism/connection, reliability/consistency, performance/overhead and scenarios, one line per dimension. Test: updated `system_prompt_distinguishes_brevity_from_coverage`.
+- N27: `BenchTempDir` removes bench temp dirs on Drop; startup clears `fa-bench-*` older than 24 hours without touching fresh directories.
+- TUI: `draw` now takes `&mut App` and clamps `chat_scroll` to `max_scroll`, so overscrolling at the top no longer delays the next Down. Test: `chat_scroll_is_clamped_after_overscrolling_at_top` in both TUIs.
+
+### Documentation
+- N28 (Q7 bold headings not recognized by the list scorer) is recorded as a test-side limitation, not a product change.
+- Windows x64 cross-compiles ten exes with system-DLL-only imports; Wine 6.0.3 passed `version` and three `bench --json` runs with a temporary `bcryptprimitives` stub, while cold-spawn/RSS are not a Windows baseline.
+- Linux suite: 198 tests, 197 passed, 1 ignored. Release bench three runs: kernel 2,568,520 B; warm P50 1.221/1.198/1.174 ms; cold P50 3.567/3.060/3.099 ms; all gates true.
 
 ## [1.2.1-rc.4.3] - 2026-11-25
 

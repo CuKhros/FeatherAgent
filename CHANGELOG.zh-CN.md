@@ -1,6 +1,21 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.3` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.4` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.4] - 2026-11-26
+
+### 修复
+- N23：`Server::stop` 改为 3 秒总预算、20 ms 间隔重试唤醒连接；bench warm/RPC join 改 5 秒 deadline 轮询，不再无限等待。`scripts/ci.sh` 用 `timeout 90` 跑 `bench --json` 并校验 7 个发布 gate。
+- N24：明确写文件任务把 guide 判据全部转 judge_only，剥掉确定性键；证据带 `tool.fs.write` 成功记录与文件正文。写成功后模型仍返回畸形 XML/空响应时，回退为“已写入 path”的确定答复，不再整轮 failed。测试：`review_rubric_moves_file_task_terms_to_judge`、`review_rubric_keeps_hard_items_for_code_tasks`、`write_fallback_names_the_file_without_claiming_missing_content`；集成测试要求 judge `votes>0`。
+- N25：XML function 开标签漏 `>` 时在换行或 parameter 前截断；parameter 开标签同样容错。测试：`malformed_xml_function_open_without_gt_is_recovered`。
+- N26：对比题按机制/连接、可靠性/一致性、性能与开销、场景逐轴展开，每维一行。测试：更新 `system_prompt_distinguishes_brevity_from_coverage`。
+- N27：`BenchTempDir` 在 Drop 清理临时目录；启动清 24 小时前的 `fa-bench-*`，不动新目录。
+- TUI：`draw` 接收 `&mut App`，渲染前把 `chat_scroll` 夹到 `max_scroll`，到顶后继续按 Up 不再积累虚拟滚动量。测试：中英 TUI 的 `chat_scroll_is_clamped_after_overscrolling_at_top`。
+
+### 文档
+- N28（Q7 粗体标题不被列表打分规则识别）记录为测试侧限制，不是产品改动。
+- Windows x64 交叉编译 10 个 exe，PE 仅依赖系统 DLL；Wine 6.0.3 在临时 `bcryptprimitives` stub 下通过 `version` 与三次 `bench --json`，冷启动/RSS 不作 Windows 基线。
+- Linux 全量 198 项、197 通过、1 ignored；release bench 三连跑内核 2,568,520 B，热启动 P50 1.221/1.198/1.174 ms，冷启动 P50 3.567/3.060/3.099 ms，gate 全绿。
 
 ## [1.2.1-rc.4.3] - 2026-11-25
 

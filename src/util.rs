@@ -277,6 +277,51 @@ pub fn json_u64(v: &Value) -> Option<u64> {
     s.parse::<u64>().ok()
 }
 
+/// 用户是否明确要求把内容写入文件。写文件任务需要让 review-gate 以文件内容
+/// 作为验收证据，而不是要求最终答复逐字复述；代码/方案类请求不触发。
+pub fn requests_file_write(input: &str) -> bool {
+    const ACTIONS: &[&str] = &[
+        "写入",
+        "写到",
+        "写进",
+        "保存到",
+        "保存为",
+        "存到",
+        "存为",
+        "落盘",
+        "生成文件",
+        "创建文件",
+        "输出到文件",
+        "write to",
+        "write into",
+        "write the",
+        "write this",
+        "write these",
+        "write a file",
+        "write file",
+        "save to",
+        "save as",
+        "save the",
+        "create a file",
+        "create file",
+        "output to file",
+    ];
+    const TARGETS: &[&str] = &[
+        "文件",
+        "workspace/",
+        ".txt",
+        ".md",
+        ".json",
+        ".csv",
+        ".log",
+        ".yaml",
+        ".yml",
+        ".toml",
+    ];
+    let lower = input.to_lowercase();
+    ACTIONS.iter().any(|a| lower.contains(a)) && TARGETS.iter().any(|t| lower.contains(t))
+}
+
 pub fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -343,6 +388,19 @@ mod tests {
         let sorted: Vec<f64> = (1..=100).map(|x| x as f64).collect();
         assert_eq!(percentile(&sorted, 0.95), 95.0);
         assert_eq!(percentile(&sorted, 0.5), 50.0);
+    }
+
+    #[test]
+    fn requests_file_write_is_explicit_about_target() {
+        assert!(requests_file_write("请把三条要点写入 workspace/notes.txt"));
+        assert!(requests_file_write("把结果保存到 report.md"));
+        assert!(requests_file_write(
+            "write the notes to workspace/notes.txt"
+        ));
+        assert!(!requests_file_write(
+            "请用 Python 实现 LRU 缓存类并给出代码"
+        ));
+        assert!(!requests_file_write("解释一下内存管理"));
     }
 
     #[test]

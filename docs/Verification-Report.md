@@ -1,10 +1,28 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.3)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.4)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.3` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.4` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.3 summary (current candidate)
+## v1.2.1-rc.4.4 summary (current candidate)
+
+The rc.4.3 retest confirmed N20 (code answers stay in the reply), found N21 only partial (TCP/UDP covered two axes instead of three), N22 still failed (`tool.fs.write` succeeded but review failed on guide-invented words), N23 bench hung after step 2 for 150 s, N24/N25/N27 tracked the same failures, and N28 was a scorer rule for bold headings. The seven-question exam scored FeatherAgent 22/24 vs bare 11/24, 123 s vs 335 s; bare runs returned empty strings after 50–66 s on Q4–Q7 and FeatherAgent's empty-response retry kept output.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N23 bench hung after `bench[2/6]` | `Server::stop` retries the wake connection for a 3 s budget; bench warm/RPC joins poll `is_finished` with a 5 s deadline; CI wraps `bench --json` in `timeout 90` | `cargo test`; three release benches complete, all gates true; Windows retest required |
+| N24 write task still `failed` | Shared `requests_file_write`; explicit write tasks convert all guide criteria to `judge_only`, carry `tool.fs.write` success plus file body, and fall back to a written-path answer after post-write XML/empty failure | `review_rubric_moves_file_task_terms_to_judge`, `write_fallback_names_the_file_without_claiming_missing_content`, integration `review_gate_validates_written_file_content_instead_of_answer_wording` with judge votes > 0 |
+| N25 XML recovery regressed | Function open-tag end is the earliest of `>`, newline, or the parameter marker; parameter open tags share the tolerance | `malformed_xml_function_open_without_gt_is_recovered` |
+| N26 comparison still two axes | Prompt requires a comparison pass over mechanism/connection, reliability/consistency, performance/overhead and scenarios, one line per requested axis | Updated `system_prompt_distinguishes_brevity_from_coverage` |
+| N27 bench temp dirs | `BenchTempDir` removes on Drop; startup clears `fa-bench-*` older than 24 h | Zero leftovers after three benches; stale-dir check passed |
+| TUI overscroll | `draw` takes `&mut App`; `chat_scroll` is clamped to `max_scroll` before rendering | `chat_scroll_is_clamped_after_overscrolling_at_top` in both TUIs |
+| N28 Q7 bold headings | Scorer limitation, not a product defect | Recorded in the change note |
+
+Linux full suite: **198 tests, 197 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 76 lib, 33 plugin ×2, 2 kernel, 6 TUI, 1 TUI-en, 4 WebUI ×2, 2 golden, 37 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,568,520 B (2.45 MiB)**; warm P50 **1.221 / 1.198 / 1.174 ms**, P90 **1.253 / 1.233 / 1.196 ms**; cold **3.567 / 3.060 / 3.099 ms**; RSS **3,584 / 3,456 / 3,584 KiB**; write P95 **3.024 / 3.787 / 2.738 µs**; assemble P95 **0.120 / 0.117 / 0.127 ms**; RPC P95 **0.072 / 0.048 / 0.037 ms**; all release gates true, `reliability:"high"`.
+
+Not verified: v1.2.1-rc.4.4 Windows real hardware (N23–N27, TUI feel, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine 6.0.3 passed `version` and three `bench --json` runs with a temporary `bcryptprimitives` stub, but cold-spawn/RSS under Wine are not a Windows baseline.
+
+## v1.2.1-rc.4.3 summary (historical, released)
 
 The rc.4.2 retest confirmed N15's XML-style recovery, removed the `[bench:rpc_connect]` failures (0/5), and confirmed the `advisory_gates` split. It left four findings: N19 cold spawn fixed at about 3.18 s, N20 code answers written to a file instead of the response, N21 missing comparison axes, and N22 a write task unapproved plus four repeated reads. This patch addresses N19–N22 and adds the curated model-report archive.
 

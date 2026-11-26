@@ -1270,6 +1270,24 @@ impl Kernel {
                     last_status = if mode == 3 { "cancelled" } else { "stopped" };
                     break;
                 }
+                Err(e)
+                    if !written_files.is_empty()
+                        && task_requests_file_write(&text)
+                        && (is_tool_format_error(&e) || e.contains("空响应")) =>
+                {
+                    // N24：文件写入已经成功；后续模型格式失败不再把整个回合变成 failed。
+                    let text = file_write_fallback(&written_files);
+                    self.emit(
+                        &session.id,
+                        EventKind::ModelRetry,
+                        json!({"attempt": 0, "reason": "write_fallback", "error": e}),
+                    );
+                    ModelReply {
+                        text,
+                        finish: "stop".into(),
+                        tool_calls: Vec::new(),
+                    }
+                }
                 Err(e) => return Err(e),
             };
             let mode = session.interrupt.load(Ordering::SeqCst);
@@ -3304,44 +3322,23 @@ struct ReviewJudgeInput<'a> {
 /// 只有“明确要求把内容落到文件”的任务才启用文件内容作为验收证据。
 /// 代码/方案类问题仍以用户可见答复为主，避免把 N20 的工具误用掩盖过去。
 fn task_requests_file_write(input: &str) -> bool {
-    const ACTIONS: &[&str] = &[
-        "写入",
-        "写到",
-        "写进",
-        "保存到",
-        "保存为",
-        "存到",
-        "存为",
-        "落盘",
-        "生成文件",
-        "创建文件",
-        "输出到文件",
-        "write to",
-        "write into",
-        "write the",
-        "write this",
-        "write these",
-        "write a file",
-        "save to",
-        "save as",
-        "save the",
-        "create a file",
-        "create file",
-        "output to file",
-    ];
-    const TARGETS: &[&str] = &[
-        "文件",
-        "workspace/",
-        ".txt",
-        ".md",
-        ".json",
-        ".csv",
-        ".log",
-        ".yaml",
-        ".yml",
-        ".toml",
-    ];
-    ACTIONS.iter().any(|a| input.contains(a)) && TARGETS.iter().any(|t| input.contains(t))
+    crate::util::requests_file_write(input)
+}
+
+/// 文件已经成功写入后，模型若继续输出畸形 XML/空响应，不应把整个回合降级成
+/// failed。给用户一个确定的收尾答复，再让 review-gate 核对文件证据。
+fn file_write_fallback(files: &[(String, String)]) -> String {
+    match files {
+        [(path, content)] => format!("已写入 {path}（{} 字符）。", content.chars().count()),
+        _ => {
+            let paths = files
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .collect::<Vec<_>>()
+                .join("、");
+            format!("已写入 {} 个文件：{paths}。", files.len())
+        }
+    }
 }
 
 /// review-gate 只审最终答复，写文件任务却应该审“文件里到底写了什么”。
@@ -3353,7 +3350,11 @@ fn review_answer_with_written_files(answer: &str, files: &[(String, String)]) ->
     if files.is_empty() {
         return answer.to_string();
     }
-    let mut out = String::from("[本轮成功写入的文件，供验收核对，不属于用户可见答复]\n");
+    let mut out =
+        String::from("[本轮成功写入的文件，供验收核对，不属于用户可见答复]\n[工具执行]\n");
+    for (path, _) in files {
+        out.push_str(&format!("tool.fs.write path={path} status=success\n"));
+    }
     let mut budget = TOTAL_MAX_CHARS;
     for (path, content) in files {
         if budget == 0 {
@@ -3594,9 +3595,21 @@ mod tests {
         )];
         let text = review_answer_with_written_files("已写入 workspace/notes.txt。", &files);
         assert!(text.contains("[本轮成功写入的文件"), "{text}");
+        assert!(
+            text.contains("tool.fs.write path=workspace/notes.txt"),
+            "{text}"
+        );
         assert!(text.contains("使用堆进行动态分配"), "{text}");
         assert!(text.contains("[最终答复]"), "{text}");
         assert!(text.ends_with("已写入 workspace/notes.txt。"), "{text}");
+    }
+
+    #[test]
+    fn write_fallback_names_the_file_without_claiming_missing_content() {
+        let files = vec![("workspace/notes.txt".to_string(), "- a\n- b".to_string())];
+        let text = file_write_fallback(&files);
+        assert!(text.contains("workspace/notes.txt"), "{text}");
+        assert!(text.contains("7 字符"), "{text}");
     }
 
     #[test]

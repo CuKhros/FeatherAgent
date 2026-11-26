@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.3 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.4 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4.3-windows-x64.zip`
-> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.2 retest (N19–N22)
-> Note: v1.2.1-rc.4.3 fixes the four findings from the rc.4.2 retest. N19: `serve`'s existing-kernel probe now uses a one-shot `ipc::try_connect`, so a clean install root no longer waits the 3-second pipe retry before starting; real clients keep the bounded retry, so N16 still holds. N20: code/text/plan/translation answers default to the response, and file tools run only on an explicit save/write/create request. N21: first-level list items must map to the requested comparison axes; with no axes, cover mechanism, reliability, performance/overhead and scenarios. N22: explicit write-file tasks give the judge the successful `tool.fs.write` path/content as labelled evidence, and the guide checks the file rather than requiring a verbatim answer. The system prompt also stops repeated post-write reads. The rc.4/rc.4.1/rc.4.2 fixes N5–N18 remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine is only a startup smoke test.
+> Package under test: `FeatherAgent-1.2.1-rc.4.4-windows-x64.zip`
+> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.3 retest (N23–N27)
+> Note: v1.2.1-rc.4.4 fixes N23–N27 from the rc.4.3 retest and a TUI long-conversation overscroll bug. N23: bench server stop now uses a 3-second bounded wake, joins use a 5-second deadline and return explicit errors. N24: write-file criteria go to the judge with `tool.fs.write` success plus file content, and a successful write followed by malformed XML no longer fails the turn. N25: a function open tag missing `>` is cut at the newline or parameter marker. N26: comparison answers expand every requested axis. N27: bench temp dirs are removed by a Drop guard and stale entries older than 24 hours are cleaned at startup. Both TUIs clamp `chat_scroll` at the top. N28 is a scorer limitation for bold headings. The rc.4/rc.4.1/rc.4.2/rc.4.3 fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 passed `version` and three `bench --json` runs with a temporary `bcryptprimitives` stub, while cold-spawn/RSS under Wine are not Windows conclusions.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.3\
+D:\FeatherAgent-1.2.1-rc.4.4\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4.3`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.4`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.3
+cd D:\FeatherAgent-1.2.1-rc.4.4
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -209,6 +209,17 @@ v1.2.1-rc.4 regression checks:
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
 
+v1.2.1-rc.4.4 regression checks:
+
+1. **N23: bench completes.** On a clean install root run `bench --json` at least five times. Every run must finish within 90 seconds with complete JSON, never 0 bytes or stuck after `bench[2/6]`. Keep `[bench:boot_stop]` / `[bench:rpc_stop]` errors and the temp path if it fails.
+2. **N24: write task.** With review-gate on, ask to write three memory-management points to `workspace
+otes2.txt` and not read it back. The turn must execute `tool.fs.write`, reach `review.status:"approved"`, and have judge `votes>0`; the final answer need not repeat literal words from the file. Repeat once with a model that emits malformed XML after the write: a successful file must not leave the turn `failed`.
+3. **N25: XML recovery.** Make the 4B exec emit a function call whose open tag is missing `>` before a newline and parameter. It must recover to `tool.fs.write` and succeed without the function-open/parameter-close error.
+4. **N26: comparison axes.** Ask for the three main differences between TCP and UDP. The answer must cover three distinct axes among mechanism/connection, reliability/consistency, performance/overhead and scenarios, not three reliability synonyms; record the length.
+5. **N27: temp dirs.** After repeated bench runs, `%TEMP%a-bench-*` must have no new leftovers. Put a two-day-old directory there: the next bench should remove it while leaving another process's fresh directory alone.
+6. **TUI: top overscroll.** In a long conversation in both TUIs, press Up to the top and then 10 more times; one Down must move the view immediately, not spend 10 presses cancelling virtual scroll.
+7. **N20/N21/N22 regression.** rc.4.3 confirmed N20; N21 was only partial and N22 failed. Re-run N21/N22 and keep N20 green. N28 (Q7 bold headings) is a scorer rule, not a product failure.
+
 v1.2.1-rc.4.3 regression checks:
 
 1. **N19: cold spawn.** Use a clean install root with no running kernel. `bench --json` must show `metrics.cold_spawn_ms_p50` in normal process-startup range instead of a fixed ~3.18 s, and `gates.cold_spawn_lt_250ms` must be true on the Windows threshold. Repeat five times; report each sample.
@@ -269,13 +280,13 @@ v1.2.1 additional checks:
 - N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- Wine smoke: `version` starts; five `bench --json` runs complete with no `[bench:rpc_connect]` failure and cold spawn **442–507 ms**, but `cold_spawn_lt_250ms` is red because Wine's process startup is much slower. A temporary `bcryptprimitives.dll` stub was used for Wine only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
+- Wine smoke: `version` starts; three source-directory `bench --json` runs complete with no `[bench:rpc_connect]` failure. Warm P50 is **80.1 / 82.7 / 99.6 ms**; cold spawn **523–568 ms** and RSS **18,560 KiB** are red because Wine's process startup is much slower. The unzipped package also passes `version` / `help` / `bench --json` (packaged warm P50 81.8 ms). A temporary `bcryptprimitives.dll` stub was used for Wine only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.3-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.4-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

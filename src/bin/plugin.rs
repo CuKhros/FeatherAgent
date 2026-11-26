@@ -298,7 +298,8 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                 if last_user.contains("REVIEW_WRITE") {
                     return Ok((
                         json!({"rubric":[
-                            {"id":"c1","criterion":"写入文件并覆盖两个要点","check":"核对 notes.txt 与内存管理内容","must_include":["notes.txt","内存管理"],"match":"all"}
+                            {"id":"c1","criterion":"把内存管理要点写入 workspace/notes.txt","check":"核对 notes.txt 中是否覆盖内存管理要点","must_include":["内存分配","内存回收","页面置换"],"match":"all"},
+                            {"id":"c2","criterion":"使用 tool.fs.write 写入文件","check":"核对文件内容与写入成功记录"}
                         ]})
                         .to_string(),
                         0,
@@ -378,6 +379,8 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                     ids
                 };
                 let quote: String = answer.chars().take(24).collect();
+                let file_evidence =
+                    answer.contains("tool.fs.write path=") && answer.contains("---");
                 let mut items = Vec::new();
                 for id in &ids {
                     // 模拟 K1：若负向判据被送进 judge，7B 只能写出“答案中没有…”，
@@ -400,7 +403,7 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                     } else {
                         items.push(json!({
                             "id": id,
-                            "pass": answer.contains("REVIEW-FINAL"),
+                            "pass": answer.contains("REVIEW-FINAL") || file_evidence,
                             "evidence": quote
                         }));
                     }
@@ -437,6 +440,9 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                     ));
                 }
                 return Ok(("REVIEW-FINAL".into(), 0));
+            }
+            if last_is_tool && last_user.contains("REVIEW_WRITE_BAD") {
+                return Err("XML syntax error on line 3".into());
             }
             if last_is_tool {
                 return Ok(("已完成。".into(), 0));
@@ -1315,11 +1321,17 @@ const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你�
 7. criterion 和 check 必须写出这条判据的具体含义；禁止照抄示例里的占位符或“这项检查什么”“怎么核对”这类空话。
 8. 示例只示范字段名与结构。不要在判据里讨论占位符、示例、模板本身，不要把 __FILL_*__ 写进 must_not_include；不要写“禁止使用占位符”这类自我指涉的条目。
 9. 不要写主观判据（简洁、清晰、明了、美观、通顺、易懂、逻辑性强、排版好看、术语准确、表达准确、内容完整）。主观要求只写在 criterion/check，不写 must_not_include；不要把“软件/硬件/计算机”这类领域常用词当禁词。需要篇幅或格式时，用 min_points / pattern / regex 等可计数、可核对的判据；否则直接省略。
-10. 只输出 JSON，不要解释、不要 markdown 代码围栏。"#;
+10. 写文件任务：不要用 must_include 猜测文件正文里的具体词，也不要把“最终答复复述文件内容”当判据；只写 criterion/check，让 judge 核对内核附上的文件内容与 tool.fs.write 成功记录。
+11. 只输出 JSON，不要解释、不要 markdown 代码围栏。"#;
 
 /// 拼 guide 的用户消息；`feedback` 非空时把上次的 schema 错误原样回注。
 fn guide_user_prompt(input: &str, environment: &str, feedback: &str) -> String {
     let mut out = format!("[REVIEW-GUIDE]\n任务输入：\n{input}\n\n环境摘要：\n{environment}");
+    if featheragent::util::requests_file_write(input) {
+        out.push_str(
+            "\n\n[写文件任务]\n这是写文件任务。判据只写 criterion/check，让 judge 核对内核提供的文件内容与 tool.fs.write 成功记录；不要在 must_include 里猜文件正文的具体词，也不要要求最终答复逐字复述文件。",
+        );
+    }
     if !feedback.trim().is_empty() {
         out.push_str(&format!(
             "\n\n[上一次的判据不合格，必须修正]\n{}\n请对照上面的 JSON 结构重写：判据要写在 must_include / must_not_include / min_points / pattern 上，criterion 和 check 只是说明。",
@@ -1574,6 +1586,9 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
             arr.len()
         ));
     }
+    // N24：明确的写文件任务由 judge 核对内核提供的文件内容；guide 猜出来的
+    // must_include 不能拿来卡“最终答复”。这里把确定性键收走，统一转描述型。
+    let file_task = featheragent::util::requests_file_write(input);
     let mut out = Vec::new();
     let mut hard_items = 0usize;
     let mut substring_only = true;
@@ -1862,26 +1877,50 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
             .unwrap_or_else(|| format!("c{}", i + 1));
         // 只有描述、没有硬判据的条目不当废品：保留给 judge 逐条核对，
         // 由 `review.warn` 明示“这条没有确定性检查”，而不是整轮 degraded。
-        let has_hard = norm.keys().any(|k| {
-            matches!(
-                k.as_str(),
-                "must_include" | "must_not_include" | "min_points" | "pattern" | "regex" | "hard"
-            )
-        });
-        if has_hard {
-            hard_items += 1;
-        } else if let Some(word) = subjective_reason(criterion).or_else(|| subjective_reason(check))
-        {
-            // M3：主观判据不进 judge，也不计入门禁；只留一条 review.warn。
-            advisory_ids.push(id.clone());
-            advisory_warnings.push(format!(
-                "验收项 {id} 是主观判据（含『{word}』）：不计入门禁；需要时改成可计数/可核对的格式"
-            ));
-            norm.insert("advisory".into(), json!(true));
-            norm.insert("advisory_reason".into(), json!(word));
-        } else {
+        if file_task {
+            for key in [
+                "must_include",
+                "must_not_include",
+                "min_points",
+                "pattern",
+                "regex",
+                "hard",
+                "match",
+                "min_matches",
+            ] {
+                norm.remove(key);
+            }
             judge_only_ids.push(id.clone());
             norm.insert("judge_only".into(), json!(true));
+            norm.insert("file_task".into(), json!(true));
+        } else {
+            let has_hard = norm.keys().any(|k| {
+                matches!(
+                    k.as_str(),
+                    "must_include"
+                        | "must_not_include"
+                        | "min_points"
+                        | "pattern"
+                        | "regex"
+                        | "hard"
+                )
+            });
+            if has_hard {
+                hard_items += 1;
+            } else if let Some(word) =
+                subjective_reason(criterion).or_else(|| subjective_reason(check))
+            {
+                // M3：主观判据不进 judge，也不计入门禁；只留一条 review.warn。
+                advisory_ids.push(id.clone());
+                advisory_warnings.push(format!(
+                    "验收项 {id} 是主观判据（含『{word}』）：不计入门禁；需要时改成可计数/可核对的格式"
+                ));
+                norm.insert("advisory".into(), json!(true));
+                norm.insert("advisory_reason".into(), json!(word));
+            } else {
+                judge_only_ids.push(id.clone());
+                norm.insert("judge_only".into(), json!(true));
+            }
         }
         let weight = item.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0);
         norm.insert("id".into(), json!(id));
@@ -1898,7 +1937,12 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
             "已丢弃占位符/示例判据 {d}：判据要描述当前任务，不能讨论占位符或示例本身"
         ));
     }
-    if hard_items == 0 {
+    if file_task {
+        warnings.push(
+            "写文件任务：判据已转为 judge 核对文件内容与 tool.fs.write 成功记录；不按最终答复的字面措辞判定"
+                .to_string(),
+        );
+    } else if hard_items == 0 {
         warnings.push(
             "整份清单没有硬判据：criterion/check 只是说明，判据必须写在 must_include / must_not_include / min_points / pattern / regex 上"
                 .to_string(),
@@ -1925,6 +1969,7 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
         "hard_items": hard_items,
         "judge_only": judge_only_ids,
         "advisory": advisory_ids,
+        "file_task": file_task,
         "warn": warnings,
     }))
 }
@@ -2891,5 +2936,41 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("出现在用户任务输入中"), "{err}");
+    }
+
+    #[test]
+    fn review_rubric_moves_file_task_terms_to_judge() {
+        let v = parse_rubric_with_input(
+            r#"{"rubric":[
+                {"id":"c1","criterion":"内存管理要点写入 workspace/notes2.txt","check":"核对 notes2.txt 与内存管理内容","must_include":["内存分配","内存回收","页面置换"],"match":"min"},
+                {"id":"c2","criterion":"使用 tool.fs.write 写入文件","check":"核对写入工具成功记录"}
+            ]}"#,
+            "请用工具把三条关于内存管理的要点写入 workspace/notes2.txt，写完后不需要再读回",
+        )
+        .unwrap();
+        assert_eq!(v["hard_items"], 0, "{v}");
+        assert_eq!(v["file_task"], true, "{v}");
+        assert!(
+            v["judge_only"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|x| x == "c1"),
+            "{v}"
+        );
+        assert!(v["rubric"][0].get("must_include").is_none(), "{v}");
+        assert!(v["rubric"][1].get("judge_only").is_some(), "{v}");
+    }
+
+    #[test]
+    fn review_rubric_keeps_hard_items_for_code_tasks() {
+        let v = parse_rubric_with_input(
+            r#"{"rubric":[{"id":"c1","criterion":"实现 LRU 缓存","check":"答案包含 LRU","must_include":"LRU"}]}"#,
+            "请用 Python 实现一个 LRU 缓存类，并给出代码",
+        )
+        .unwrap();
+        assert_eq!(v["hard_items"], 1, "{v}");
+        assert!(v["file_task"] == false, "{v}");
+        assert!(v["rubric"][0].get("must_include").is_some(), "{v}");
     }
 }
