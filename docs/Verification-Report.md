@@ -1,10 +1,24 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.4)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.5)
 
-> Date: 2026-11-25 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.4` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-26 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.5` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.4 summary (current candidate)
+## v1.2.1-rc.4.5 summary (current candidate)
+
+The rc.4.4 retest confirmed N23 and that N25 no longer appears. It found N29: a write task still ended `degraded rounds=0` because the guide was rejected first for having no hard criterion, then for `must_include:["-"]` being one character; N30: `write_p95_lt_10ms` occasionally red while `reliability` stayed high; and N31: L17 was scored 1.5/3 because bold `**1.**` items were not counted. The large exam scored FeatherAgent 50.5/54 vs bare 30.0/54, 319 s vs 856 s, with 8 bare-model empty responses.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N29 write-file review `degraded rounds=0` | `parse_rubric_with_input` keeps only judge-only fields for `file_task`, strips `must_include`/`min_points`/`pattern` and related hard keys, and adds the IDs to `judge_only`; `review_prepare` skips the zero-hard-item retry for file tasks | `review_rubric_file_task_bypasses_symbol_term_limit`; `REVIEW_WRITE` integration fixture now uses the N29 bad-symbol rubric and still requires `approved` with judge `votes>0` |
+| N30 Windows write gate occasional red | On Windows a write P95 of 10–20 ms is `advisory`; above 20 ms still fails. `gates` adds `write_gate_status` / `write_gate_raw`; the platform key uses the effective result. Linux stays at 100 µs | `write_gate_marks_windows_edge_jitter_as_advisory`; CI validates both fields; Linux bench shows `pass` / `raw:true` |
+| N31 L17 bold numbering | `large-1.json` list regex accepts `**1.**`; test-scoring only | Scorer replay counts 3/3; historical rc.4.4 scores are not recalculated |
+
+Linux full suite: **201 tests, 200 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 76 lib, 34 plugin ×2, 3 kernel, 6 TUI, 1 TUI-en, 4 WebUI ×2, 2 golden, 37 integration (36 pass + 1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,568,840 B (2.45 MiB)**; warm P50 **1.182 / 1.194 / 1.176 ms**, P90 **1.243 / 1.203 / 1.257 ms**; cold P50 **3.413 / 3.239 / 3.160 ms**; RSS **3,456 / 3,456 / 3,584 KiB**; write P95 **2.727 / 4.903 / 3.754 µs**; assemble P95 **0.135 / 0.126 / 0.128 ms**; RPC P95 **0.053 / 0.045 / 0.041 ms**; all required gates true, `write_gate_status:"pass"`, `write_gate_raw:true`, `reliability:"high"`.
+
+Not verified: v1.2.1-rc.4.5 Windows real hardware (N29–N31, TUI feel, bilingual package), medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine 6.0.3 smoke only; cold-spawn/RSS/write-gate under Wine are not a Windows baseline.
+
+## v1.2.1-rc.4.4 summary (historical, released)
 
 The rc.4.3 retest confirmed N20 (code answers stay in the reply), found N21 only partial (TCP/UDP covered two axes instead of three), N22 still failed (`tool.fs.write` succeeded but review failed on guide-invented words), N23 bench hung after step 2 for 150 s, N24/N25/N27 tracked the same failures, and N28 was a scorer rule for bold headings. The seven-question exam scored FeatherAgent 22/24 vs bare 11/24, 123 s vs 335 s; bare runs returned empty strings after 50–66 s on Q4–Q7 and FeatherAgent's empty-response retry kept output.
 

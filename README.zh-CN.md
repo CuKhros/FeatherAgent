@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2/rc.4.3 已复测；v1.2.1-rc.4.4 包待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2/rc.4.3/rc.4.4 已复测；v1.2.1-rc.4.5 包待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -113,7 +113,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.4.4-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.4.5-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 中文命令表
@@ -128,19 +128,19 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 10 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.4.4）
+## 平台门禁差异（v1.2.1-rc.4.5）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
 | 热启动（进程内）P50 | < 20 ms | **< 100 ms** | 同一安装根，预热 1 次丢弃 + 5 次样本 |
 | 冷启动 spawn→socket P50 | < 100 ms | **< 250 ms** | 真实 `serve` 子进程；Windows 含 DLL 加载与实时防护 |
-| 事件写入 P95 | < 100 µs | **< 10 ms** | NTFS `FlushFileBuffers` + 实时防护导致一个数量级差异，属环境特性 |
+| 事件写入 P95 | < 100 µs | **< 10 ms 严格；10–20 ms advisory** | NTFS `FlushFileBuffers` + 实时防护导致一个数量级差异；边缘抖动标 advisory，超过 20 ms 仍 fail |
 | 内核体积 | ≤ 8 MB | ≤ 8 MB | 共用 |
 | 空闲 RSS | ≤ 15 MB | ≤ 15 MB | 共用 |
 | 上下文组装 P95 | < 30 ms | < 30 ms | 共用 |
 | RPC P95 | < 1 ms | < 1 ms | 共用 |
 
-`bench --json` 会返回 `platform`、`boot_mode`、`boot_samples_ms`、`boot_sample_count`、`boot_ms_p50`/`boot_ms_p90`、`cold_spawn_ms_p50`、`boot_limit_ms`、`cold_spawn_limit_ms` 与 `write_limit_us`；发布门禁在 `gates`，`boot_gate_trusted`、`boot_gate_status`、`reliability` 在 `advisory_gates`，不参与 `passed/total`。`metrics.env` 带 `mem_load_pct`，整机内存超过 85% 时附 `note`。不会把 Windows 固定标红。
+`bench --json` 会返回 `platform`、`boot_mode`、`boot_samples_ms`、`boot_sample_count`、`boot_ms_p50`/`boot_ms_p90`、`cold_spawn_ms_p50`、`boot_limit_ms`、`cold_spawn_limit_ms` 与 `write_limit_us`；写入门禁另有 `write_gate_status`（`pass|advisory|fail`）与 `write_gate_raw`。发布门禁在 `gates`，`boot_gate_trusted`、`boot_gate_status`、`reliability` 在 `advisory_gates`，不参与 `passed/total`。`metrics.env` 带 `mem_load_pct`，整机内存超过 85% 时附 `note`。不会把 Windows 固定标红。
 
 ## 参与与许可
 
@@ -157,9 +157,10 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.4.5 变更说明](docs/v1.2.1-rc.4.5-变更说明.zh-CN.md)** —— 写文件任务跳过硬判据并全交 judge、Windows 写入门禁 advisory、L17 粗体编号识别，以及 rc.4.4 报告与 5 份试卷归档（[English](docs/v1.2.1-rc.4.5-Changes.md)）
 - **[v1.2.1-rc.4.4 变更说明](docs/v1.2.1-rc.4.4-变更说明.zh-CN.md)** —— bench 停止/join 有界、临时目录清理、写文件判据交 judge、XML 开标签恢复、对比轴覆盖与 TUI 到顶滚动夹紧（[English](docs/v1.2.1-rc.4.4-Changes.md)）
 - **[v1.2.1-rc.4.3 变更说明](docs/v1.2.1-rc.4.3-变更说明.zh-CN.md)** —— 冷启动单次 IPC 探测、代码与文件输出区分、对比轴覆盖、写文件 review 证据，以及精选模型报告归档（[English](docs/v1.2.1-rc.4.3-Changes.md)）
-- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 10 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV（[English](docs/model-test-reports/README.md)）
+- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 11 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV 与 5 份可复用试卷（[English](docs/model-test-reports/README.md)）
 - **[v1.2.1-rc.4.2 变更说明](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md)** —— XML 风格工具调用恢复、Windows bench RPC 连接重试、`advisory_gates` 拆分、简洁与覆盖的提示词区分（[English](docs/v1.2.1-rc.4.2-Changes.md)）
 - **[v1.2.1-rc.4.1 变更说明](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md)** —— 路径/文件型 `must_include` 豁免、纯文本工具调用兜底与别名归一化、`data/web-artifacts` 可审计副本、`rubric-final` 留档；并注明 4B 长流程边界（[English](docs/v1.2.1-rc.4.1-Changes.md)）
 - **[v1.2.1-rc.4 变更说明](docs/v1.2.1-rc.4-变更说明.zh-CN.md)** —— `must_include` 匹配模式、主观判据/禁词校验、bench 唯一临时目录与结构化错误、reliability 感知启动门禁、重复工具调用抑制、搜索落盘、WebUI/TUI 文件附件（[English](docs/v1.2.1-rc.4-Changes.md)）
@@ -187,6 +188,8 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 状态
 
+`v1.2.1-rc.4.5` 修复 rc.4.4 复测的 N29–N31。明确的写文件任务不再要求 guide 产出硬判据：判据全部转 judge，`parse_rubric` 在 `file_task` 时提前剥掉 `must_include`/`min_points`/`pattern` 等确定性键，`must_include:["-"]` 不再触发“术语至少 2 字”校验；`review_prepare` 不再对写文件任务做“零硬判据”重试。Windows 写入门禁把 10–20 ms 的边缘抖动标为 `advisory`，保留 `write_gate_raw`，超过 20 ms 仍 fail；Linux 仍按 100 µs 严格判定。测试侧 L17 列表判据识别 `**1.**` 粗体编号。rc.4.5 新增 1 项单测，并把 `REVIEW_WRITE` 集成夹具改为复现 N29 的坏符号硬键。
+
 `v1.2.1-rc.4.4` 修复 rc.4.3 复测的 N23–N27，并修掉 TUI 长对话到顶后的虚拟滚动延迟。`Server::stop` 改为 3 秒总预算重试命名管道唤醒，bench 的两处 join 改为 5 秒 deadline 并返回明确错误；bench 临时目录用 `Drop` 统一清理，启动时清掉超过 24 小时的旧 `fa-bench-*`。明确的写文件任务把 guide 判据全部转给 judge，证据带 `tool.fs.write path=... status=success` 与文件正文，不再因答案没有复述 guide 自造词而失败；文件已写入后模型返回畸形 XML 时用确定性收尾，不再整轮 failed。XML function 开标签漏 `>` 时按换行或参数前截断；对比题按机制/连接、可靠性/一致性、性能与开销、典型场景四轴逐维展开；中英 TUI 在 `draw` 里先把 `chat_scroll` 夹到 `max_scroll`，到顶后多按 Up 不再积累虚拟增量。N23–N27 仍需真机确认；N28 是测试侧粗体标题识别限制。
 
 `v1.2.1-rc.4.3` 修复 rc.4.2 复测的四条问题。`serve` 的旧内核探测改用单次 `ipc::try_connect`，干净安装根不再先等满 3 秒管道重试；正常客户端仍保留有界重试。代码/文本/方案/译文默认留在答复里，只有明确要求保存或写入文件才调用文件工具。列举与比较的第一层条目对应用户要求的对比轴；用户未给轴时覆盖性能与开销。明确的写文件任务会把成功写入的路径与内容作为带标签证据交给 review-gate，检查文件而不是要求答复逐字复述；提示词也禁止写成功后反复读取。N15–N18 已由 rc.4.2 复测确认。
@@ -205,6 +208,6 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **198 项测试：197 通过、1 个默认 ignored**（76 lib、33 plugin ×2、2 kernel、6 TUI、1 TUI-en、4 WebUI ×2、2 golden、37 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,568,520 B（2.45 MiB）**；热启动 P50 **1.221 / 1.198 / 1.174 ms**；冷启动 P50 **3.567 / 3.060 / 3.099 ms**；七项发布门禁全绿、`reliability:"high"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
+Linux 自动化共 **201 项测试：200 通过、1 个默认 ignored**（76 lib、34 plugin ×2、3 kernel、6 TUI、1 TUI-en、4 WebUI ×2、2 golden、37 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,568,840 B（2.45 MiB）**；热启动 P50 **1.182 / 1.194 / 1.176 ms**；冷启动 P50 **3.413 / 3.239 / 3.160 ms**；必需发布门禁全绿，`write_gate_status:"pass"`、`write_gate_raw:true`、`reliability:"high"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2、rc.4.3 三轮复测。rc.4.3 报告确认 N20，并发现 N23–N27：bench 第二步后卡死、写文件任务仍被 guide 自造词卡死、XML 恢复回归、TCP/UDP 只覆盖两轴、超时 bench 留下临时目录。本候选版修复这五条与 TUI 到顶后虚拟滚动。v1.2.1-rc.4.4 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N23–N27 仍需真机确认。Wine 6.0.3 在临时 `bcryptprimitives` stub 下通过 `version` 与三次 `bench --json`；冷启动/RSS 受 Wine 开销影响，不作 Windows 基线。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2、rc.4.3、rc.4.4 四轮复测。rc.4.3 报告确认 N20，并发现 N23–N27：bench 第二步后卡死、写文件任务仍被 guide 自造词卡死、XML 恢复回归、TCP/UDP 只覆盖两轴、超时 bench 留下临时目录。rc.4.4 复测确认 N23 已修、N25 不再出现，遗留 N29–N31。本候选版修复 N29–N31。v1.2.1-rc.4.5 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N29–N31 仍需真机确认。Wine 6.0.3 冒烟通过 `version` 与三次 `bench --json`；冷启动/RSS/写入门禁受 Wine 开销影响，不作 Windows 基线。

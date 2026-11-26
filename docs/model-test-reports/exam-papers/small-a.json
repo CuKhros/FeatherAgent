@@ -1,0 +1,181 @@
+{
+ "id": "small-a",
+ "name": "小试卷 A · 通用八题",
+ "size": "small",
+ "full_score": 20,
+ "desc": "代码 / 调试 / 翻译 / 知识 / 数学 / 摘要 / 设计 / 推理，覆盖面最广，适合日常回归",
+ "questions": [
+  {
+   "id": "A1",
+   "domain": "代码",
+   "prompt": "写一个 Python 函数 is_palindrome(s)，忽略大小写和非字母字符，并给出 3 个测试用例。只输出代码和测试。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "函数定义",
+     "type": "regex",
+     "val": "def ",
+     "w": 1
+    },
+    {
+     "name": "返回语句",
+     "type": "regex",
+     "val": "return",
+     "w": 1
+    },
+    {
+     "name": "测试用例",
+     "type": "regex",
+     "val": "assert|is_palindrome\\(",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A2",
+   "domain": "调试",
+   "prompt": "这段 Python 有 bug，指出问题并给修正：\n\ndef add_item(item, box=[]):\n    box.append(item)\n    return box\n\nprint(add_item(1))\nprint(add_item(2))",
+   "full": 3,
+   "checks": [
+    {
+     "name": "指出可变默认参数",
+     "type": "regex",
+     "val": "默认参数|可变|mutable",
+     "w": 1
+    },
+    {
+     "name": "给修正",
+     "type": "regex",
+     "val": "None|copy|内部初始化",
+     "w": 1
+    },
+    {
+     "name": "解释原因",
+     "type": "regex",
+     "val": "定义时|只执行一次|共享",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A3",
+   "domain": "翻译",
+   "prompt": "把下面这句翻译成英文，只给译文：本地小模型在受限硬件上也能完成日常问答与代码补全。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "英文为主",
+     "type": "regex",
+     "val": "^[^\\u4e00-\\u9fff]*$",
+     "w": 1
+    },
+    {
+     "name": "关键词",
+     "type": "regex",
+     "val": "local|small|model",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A4",
+   "domain": "知识",
+   "prompt": "用三句话说明 TCP 三次握手。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "SYN",
+     "type": "regex",
+     "val": "SYN",
+     "w": 1
+    },
+    {
+     "name": "ACK",
+     "type": "regex",
+     "val": "ACK",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A5",
+   "domain": "数学",
+   "prompt": "一个房间里有 n 个人，要使至少两人生日相同的概率超过 50%，n 至少是多少？给出答案。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "答案 23",
+     "type": "regex",
+     "val": "\\b23\\b",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A6",
+   "domain": "摘要",
+   "prompt": "把这段压成 2 条备忘，每条不超过 30 字：服务上线后间歇性超时，原因是数据库连接池上限 10 而并发峰值 80；上调到 100 并加熔断后，超时率从 12% 降到 0.3%。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "列表形式",
+     "type": "regex",
+     "val": "^\\s*(\\d+[.、)]|[-*])\\s+",
+     "w": 1
+    },
+    {
+     "name": "含数据",
+     "type": "regex",
+     "val": "12%|0\\.3%",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A7",
+   "domain": "设计",
+   "prompt": "设计一个短链接服务的存储方案，列出核心表和关键字段。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "表结构",
+     "type": "regex",
+     "val": "表|table",
+     "w": 1
+    },
+    {
+     "name": "字段",
+     "type": "regex",
+     "val": "字段|column|主键|id",
+     "w": 1
+    },
+    {
+     "name": "索引",
+     "type": "regex",
+     "val": "索引|index",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "A8",
+   "domain": "推理",
+   "prompt": "三个开关在楼下，三盏灯在楼上，只能上楼一次。如何确定每个开关控制哪盏灯？",
+   "full": 3,
+   "checks": [
+    {
+     "name": "利用热量",
+     "type": "regex",
+     "val": "热|温度|发热|灯泡温度",
+     "w": 1
+    },
+    {
+     "name": "先开一个",
+     "type": "regex",
+     "val": "开.*等|先开|一段时间",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}

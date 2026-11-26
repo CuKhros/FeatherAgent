@@ -298,8 +298,8 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                 if last_user.contains("REVIEW_WRITE") {
                     return Ok((
                         json!({"rubric":[
-                            {"id":"c1","criterion":"把内存管理要点写入 workspace/notes.txt","check":"核对 notes.txt 中是否覆盖内存管理要点","must_include":["内存分配","内存回收","页面置换"],"match":"all"},
-                            {"id":"c2","criterion":"使用 tool.fs.write 写入文件","check":"核对文件内容与写入成功记录"}
+                            {"id":"c1","criterion":"notes.txt 存在且包含三条内存管理要点，每条以 - 开头","check":"核对文件内容、行数与行首格式","must_include":["-"],"min_points":3,"pattern":"(?m)^- "},
+                            {"id":"c2","criterion":"使用 tool.fs.write 写入文件","check":"核对写入成功记录与文件正文"}
                         ]})
                         .to_string(),
                         0,
@@ -1312,11 +1312,11 @@ const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你�
 
 规则（必须遵守）：
 1. 写 1–5 条判据，每条都要针对下面的“任务输入”，不要复用示例的领域或文字。
-2. criterion 和 check 只是给人看的说明，不参与判定；真正的判据只能写在 must_include / must_not_include / min_points / pattern / regex 这五个键上。
-3. 整份清单至少有一条判据用到这五个硬键中的任意一个，否则整份清单作废。
-4. must_include 只能写任务里必须出现的专有名词、术语、文件名、命令或固定写法，2–12 字；禁止写概念性描述或句子，禁止含“和/与/及/或/是/的”等连接词。概念要求（如“说明作用”“解释过程”）不要用 must_include，写在 criterion/check 交给 judge。多个术语用数组时，默认 match=min（至少 ceil(n/2) 项）；功能清单/举例用 match=min 或 any，只有“SYN 与 ACK 都必须出现”这类硬约束才写 match=all；需要精确数量时写 min_matches。例如 must_include 用 “SYN”“ACK”“操作系统”“进程调度”，不要写“管理计算机硬件和资源”。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。
-5. 至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或；或 regex 引擎下的正则）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。
-5b. 至少留一条“描述型”判据：只写 criterion/check，不写任何硬键，交给 judge 评估。描述型不要超过 2 条。
+2. criterion 和 check 只是给人看的说明，不参与判定；普通任务真正的判据只能写在 must_include / must_not_include / min_points / pattern / regex 这五个键上。写文件任务例外：只写 criterion/check，不要写任何硬键。
+3. 普通任务整份清单至少有一条判据用到这五个硬键中的任意一个，否则整份清单作废。写文件任务跳过本规则，全部判据交给 judge 核对文件。
+4. must_include 只能写任务里必须出现的专有名词、术语、文件名、命令或固定写法，2–12 字；禁止写概念性描述或句子，禁止含“和/与/及/或/是/的”等连接词。概念要求（如“说明作用”“解释过程”）不要用 must_include，写在 criterion/check 交给 judge。多个术语用数组时，默认 match=min（至少 ceil(n/2) 项）；功能清单/举例用 match=min 或 any，只有“SYN 与 ACK 都必须出现”这类硬约束才写 match=all；需要精确数量时写 min_matches。例如 must_include 用 “SYN”“ACK”“操作系统”“进程调度”，不要写“管理计算机硬件和资源”。禁止使用 REVIEW-FINAL、REVIEW-START 这类测试标记；禁止保留 <...> 占位符。写文件任务不要使用本键。
+5. 普通任务至少一条使用 must_not_include（禁止出现的词）、min_points（至少几个要点）、pattern（通配：* 任意、? 单字符、| 或；或 regex 引擎下的正则）或 regex（真正则，可配 min_matches）。判据要能区分“答对”和“照抄判据”。写文件任务跳过本规则。
+5b. 普通任务至少留一条“描述型”判据：只写 criterion/check，不写任何硬键，交给 judge 评估。描述型不要超过 2 条。写文件任务全部判据都是描述型。
 6. 判据必须是任务本身可验证的事实（结论关键词、文件名、命令、路径、格式），不要评价“逻辑清晰”“内容完整”这类无法核对的话。
 7. criterion 和 check 必须写出这条判据的具体含义；禁止照抄示例里的占位符或“这项检查什么”“怎么核对”这类空话。
 8. 示例只示范字段名与结构。不要在判据里讨论占位符、示例、模板本身，不要把 __FILL_*__ 写进 must_not_include；不要写“禁止使用占位符”这类自我指涉的条目。
@@ -1327,15 +1327,22 @@ const GUIDE_SYSTEM: &str = r#"你是 Review-Gate 的指导者（guide）。你�
 /// 拼 guide 的用户消息；`feedback` 非空时把上次的 schema 错误原样回注。
 fn guide_user_prompt(input: &str, environment: &str, feedback: &str) -> String {
     let mut out = format!("[REVIEW-GUIDE]\n任务输入：\n{input}\n\n环境摘要：\n{environment}");
-    if featheragent::util::requests_file_write(input) {
+    let file_task = featheragent::util::requests_file_write(input);
+    if file_task {
         out.push_str(
-            "\n\n[写文件任务]\n这是写文件任务。判据只写 criterion/check，让 judge 核对内核提供的文件内容与 tool.fs.write 成功记录；不要在 must_include 里猜文件正文的具体词，也不要要求最终答复逐字复述文件。",
+            "\n\n[写文件任务]\n这是写文件任务。只写 criterion/check，让 judge 核对内核提供的文件内容与 tool.fs.write 成功记录；不要写 must_include/must_not_include/min_points/pattern/regex，不要猜文件正文的具体词，也不要要求最终答复逐字复述文件。",
         );
     }
     if !feedback.trim().is_empty() {
+        let instruction = if file_task {
+            "请对照上面的 JSON 结构重写：写文件任务只写 criterion/check，不要写任何硬键。"
+        } else {
+            "请对照上面的 JSON 结构重写：判据要写在 must_include / must_not_include / min_points / pattern 上，criterion 和 check 只是说明。"
+        };
         out.push_str(&format!(
-            "\n\n[上一次的判据不合格，必须修正]\n{}\n请对照上面的 JSON 结构重写：判据要写在 must_include / must_not_include / min_points / pattern 上，criterion 和 check 只是说明。",
-            feedback.trim()
+            "\n\n[上一次的判据不合格，必须修正]\n{}\n{}",
+            feedback.trim(),
+            instruction
         ));
     }
     out
@@ -1614,6 +1621,29 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
                 "验收项 {} 的 criterion/check 是示例占位符或空话（criterion=『{criterion}』，check=『{check}』）：必须换成当前任务的具体判据",
                 i + 1
             ));
+        }
+        // N29：写文件任务不按答案字面校验 guide 产出的硬键。文件任务的判据天然
+        // 会写“行首 - ”这类符号（会被 2 字术语下限误杀），也可能与“必须有硬键”
+        // 的普通任务规则冲突。这里一次性剥掉所有硬键，只留 criterion/check 给
+        // judge 结合文件正文核对；空/占位 criterion 仍会被上面的检查拦住。
+        if file_task {
+            let id = item
+                .get("id")
+                .and_then(|x| x.as_str())
+                .filter(|x| !x.trim().is_empty())
+                .map(|x| x.to_string())
+                .unwrap_or_else(|| format!("c{}", i + 1));
+            let weight = item.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0);
+            let mut norm = serde_json::Map::new();
+            norm.insert("id".into(), json!(id));
+            norm.insert("criterion".into(), json!(criterion));
+            norm.insert("check".into(), json!(check));
+            norm.insert("weight".into(), json!(weight.clamp(0.1, 10.0)));
+            norm.insert("judge_only".into(), json!(true));
+            norm.insert("file_task".into(), json!(true));
+            judge_only_ids.push(id.clone());
+            out.push(Value::Object(norm));
+            continue;
         }
         let mut norm = serde_json::Map::new();
         // must_include：关键词/短语，禁整句，≤20 字。7B 有时写成数组（如 ["SYN","ACK"]），
@@ -1957,7 +1987,7 @@ fn parse_rubric_with_input(text: &str, input: &str) -> Result<Value, String> {
     } else {
         warnings.push("没有描述型判据：judge 不参与本轮，全部由确定性判据决定".to_string());
     }
-    if substring_only {
+    if substring_only && !file_task {
         warnings.push(
             "判据全是字面短语，建议再加一条 must_not_include / min_points / pattern 以覆盖格式与要点"
                 .to_string(),
@@ -2960,6 +2990,28 @@ mod tests {
         );
         assert!(v["rubric"][0].get("must_include").is_none(), "{v}");
         assert!(v["rubric"][1].get("judge_only").is_some(), "{v}");
+    }
+
+    #[test]
+    fn review_rubric_file_task_bypasses_symbol_term_limit() {
+        let v = parse_rubric_with_input(
+            r#"{"rubric":[
+                {"id":"c1","criterion":"notes3.txt 存在且包含三条内存管理要点，每条以 - 开头","check":"核对文件内容、行数与行首格式","must_include":["-"],"min_points":3,"pattern":"(?m)^- "},
+                {"id":"c2","criterion":"使用 tool.fs.write 写入文件","check":"核对写入成功记录与文件正文"}
+            ]}"#,
+            "请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头",
+        )
+        .unwrap();
+        assert_eq!(v["file_task"], true, "{v}");
+        assert_eq!(v["hard_items"], 0, "{v}");
+        assert_eq!(v["rubric"][0]["judge_only"], true, "{v}");
+        assert!(v["rubric"][0].get("must_include").is_none(), "{v}");
+        assert!(v["rubric"][0].get("pattern").is_none(), "{v}");
+        assert!(v["judge_only"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "c1"));
     }
 
     #[test]

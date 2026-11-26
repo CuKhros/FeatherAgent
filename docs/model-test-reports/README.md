@@ -36,8 +36,13 @@ Reports that only contain build/UI defect checklists are intentionally excluded.
 | [v1.2.1-rc.4.1](reports/Windows真机复测报告-v1.2.1-rc.4.1.md) | Four task classes, 4 points each: 15/16 vs 15/16; 49 s vs 104 s | Controlled bare-vs-FA comparison |
 | [v1.2.1-rc.4.2](reports/Windows真机复测报告-v1.2.1-rc.4.2.md) | Seven-question exam, 24 points: 24/24 vs 17/24; 143 s vs 332 s | Larger mixed-task comparison, including two bare-model empty responses |
 | [v1.2.1-rc.4.3](reports/Windows真机复测报告-v1.2.1-rc.4.3.md) | Seven-question exam, 24 points: 22/24 vs 11/24; 123 s vs 335 s; bare Q4–Q7 returned empty after 50–66 s | Confirms answer-only code delivery and exposes the write-task judge gap, plus a bench hang that blocked N19 |
+| [v1.2.1-rc.4.4](reports/Windows真机复测报告-v1.2.1-rc.4.4.md) | Large exam 1 (20 questions, 54 points): 50.5/54 vs 30.0/54; 319 s vs 856 s; 8 bare-model empty responses; bench 47.1 ms, cold start 214.1 ms | Confirms N23/N19 are fixed and exposes the N29 rule conflict on write-file tasks |
 
-Ten reports are preserved in their original Chinese wording. Only local Windows usernames were replaced with `[user]` before publication. Other commands, ports, model names, and event traces are unchanged.
+Eleven reports are preserved in their original Chinese wording. Local Windows usernames were replaced before publication. Commands, ports, model names, and event traces are unchanged.
+
+## Exam papers
+
+[`exam-papers/`](exam-papers/) contains five reusable papers (`small-a`, `small-b`, `small-c`, `large-1`, `large-2`): 62 questions and 171 points in total. It ships only the paper JSON and a format note, with no runner or historical results. Per-paper counts and full scores follow the `full_score` field in each JSON.
 
 ## Extracted data
 

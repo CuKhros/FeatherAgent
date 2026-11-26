@@ -66,7 +66,7 @@ No built-in inference engine, no model weights, no cloud account, no telemetry, 
 | Platform | Arch | Build path | Release form | Current state |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | native `cargo` / `scripts/build-linux.sh` | three tar.gz artifacts | **tested** (automation, TUI PTY, WebUI, mock/Ollama integration) |
-| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with ten exes (Chinese + English `-en`) | **tested** (v1.1.9 real hardware; rc.4.2/rc.4.3 retested; v1.2.1-rc.4.4 package pending retest) |
+| Windows x64 | x86_64 | mingw-w64 cross-compile / `scripts/build-windows.sh` | one zip with ten exes (Chinese + English `-en`) | **tested** (v1.1.9 real hardware; rc.4.2/rc.4.3/rc.4.4 retested; v1.2.1-rc.4.5 package pending retest) |
 | Linux arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows arm64 | aarch64 | no build script | none | not supported, untested |
 | Windows x86 | i686 | no build script | none | not supported, untested |
@@ -116,7 +116,7 @@ At runtime the install root gets `data/`, `workspace/`, and `runtime/`. Use `--d
 
 ## Quick start (Windows x64 test package)
 
-Unzip `FeatherAgent-1.2.1-rc.4.4-windows-x64.zip` into a writable directory (not `Program Files`), then:
+Unzip `FeatherAgent-1.2.1-rc.4.5-windows-x64.zip` into a writable directory (not `Program Files`), then:
 
 ```powershell
 .\featheragent.exe help                       # Chinese command table
@@ -131,19 +131,19 @@ Unzip `FeatherAgent-1.2.1-rc.4.4-windows-x64.zip` into a writable directory (not
 
 The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runtime). `serve` prints a banner immediately; first launch can take 1–2 minutes while antivirus scans plugin binaries and prints `[init]` progress. If `runtime\ipc\ready` is absent, `chat` reports "kernel not ready (starting)" rather than a channel failure. Build: `scripts/build-windows.sh` (mingw-w64 + `x86_64-pc-windows-gnu` + static CRT); package: `scripts/package-windows.sh`. See [Windows Test Guide](docs/Windows-Test-Guide.md) ([中文](docs/Windows测试说明.zh-CN.md)).
 
-## Platform gate differences (v1.2.1-rc.4.4)
+## Platform gate differences (v1.2.1-rc.4.5)
 
 | Gate | Linux | Windows | Notes |
 |---|---|---|---|
 | Warm in-process startup P50 | < 20 ms | **< 100 ms** | same install root, 1 warm-up discarded + 5 samples |
 | Cold spawn → socket P50 | < 100 ms | **< 250 ms** | real `serve` child process; Windows includes DLL load and real-time protection |
-| Event write P95 | < 100 µs | **< 10 ms** | NTFS `FlushFileBuffers` + real-time protection; environmental, one order of magnitude |
+| Event write P95 | < 100 µs | **< 10 ms strict; 10–20 ms advisory** | NTFS `FlushFileBuffers` + real-time protection; edge jitter is advisory, above 20 ms still fails |
 | Kernel size | ≤ 8 MB | ≤ 8 MB | shared |
 | Idle RSS | ≤ 15 MB | ≤ 15 MB | shared |
 | Context assembly P95 | < 30 ms | < 30 ms | shared |
 | RPC P95 | < 1 ms | < 1 ms | shared |
 
-`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `boot_sample_count`, `boot_ms_p50`/`boot_ms_p90`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; release gates live under `gates`, while `boot_gate_trusted`, `boot_gate_status` and `reliability` live under `advisory_gates` and are not counted in `passed/total`. `metrics.env` carries `mem_load_pct` and a `note` when the host is above 85% memory. Windows is not hard-coded as a failure.
+`bench --json` returns `platform`, `boot_mode`, `boot_samples_ms`, `boot_sample_count`, `boot_ms_p50`/`boot_ms_p90`, `cold_spawn_ms_p50`, `boot_limit_ms`, `cold_spawn_limit_ms`, and `write_limit_us`; the write gate adds `write_gate_status` (`pass|advisory|fail`) and `write_gate_raw`. Release gates live under `gates`, while `boot_gate_trusted`, `boot_gate_status` and `reliability` live under `advisory_gates` and are not counted in `passed/total`. `metrics.env` carries `mem_load_pct` and a `note` when the host is above 85% memory. Windows is not hard-coded as a failure.
 
 ## Contributing and license
 
@@ -160,9 +160,10 @@ The ten exes depend only on Windows system DLLs (no VC++ runtime, no MinGW runti
 - **[Architecture Design v1.1](docs/Architecture-Design-v1.1.md)** — full design: v1.0 → v1.1 changes, erratum R1, technology inventory, roadmap, risks ([中文](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md))
 - **[Verification Report](docs/Verification-Report.md)** — test matrix, measured gate numbers, fixed defects, untested items and deviations ([中文](docs/验证报告.zh-CN.md))
 - **[Frontend Contract · Wire Format](docs/Wire-Format.md)** — 4-byte little-endian length + MsgPack/JSON, endpoint discovery, handshake order, error codes ([中文](docs/前端契约-WireFormat.zh-CN.md))
+- **[v1.2.1-rc.4.5 Changes](docs/v1.2.1-rc.4.5-Changes.md)** — write-file tasks skip hard criteria and go fully to the judge, the Windows write gate becomes advisory at the edge, L17 recognises bold numbering, and the rc.4.4 report plus five exam papers are archived ([中文](docs/v1.2.1-rc.4.5-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4.4 Changes](docs/v1.2.1-rc.4.4-Changes.md)** — bench stop/join deadlines and temp-dir cleanup, file-task review routed to the judge, XML open-tag recovery, comparison-axis coverage, and TUI overscroll clamping ([中文](docs/v1.2.1-rc.4.4-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4.3 Changes](docs/v1.2.1-rc.4.3-Changes.md)** — one-shot IPC probe for cold spawn, code-vs-file output prompt, comparison-axis coverage, write-task review evidence, and the curated model-report archive ([中文](docs/v1.2.1-rc.4.3-变更说明.zh-CN.md))
-- **[Model Test Reports](docs/model-test-reports/README.md)** — ten curated Windows real-machine reports with reusable local-model data, plus extracted CSVs ([中文](docs/model-test-reports/README.zh-CN.md))
+- **[Model Test Reports](docs/model-test-reports/README.md)** — eleven curated Windows real-machine reports with reusable local-model data, plus extracted CSVs and five reusable exam papers ([中文](docs/model-test-reports/README.zh-CN.md))
 - **[v1.2.1-rc.4.2 Changes](docs/v1.2.1-rc.4.2-Changes.md)** — XML-style tool-call recovery, bench RPC connect retries on Windows, `advisory_gates` separation, and concise-vs-complete prompt wording ([中文](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4.1 Changes](docs/v1.2.1-rc.4.1-Changes.md)** — path/file `must_include` exemption, plain-text tool-call recovery and alias normalization, auditable `data/web-artifacts` copies, and `rubric-final` artifacts; documents the 4B long-flow boundary ([中文](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md))
 - **[v1.2.1-rc.4 Changes](docs/v1.2.1-rc.4-Changes.md)** — `must_include` match modes, subjective/banned-word validation, unique bench temp dirs with structured errors, reliability-aware boot gate, duplicate tool-call suppression, search-result artifacts, and WebUI/TUI file attachments ([中文](docs/v1.2.1-rc.4-变更说明.zh-CN.md))
@@ -186,6 +187,8 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 ## Status
 
+`v1.2.1-rc.4.5` fixes N29–N31 from the rc.4.4 retest. Explicit write-file tasks no longer require guide hard criteria: all criteria go to the judge, `parse_rubric` strips `must_include`/`min_points`/`pattern` and similar deterministic keys when `file_task` is true, and `must_include:["-"]` no longer trips the two-character term rule; `review_prepare` no longer retries a write-file task for having zero hard items. On Windows the write gate marks 10–20 ms edge jitter as `advisory` with `write_gate_raw` preserved, while above 20 ms still fails; Linux stays strict at 100 µs. The L17 test scorer now recognises `**1.**` bold numbering. rc.4.5 adds one unit test and turns the `REVIEW_WRITE` fixture into the N29 bad-symbol hard-key case.
+
 `v1.2.1-rc.4.4` fixes the five findings from the rc.4.3 retest plus a TUI overscroll bug. `Server::stop` now retries its named-pipe wake connection for a 3-second budget and bench joins with a 5-second deadline instead of hanging; bench temp dirs are removed through a `Drop` guard and stale `fa-bench-*` dirs older than 24 hours are cleaned at startup. Explicit write-file tasks route all guide criteria to the judge, carry `tool.fs.write path=... status=success` plus the file body as evidence, and no longer fail because the final answer does not repeat guide-invented words; a successful write followed by malformed XML falls back to a deterministic written-path answer. XML function open tags missing `>` are recovered, comparison answers must cover each requested axis, and both TUIs clamp `chat_scroll` at the top so overscroll no longer delays the next Down. N23–N27 still need real-hardware confirmation; N28 is a test-scorer limitation.
 
 `v1.2.1-rc.4.3` fixes the four findings from the rc.4.2 retest. `serve` now uses a one-shot `ipc::try_connect` for its existing-kernel probe, so a clean install root no longer waits the 3-second pipe retry before starting; normal clients keep the bounded retry. Code/text/plan/translation answers stay in the response unless the user explicitly asks to save or write a file. List and comparison answers map their first-level items to the requested axes, covering performance/overhead when no axes are given. For explicit write-file tasks, review-gate receives the successful write path and content as labelled evidence and checks the file rather than demanding a verbatim answer; the prompt also stops repeated post-write reads. N15–N18 were confirmed by the rc.4.2 retest.
@@ -204,6 +207,6 @@ Historical Windows retest notes are Chinese-only and use the `.zh-CN.md` suffix:
 
 `v1.2.1-rc.3` made plugin settings a declaration: a plugin states its settings schema in `plugins/<name>/plugin.json` (`manifest.settings`: root, title, description, and `bool|int|number|string|enum` fields with range/options), the kernel relays it through the `plugin.settings` RPC and validates writes in `config.set`, and the TUI and WebUI render any plugin's form generically. It also closed the review-gate and S3 findings H1–H4 from the rc.2.1 retest: phrase-only rubrics with four criterion kinds and a pre-judge hardcheck, judge evidence that must be a verbatim ≥10-character window of the answer, an explicit “unknown tool + available tools” correction, and S3 t5/t6 prompts that ask for a single tool call.
 
-Linux automation has **198 tests: 197 passed, 1 ignored by default** (76 lib, 33 plugin ×2, 2 kernel, 6 TUI, 1 TUI-en, 4 WebUI ×2, 2 golden, 37 integration); the English worker/WebUI aliases repeat the plugin and WebUI modules, so those cases run twice. The ignored network-dependent test needs public network. `fmt` and `clippy -D warnings` pass. Release bench: kernel **2,568,520 B (2.45 MiB)**; warm P50 **1.221 / 1.198 / 1.174 ms**; cold spawn P50 **3.567 / 3.060 / 3.099 ms**; all seven release gates are green and `reliability:"high"`. Settings pages were verified at rc.3 on both front ends: TUI through a PTY and the WebUI bridge over WebSocket.
+Linux automation has **201 tests: 200 passed, 1 ignored by default** (76 lib, 34 plugin ×2, 3 kernel, 6 TUI, 1 TUI-en, 4 WebUI ×2, 2 golden, 37 integration); the English worker/WebUI aliases repeat the plugin and WebUI modules, so those cases run twice. The ignored network-dependent test needs public network. `fmt` and `clippy -D warnings` pass. Release bench: kernel **2,568,840 B (2.45 MiB)**; warm P50 **1.182 / 1.194 / 1.176 ms**; cold spawn P50 **3.413 / 3.239 / 3.160 ms**; all required release gates are green, `write_gate_status:"pass"`, `write_gate_raw:true`, and `reliability:"high"`. Settings pages were verified at rc.3 on both front ends: TUI through a PTY and the WebUI bridge over WebSocket.
 
-Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, then rc.4.1, rc.4.2 and rc.4.3 retests. The rc.4.3 report confirmed N20 and found N23–N27: a bench hang after step 2, a write task still failed against guide-invented words, XML recovery regressed, TCP/UDP coverage stayed at two axes, and timed-out bench runs left temp dirs. This candidate fixes those five and the TUI overscroll. The v1.2.1-rc.4.4 Windows package contains ten exes (five Chinese, five English `-en`) and is cross-compiled; its automation runs only on Linux. N23–N27 still need real-hardware confirmation. Wine 6.0.3 passed `version` and three `bench --json` runs with a temporary `bcryptprimitives` stub; boot/RSS under Wine are not Windows conclusions.
+Windows x64 has gone through nine real-hardware rounds from v1.1.3 to v1.1.9, then rc.4.1, rc.4.2, rc.4.3 and rc.4.4 retests. The rc.4.3 report confirmed N20 and found N23–N27: a bench hang after step 2, a write task still failed against guide-invented words, XML recovery regressed, TCP/UDP coverage stayed at two axes, and timed-out bench runs left temp dirs. The rc.4.4 retest confirmed N23 and that N25 no longer appears, leaving N29–N31. This candidate fixes N29–N31. The v1.2.1-rc.4.5 Windows package contains ten exes (five Chinese, five English `-en`) and is cross-compiled; its automation runs only on Linux. N29–N31 still need real-hardware confirmation. Wine 6.0.3 passed `version` and three `bench --json` runs with a temporary stub; boot/RSS/write-gate under Wine are not Windows conclusions.

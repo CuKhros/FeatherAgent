@@ -1,0 +1,481 @@
+{
+ "id": "large-1",
+ "name": "大试卷 1 · 全领域二十题",
+ "size": "large",
+ "full_score": 54,
+ "desc": "代码×4 调试×2 设计×2 翻译×2 知识×4 数学×2 摘要×2 推理×2，覆盖八个领域，适合长时间跑的完整回归",
+ "questions": [
+  {
+   "id": "L01",
+   "domain": "代码",
+   "prompt": "用 Python 实现 LRU 缓存类，get/put 平均 O(1)，写完整可运行代码并说明复杂度。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "类结构",
+     "type": "regex",
+     "val": "class |def ",
+     "w": 1
+    },
+    {
+     "name": "哈希+链表",
+     "type": "regex",
+     "val": "dict|OrderedDict|双向链表|linked list",
+     "w": 1
+    },
+    {
+     "name": "O(1)",
+     "type": "regex",
+     "val": "O\\(1\\)",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L02",
+   "domain": "代码",
+   "prompt": "用 Python 实现快速排序，要求原地或说明空间复杂度，并给 2 个测试。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "函数",
+     "type": "regex",
+     "val": "def ",
+     "w": 1
+    },
+    {
+     "name": "递归或分区",
+     "type": "regex",
+     "val": "partition|递归|pivot",
+     "w": 1
+    },
+    {
+     "name": "复杂度",
+     "type": "regex",
+     "val": "O\\(n",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L03",
+   "domain": "代码",
+   "prompt": "写一个函数，判断两个字符串是否为字母异位词（anagram），要求 O(n)。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "函数",
+     "type": "regex",
+     "val": "def ",
+     "w": 1
+    },
+    {
+     "name": "计数",
+     "type": "regex",
+     "val": "Counter|count|sorted|字典",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L04",
+   "domain": "代码",
+   "prompt": "用 Python 实现一个线程安全的单例（双重检查或装饰器均可）。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "单例",
+     "type": "regex",
+     "val": "class |__new__|singleton",
+     "w": 1
+    },
+    {
+     "name": "加锁",
+     "type": "regex",
+     "val": "Lock|lock|锁",
+     "w": 1
+    },
+    {
+     "name": "双重检查",
+     "type": "regex",
+     "val": "double|两次|None",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L05",
+   "domain": "调试",
+   "prompt": "这段代码为什么会输出 [1,2] 而不是 [1]？给出修正：\n\ndef add(item, box=[]):\n    box.append(item); return box\nprint(add(1)); print(add(2))",
+   "full": 2,
+   "checks": [
+    {
+     "name": "可变默认参数",
+     "type": "regex",
+     "val": "默认参数|可变|mutable",
+     "w": 1
+    },
+    {
+     "name": "修正",
+     "type": "regex",
+     "val": "None|copy|内部初始化",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L06",
+   "domain": "调试",
+   "prompt": "找出下面 SQL 的问题：SELECT * FROM orders WHERE created_at > '2026-01-01' AND amount > AVG(amount);",
+   "full": 3,
+   "checks": [
+    {
+     "name": "聚合不能在 WHERE",
+     "type": "regex",
+     "val": "WHERE.*聚合|不能用.*聚合|HAVING",
+     "w": 1
+    },
+    {
+     "name": "改 HAVING/子查询",
+     "type": "regex",
+     "val": "HAVING|子查询|subquery",
+     "w": 1
+    },
+    {
+     "name": "SELECT *",
+     "type": "regex",
+     "val": "SELECT \\*|全字段|只查需要",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L07",
+   "domain": "设计",
+   "prompt": "设计一个短链接服务，说明 ID 生成、存储、跳转与统计方案。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "ID 生成",
+     "type": "regex",
+     "val": "发号|雪花|snowflake|自增|base62|哈希",
+     "w": 1
+    },
+    {
+     "name": "存储",
+     "type": "regex",
+     "val": "存储|表|KV|Redis|MySQL",
+     "w": 1
+    },
+    {
+     "name": "跳转/统计",
+     "type": "regex",
+     "val": "301|302|重定向|统计|计数",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L08",
+   "domain": "设计",
+   "prompt": "设计一个秒杀系统，列出三个关键点与对应手段。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "限流/削峰",
+     "type": "regex",
+     "val": "限流|队列|削峰|预热",
+     "w": 1
+    },
+    {
+     "name": "库存一致",
+     "type": "regex",
+     "val": "库存|超卖|扣减|原子",
+     "w": 1
+    },
+    {
+     "name": "防刷",
+     "type": "regex",
+     "val": "防刷|令牌|验证码|风控",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L09",
+   "domain": "翻译",
+   "prompt": "翻译成中文并保留术语：\n\nThe system enforces backpressure by bounding the queue capacity; when the queue is full, producers are blocked rather than dropping messages.",
+   "full": 3,
+   "checks": [
+    {
+     "name": "背压",
+     "type": "regex",
+     "val": "背压|backpressure",
+     "w": 1
+    },
+    {
+     "name": "队列容量",
+     "type": "regex",
+     "val": "队列|queue|容量",
+     "w": 1
+    },
+    {
+     "name": "阻塞而非丢弃",
+     "type": "regex",
+     "val": "阻塞|block|丢弃|drop",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L10",
+   "domain": "翻译",
+   "prompt": "把下面这句译成英文：分布式事务的最终一致性通过补偿机制来保证。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "英文",
+     "type": "regex",
+     "val": "^[^\\u4e00-\\u9fff]*$",
+     "w": 1
+    },
+    {
+     "name": "术语",
+     "type": "regex",
+     "val": "eventual|compensat|distributed",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L11",
+   "domain": "知识",
+   "prompt": "解释 CAP 与 PACELC 的关系，各举两个真实系统。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "CAP",
+     "type": "regex",
+     "val": "\\bCAP\\b",
+     "w": 1
+    },
+    {
+     "name": "PACELC",
+     "type": "regex",
+     "val": "PACELC",
+     "w": 1
+    },
+    {
+     "name": "例子",
+     "type": "regex",
+     "val": "Dynamo|Cassandra|Spanner|Mongo|Redis",
+     "w": 1
+    },
+    {
+     "name": "延迟",
+     "type": "regex",
+     "val": "延迟|latency",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L12",
+   "domain": "知识",
+   "prompt": "TCP 与 UDP 的三个主要区别，列成三条。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "连接",
+     "type": "regex",
+     "val": "连接|握手",
+     "w": 1
+    },
+    {
+     "name": "可靠",
+     "type": "regex",
+     "val": "可靠|重传|确认",
+     "w": 1
+    },
+    {
+     "name": "开销/场景",
+     "type": "regex",
+     "val": "开销|头部|header|场景|实时",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L13",
+   "domain": "知识",
+   "prompt": "HTTP/1.1、HTTP/2、HTTP/3 的核心演进各一句话。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "1.1",
+     "type": "regex",
+     "val": "1\\.1.*(keep-alive|长连接|管道)",
+     "w": 1
+    },
+    {
+     "name": "2",
+     "type": "regex",
+     "val": "多路复用|multiplex",
+     "w": 1
+    },
+    {
+     "name": "3",
+     "type": "regex",
+     "val": "QUIC|UDP",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L14",
+   "domain": "知识",
+   "prompt": "解释数据库索引为什么能加速查询，以及什么时候会失效。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "B+树/结构",
+     "type": "regex",
+     "val": "B\\+|B-|树|索引结构",
+     "w": 1
+    },
+    {
+     "name": "减少扫描",
+     "type": "regex",
+     "val": "减少|扫描|IO|范围",
+     "w": 1
+    },
+    {
+     "name": "失效",
+     "type": "regex",
+     "val": "失效|不走索引|函数|类型转换|LIKE",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L15",
+   "domain": "数学",
+   "prompt": "生日悖论：n 至少多少才使「至少两人同生日」概率 > 50%？给出答案与思路。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "23",
+     "type": "regex",
+     "val": "\\b23\\b",
+     "w": 1
+    },
+    {
+     "name": "补集思路",
+     "type": "regex",
+     "val": "补集|对立|都不同|1-",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L16",
+   "domain": "数学",
+   "prompt": "一个公平硬币抛 10 次，恰好 5 次正面的概率约是多少？给出式子。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "组合数",
+     "type": "regex",
+     "val": "C\\(10|\\\\binom|组合",
+     "w": 1
+    },
+    {
+     "name": "数值",
+     "type": "regex",
+     "val": "0\\.24|24\\.6|约\\s*0\\.25",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L17",
+   "domain": "摘要",
+   "prompt": "把下面压成 3 条备忘，每条不超 40 字：\n\n服务上线后出现间歇性超时，排查发现数据库连接池上限为 10，而并发请求峰值达到 80，导致大量请求排队等待连接。将连接池上调至 100 并加入超时熔断后，超时率从 12% 降到 0.3%。后续计划引入读写分离进一步降低主库压力。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "三条",
+     "type": "regex",
+     "val": "(?m)^\\s*(\\d+[.、)]|[-*]|\\*\\*\\d+[.、)]\\*\\*)\\s+",
+     "w": 3
+    },
+    {
+     "name": "含数据",
+     "type": "regex",
+     "val": "12%|0\\.3%|100",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L18",
+   "domain": "摘要",
+   "prompt": "用 50 字以内说明「什么是技术债」。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "字数",
+     "type": "len_le",
+     "val": 120,
+     "w": 1
+    },
+    {
+     "name": "权衡",
+     "type": "regex",
+     "val": "短期|权衡|代价|将来|偿还",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L19",
+   "domain": "推理",
+   "prompt": "三个开关三盏灯，只能上楼一次，如何确定对应关系？",
+   "full": 3,
+   "checks": [
+    {
+     "name": "热量",
+     "type": "regex",
+     "val": "热|温度",
+     "w": 1
+    },
+    {
+     "name": "步骤",
+     "type": "regex",
+     "val": "先开|等.*分钟|关掉|摸",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "L20",
+   "domain": "推理",
+   "prompt": "有 8 个球，其中 1 个较重，用天平最少称几次能找出？说明方法。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "2 次",
+     "type": "regex",
+     "val": "\\b2\\b|两次|二次",
+     "w": 1
+    },
+    {
+     "name": "三分法",
+     "type": "regex",
+     "val": "3.*3|三分|分成三",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}

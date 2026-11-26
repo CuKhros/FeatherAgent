@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.4.4** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.4.5** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.4","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.5","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -349,6 +349,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 A local file inside the install root returns `copied:false` and its canonical path; an outside file is copied to the default workspace. Browser bytes always land in the default workspace. The model receives only `result.path`, never the browser path or the outside source.
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.4.5: no new frame, endpoint, event kind, or error code. `review.verdict` keeps its fields; write-file tasks simply produce judge-only rubric items. `bench --json` keeps its shape and adds `write_gate_status` / `write_gate_raw` inside `gates`.
 - 1.2.1-rc.4.4: no new frame, endpoint, event kind, or error code. The write-task review now feeds the judge `tool.fs.write` success plus file content inside the existing review payload; bench stop/join and temp-dir cleanup are internal, and `chat_scroll` clamping is TUI-local. `review.verdict` fields (`pass`/`failed`/`items`/`evidence`/`attempts`/`votes`/`artifacts`) are unchanged. `bench --json` shape is unchanged; failures now return explicit `bench:boot_stop` / `bench:rpc_stop` text in `error`.
 - 1.2.1-rc.4.3: no new frame, endpoint, event kind, or error code. The review-gate file-content evidence for explicit write tasks is internal engine/plugin input, not a wire payload; `ipc::try_connect` and the cold-spawn measurement fix are internal. All external methods, events and status values are unchanged.
 - 1.2.1-rc.4.2: no new frame, endpoint, event kind, or error code. `bench --json` moves `boot_gate_trusted` out of `gates` and into a top-level `advisory_gates` object with `boot_gate_status` and `reliability`; `metrics` keeps the diagnostic field. The context parser also recovers XML-style function/parameter calls, and the Ollama provider can salvage them from accumulated stream text; this is provider-side compatibility, not a wire change. All additive.

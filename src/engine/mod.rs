@@ -2105,6 +2105,10 @@ impl Kernel {
                         .and_then(|x| x.as_array())
                         .map(|x| x.len() as u64)
                         .unwrap_or(0);
+                    let file_task = parsed
+                        .get("file_task")
+                        .and_then(|x| x.as_bool())
+                        .unwrap_or(false);
                     // M3：只有主观/空描述条目时不算可执行判据；重试用尽也不能放行。
                     if hard_items == 0 && judge_only_count == 0 {
                         last = "整份清单没有可执行判据：只有主观评价或空描述，必须补一条可计数/可核对的判据".into();
@@ -2119,7 +2123,9 @@ impl Kernel {
                     }
                     // 一条硬判据都没有时先带错误回注重试；重试用尽后仍然接受，
                     // 由 judge 逐条评估并打 review.warn，而不是整轮 degraded。
-                    if hard_items == 0 && attempt < REVIEW_GUIDE_ATTEMPTS {
+                    // N29：写文件任务的判据全部是 judge-only，不能再用“必须有硬判据”
+                    // 的普通任务规则逼 guide 重试。
+                    if hard_items == 0 && attempt < REVIEW_GUIDE_ATTEMPTS && !file_task {
                         last = "整份清单没有硬判据：criterion/check 只是说明，判据必须写在 must_include / must_not_include / min_points / pattern 上".into();
                         self.emit(
                             &session.id,

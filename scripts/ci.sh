@@ -32,6 +32,10 @@ required = ['binary_le_8mb', 'boot_lt_20ms', 'cold_spawn_lt_100ms',
 bad = [k for k in required if gates.get(k) is not True]
 if bad:
     raise SystemExit(f"bench 门禁未过: {bad}; gates={gates}")
+if gates.get('write_gate_status') not in ('pass', 'advisory'):
+    raise SystemExit(f"write_gate_status 非法: {gates.get('write_gate_status')!r}; gates={gates}")
+if not isinstance(gates.get('write_gate_raw'), bool):
+    raise SystemExit(f"write_gate_raw 缺失或类型错误; gates={gates}")
 m = v.get('metrics') or {}
 print(f"bench 通过: boot_p50={m.get('boot_ms_p50')}ms cold_p50={m.get('cold_spawn_ms_p50')}ms")
 PY_BENCH

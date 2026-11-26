@@ -1,0 +1,141 @@
+{
+ "id": "small-c",
+ "name": "小试卷 C · 语言六题",
+ "size": "small",
+ "full_score": 15,
+ "desc": "翻译 / 改写 / 术语 / 纠错 / 压缩 / 问答，偏语言与表达",
+ "questions": [
+  {
+   "id": "C1",
+   "domain": "翻译",
+   "prompt": "把下面这段翻译成中文，保留术语：\n\nThe client retries idempotent requests up to three times with exponential backoff. Non-idempotent operations must not be retried automatically.",
+   "full": 3,
+   "checks": [
+    {
+     "name": "幂等",
+     "type": "regex",
+     "val": "幂等|idempotent",
+     "w": 1
+    },
+    {
+     "name": "退避",
+     "type": "regex",
+     "val": "退避|backoff|重试",
+     "w": 1
+    },
+    {
+     "name": "中文",
+     "type": "regex",
+     "val": "[\\u4e00-\\u9fff]{20,}",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "C2",
+   "domain": "改写",
+   "prompt": "把这句话改写成面向非技术读者的版本：「该服务通过异步消息队列解耦上下游，实现最终一致性。」",
+   "full": 2,
+   "checks": [
+    {
+     "name": "去术语",
+     "type": "regex",
+     "val": "消息|等待|排队",
+     "w": 1
+    },
+    {
+     "name": "通俗表达",
+     "type": "regex",
+     "val": "用户可以|简单说|相当于|不会立刻",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "C3",
+   "domain": "术语",
+   "prompt": "解释「幂等」「最终一致性」「背压」三个术语，每个一句话。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "幂等",
+     "type": "regex",
+     "val": "幂等",
+     "w": 1
+    },
+    {
+     "name": "最终一致",
+     "type": "regex",
+     "val": "最终一致",
+     "w": 1
+    },
+    {
+     "name": "背压",
+     "type": "regex",
+     "val": "背压|backpressure|压力",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "C4",
+   "domain": "纠错",
+   "prompt": "找出下面这句话的语病并修改：「通过这次优化，使得系统的响应时间得到了明显的下降。」",
+   "full": 2,
+   "checks": [
+    {
+     "name": "指出缺主语",
+     "type": "regex",
+     "val": "主语|使得|缺",
+     "w": 1
+    },
+    {
+     "name": "给改法",
+     "type": "regex",
+     "val": "本次优化|优化后|删除.*使得",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "C5",
+   "domain": "压缩",
+   "prompt": "把这段话压成不超过 25 字的一句话：「由于数据库连接池配置过小，在高并发场景下请求大量排队，进而引发了接口超时和用户投诉。」",
+   "full": 2,
+   "checks": [
+    {
+     "name": "字数",
+     "type": "len_le",
+     "val": 60,
+     "w": 1
+    },
+    {
+     "name": "保留因果",
+     "type": "regex",
+     "val": "连接池|池|并发|超时",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "C6",
+   "domain": "问答",
+   "prompt": "用一个类比解释「缓存」是什么。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "类比",
+     "type": "regex",
+     "val": "像|好比|类似|相当于",
+     "w": 1
+    },
+    {
+     "name": "命中/未命中",
+     "type": "regex",
+     "val": "命中|找不到|miss|第二次",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}

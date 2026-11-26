@@ -1,6 +1,18 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.4` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.5` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.5] - 2026-11-26
+
+### 修复
+- N29：明确写文件任务不再要求 guide 产出硬判据。`parse_rubric_with_input` 在 `file_task` 时只保留 judge-only 条目，剥掉 `must_include` / `min_points` / `pattern` 等确定性键，`must_include:["-"]` 不再触发“术语至少 2 字”；`review_prepare` 对写文件任务跳过“零硬判据”重试。测试：`review_rubric_file_task_bypasses_symbol_term_limit`；写文件集成夹具改为 N29 坏符号判据，仍要求 `approved` 且 judge `votes>0`。
+- N30：Windows 上写 P95 在 10–20 ms 之间标 `advisory`，不再整轮判红；超过 20 ms 仍 fail。`bench --json` 新增 `write_gate_status` 与 `write_gate_raw`，平台写 key 使用 effective 结果；Linux 仍按 100 µs。测试：`write_gate_marks_windows_edge_jitter_as_advisory`；CI 校验这两个新字段。
+- N31：large-1 的 L17 列表判据在 `1.`、`-`、`*` 之外识别 `**1.**` 粗体编号。这是测试评分规则改动，不是产品改动。
+
+### 文档
+- 归档 `Windows真机复测报告-v1.2.1-rc.4.4.md`，两份报告索引改为 11 份。
+- 新增 `docs/model-test-reports/exam-papers/`：5 份试卷（62 题 / 171 分）、修正后的索引；本机 runner 与历史结果不入库。
+- Linux 全量 201 项、200 通过、1 ignored。Release bench 三连跑：内核 2,568,840 B；热启动 P50 1.182/1.194/1.176 ms；冷启动 P50 3.413/3.239/3.160 ms；必需门禁全绿，`write_gate_status:"pass"`、`write_gate_raw:true`。
 
 ## [1.2.1-rc.4.4] - 2026-11-26
 

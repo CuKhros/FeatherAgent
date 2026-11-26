@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.4.4**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.4.5**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.4","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.5","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -350,6 +350,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 安装目录内的本地文件返回 `copied:false` 和 canonical 路径；目录外文件复制到默认工作区。浏览器字节总是落到默认工作区。模型只拿 `result.path`，不拿浏览器路径或目录外原路径。
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.4.5：没有新增帧、端点、事件类型或错误码。`review.verdict` 字段不变，写文件任务只是产出 judge-only 判据。`bench --json` 结构不变，`gates` 内新增 `write_gate_status` / `write_gate_raw`。
 - 1.2.1-rc.4.4：没有新增帧、端点、事件类型或错误码。写文件任务的 review 证据在既有载荷内增加 `tool.fs.write` 成功记录与文件正文；bench 停止/join 与临时目录清理属内部改动，`chat_scroll` 夹紧属 TUI 本地状态。`review.verdict` 的 `pass`/`failed`/`items`/`evidence`/`attempts`/`votes`/`artifacts` 字段不变。`bench --json` 结构不变，失败时 `error` 会返回明确的 `bench:boot_stop` / `bench:rpc_stop` 文本。
 - 1.2.1-rc.4.3：没有新增帧、端点、事件类型或错误码。写文件任务的 review 文件内容证据属于引擎/插件内部输入，不是 wire 载荷；`ipc::try_connect` 与冷启动测量修正均为内部改动。对外方法、事件和状态值不变。
 - 1.2.1-rc.4.2：没有新增帧、端点、事件类型或错误码。`bench --json` 把 `boot_gate_trusted` 从 `gates` 移到顶层 `advisory_gates`，与 `boot_gate_status`、`reliability` 同列；`metrics` 保留该诊断字段。上下文解析器也能恢复 XML 风格的 function/parameter 调用，Ollama provider 可从已累计流文本抢救；这是 provider 侧兼容，不是 wire 变更。均为增量。

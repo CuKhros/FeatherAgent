@@ -1,0 +1,211 @@
+{
+ "id": "small-b",
+ "name": "小试卷 B · 工程八题",
+ "size": "small",
+ "full_score": 22,
+ "desc": "SQL / 正则 / 日志排查 / 并发 / 测试 / 重构 / 缓存 / 接口设计，偏工程实操",
+ "questions": [
+  {
+   "id": "B1",
+   "domain": "SQL",
+   "prompt": "有一张 orders(id, user_id, amount, created_at)。写出「每个用户最近一次订单」的 SQL。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "窗口函数或子查询",
+     "type": "regex",
+     "val": "ROW_NUMBER|row_number|MAX\\(|max\\(|NOT EXISTS",
+     "w": 1
+    },
+    {
+     "name": "分组",
+     "type": "regex",
+     "val": "GROUP BY|PARTITION BY|group by",
+     "w": 1
+    },
+    {
+     "name": "表名",
+     "type": "regex",
+     "val": "orders",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B2",
+   "domain": "正则",
+   "prompt": "写一个正则，匹配形如 2026-11-26 的日期（年份 20xx）。只给正则。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "年份段",
+     "type": "regex",
+     "val": "20\\[0-9\\]|20\\\\d",
+     "w": 1
+    },
+    {
+     "name": "月日段",
+     "type": "regex",
+     "val": "\\[0-1\\]|\\\\d\\{2\\}",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B3",
+   "domain": "日志排查",
+   "prompt": "服务出现 502，日志里有 upstream timeout。列出 3 个最可能的排查方向。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "后端超时",
+     "type": "regex",
+     "val": "后端|upstream|超时.*服务|处理慢",
+     "w": 1
+    },
+    {
+     "name": "连接池/并发",
+     "type": "regex",
+     "val": "连接池|并发|队列|线程",
+     "w": 1
+    },
+    {
+     "name": "网络/网关",
+     "type": "regex",
+     "val": "网络|网关|proxy|DNS",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B4",
+   "domain": "并发",
+   "prompt": "解释为什么 i++ 在多线程下不安全，给出两种修复方式。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "非原子",
+     "type": "regex",
+     "val": "原子|atomic|读改写|race",
+     "w": 1
+    },
+    {
+     "name": "锁",
+     "type": "regex",
+     "val": "锁|lock|mutex",
+     "w": 1
+    },
+    {
+     "name": "原子变量/CAS",
+     "type": "regex",
+     "val": "atomic|CAS|原子变量|AtomicInteger",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B5",
+   "domain": "测试",
+   "prompt": "为一个「用户注册」接口列出 5 个测试用例（含边界与异常）。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "正常路径",
+     "type": "regex",
+     "val": "正常|成功|valid",
+     "w": 1
+    },
+    {
+     "name": "边界",
+     "type": "regex",
+     "val": "边界|长度|超长|空",
+     "w": 1
+    },
+    {
+     "name": "异常/重复",
+     "type": "regex",
+     "val": "重复|已存在|异常|非法",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B6",
+   "domain": "重构",
+   "prompt": "下面代码如何重构？说明问题并给出改法：\n\ndef f(x):\n    if x == 1: return 'a'\n    elif x == 2: return 'b'\n    elif x == 3: return 'c'\n    else: return 'd'",
+   "full": 2,
+   "checks": [
+    {
+     "name": "映射表",
+     "type": "regex",
+     "val": "dict|字典|映射|map",
+     "w": 1
+    },
+    {
+     "name": "说明问题",
+     "type": "regex",
+     "val": "分支|扩展|可维护|if-else",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B7",
+   "domain": "缓存",
+   "prompt": "缓存穿透、击穿、雪崩三者的区别与对策。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "穿透",
+     "type": "regex",
+     "val": "穿透",
+     "w": 1
+    },
+    {
+     "name": "击穿",
+     "type": "regex",
+     "val": "击穿",
+     "w": 1
+    },
+    {
+     "name": "雪崩",
+     "type": "regex",
+     "val": "雪崩",
+     "w": 1
+    },
+    {
+     "name": "对策",
+     "type": "regex",
+     "val": "布隆|空值|互斥|随机|过期",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "B8",
+   "domain": "接口设计",
+   "prompt": "设计一个「文件上传」的 REST 接口，给出方法、路径、请求体与返回。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "POST",
+     "type": "regex",
+     "val": "POST",
+     "w": 1
+    },
+    {
+     "name": "路径",
+     "type": "regex",
+     "val": "/upload|/files|/api",
+     "w": 1
+    },
+    {
+     "name": "返回",
+     "type": "regex",
+     "val": "200|201|url|id",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}

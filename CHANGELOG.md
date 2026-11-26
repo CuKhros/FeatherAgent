@@ -1,6 +1,18 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.4` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.5` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.5] - 2026-11-26
+
+### Fixed
+- N29: explicit write-file tasks no longer require guide hard criteria. `parse_rubric_with_input` keeps judge-only items and strips `must_include` / `min_points` / `pattern` and related deterministic keys when `file_task` is true, so `must_include:["-"]` no longer trips the two-character term rule. `review_prepare` skips the zero-hard-criteria retry for file tasks. Tests: `review_rubric_file_task_bypasses_symbol_term_limit`; the write-task integration fixture now reproduces the N29 bad-symbol rubric and still requires `approved` with judge `votes>0`.
+- N30: on Windows, a write P95 of 10–20 ms is `advisory` instead of a red gate; above 20 ms still fails. `bench --json` gains `write_gate_status` and `write_gate_raw`, and the platform write key uses the effective result. Linux keeps the 100 µs limit. Test: `write_gate_marks_windows_edge_jitter_as_advisory`; CI validates both new fields.
+- N31: the large-1 L17 list scorer now recognises `**1.**` bold numbering in addition to `1.`, `-` and `*`. This is a test-scoring change, not a product change.
+
+### Documentation
+- Archived `Windows真机复测报告-v1.2.1-rc.4.4.md` and updated both report indexes to 11 reports.
+- Added `docs/model-test-reports/exam-papers/` with five papers (62 questions / 171 points), a corrected index and no local runner or historical results.
+- Linux suite: 201 tests, 200 passed, 1 ignored. Release bench three runs: kernel 2,568,840 B; warm P50 1.182/1.194/1.176 ms; cold P50 3.413/3.239/3.160 ms; all required gates true, `write_gate_status:"pass"`, `write_gate_raw:true`.
 
 ## [1.2.1-rc.4.4] - 2026-11-26
 

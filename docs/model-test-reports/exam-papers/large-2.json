@@ -1,0 +1,529 @@
+{
+ "id": "large-2",
+ "name": "大试卷 2 · 工程深水二十题",
+ "size": "large",
+ "full_score": 60,
+ "desc": "分布式 / 数据库 / 性能 / 安全 / 测试 / 运维 / 协议，偏生产环境实战，难度高于大卷 1",
+ "questions": [
+  {
+   "id": "M01",
+   "domain": "分布式",
+   "prompt": "解释 Raft 的 leader 选举流程，说明为什么能避免脑裂。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "任期",
+     "type": "regex",
+     "val": "term|任期",
+     "w": 1
+    },
+    {
+     "name": "多数派",
+     "type": "regex",
+     "val": "多数|majority|过半",
+     "w": 1
+    },
+    {
+     "name": "脑裂",
+     "type": "regex",
+     "val": "脑裂|split|双主",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M02",
+   "domain": "分布式",
+   "prompt": "两阶段提交与三阶段提交的区别，各自的问题。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "2PC",
+     "type": "regex",
+     "val": "2PC|两阶段",
+     "w": 1
+    },
+    {
+     "name": "3PC",
+     "type": "regex",
+     "val": "3PC|三阶段",
+     "w": 1
+    },
+    {
+     "name": "阻塞/超时",
+     "type": "regex",
+     "val": "阻塞|超时|协调者",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M03",
+   "domain": "分布式",
+   "prompt": "什么是幂等性？在消息队列消费场景如何保证。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "幂等定义",
+     "type": "regex",
+     "val": "幂等",
+     "w": 1
+    },
+    {
+     "name": "去重",
+     "type": "regex",
+     "val": "去重|唯一键|dedup|id",
+     "w": 1
+    },
+    {
+     "name": "重试安全",
+     "type": "regex",
+     "val": "重试|重复消费|至少一次",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M04",
+   "domain": "数据库",
+   "prompt": "MySQL 的 MVCC 如何实现可重复读？说明 undo log 与 read view。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "undo log",
+     "type": "regex",
+     "val": "undo",
+     "w": 1
+    },
+    {
+     "name": "read view",
+     "type": "regex",
+     "val": "read view|快照|snapshot",
+     "w": 1
+    },
+    {
+     "name": "版本链",
+     "type": "regex",
+     "val": "版本链|version",
+     "w": 1
+    },
+    {
+     "name": "可重复读",
+     "type": "regex",
+     "val": "可重复读|RR",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M05",
+   "domain": "数据库",
+   "prompt": "聚簇索引与二级索引的区别，回表是什么。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "聚簇",
+     "type": "regex",
+     "val": "聚簇|clustered",
+     "w": 1
+    },
+    {
+     "name": "二级",
+     "type": "regex",
+     "val": "二级|secondary|辅助",
+     "w": 1
+    },
+    {
+     "name": "回表",
+     "type": "regex",
+     "val": "回表",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M06",
+   "domain": "数据库",
+   "prompt": "一条慢查询如何定位与优化？给出步骤。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "explain",
+     "type": "regex",
+     "val": "explain|执行计划",
+     "w": 1
+    },
+    {
+     "name": "索引",
+     "type": "regex",
+     "val": "索引",
+     "w": 1
+    },
+    {
+     "name": "慢日志",
+     "type": "regex",
+     "val": "慢日志|slow log|profile",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M07",
+   "domain": "性能",
+   "prompt": "CPU 使用率高如何排查？列出工具与判断依据。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "top/perf",
+     "type": "regex",
+     "val": "top|perf|pidstat",
+     "w": 1
+    },
+    {
+     "name": "火焰图",
+     "type": "regex",
+     "val": "火焰图|flame",
+     "w": 1
+    },
+    {
+     "name": "线程栈",
+     "type": "regex",
+     "val": "jstack|pstack|线程栈",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M08",
+   "domain": "性能",
+   "prompt": "解释 P99 延迟与平均延迟的差别，为什么更关注 P99。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "长尾",
+     "type": "regex",
+     "val": "长尾|tail|极端",
+     "w": 1
+    },
+    {
+     "name": "平均失真",
+     "type": "regex",
+     "val": "平均|掩盖|失真",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M09",
+   "domain": "安全",
+   "prompt": "SQL 注入的原理与三种防御方式。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "拼接",
+     "type": "regex",
+     "val": "拼接|字符串.*SQL|注入",
+     "w": 1
+    },
+    {
+     "name": "参数化",
+     "type": "regex",
+     "val": "参数化|prepared|占位",
+     "w": 1
+    },
+    {
+     "name": "最小权限/校验",
+     "type": "regex",
+     "val": "权限|校验|白名单|转义",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M10",
+   "domain": "安全",
+   "prompt": "XSS 与 CSRF 的区别与防御。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "XSS",
+     "type": "regex",
+     "val": "XSS|脚本注入",
+     "w": 1
+    },
+    {
+     "name": "CSRF",
+     "type": "regex",
+     "val": "CSRF|跨站请求",
+     "w": 1
+    },
+    {
+     "name": "防御",
+     "type": "regex",
+     "val": "转义|CSP|token|SameSite",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M11",
+   "domain": "测试",
+   "prompt": "单元测试与集成测试的边界怎么划？给一个例子。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "边界",
+     "type": "regex",
+     "val": "边界|范围|职责",
+     "w": 1
+    },
+    {
+     "name": "例子",
+     "type": "regex",
+     "val": "例如|比如|例：",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M12",
+   "domain": "测试",
+   "prompt": "如何测试一个「重试 3 次仍失败则告警」的逻辑？",
+   "full": 3,
+   "checks": [
+    {
+     "name": "mock 失败",
+     "type": "regex",
+     "val": "mock|桩|模拟",
+     "w": 1
+    },
+    {
+     "name": "第 4 次",
+     "type": "regex",
+     "val": "第\\s*4|四次|超过",
+     "w": 1
+    },
+    {
+     "name": "告警断言",
+     "type": "regex",
+     "val": "告警|alert|通知",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M13",
+   "domain": "运维",
+   "prompt": "滚动发布与蓝绿发布的区别与适用场景。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "滚动",
+     "type": "regex",
+     "val": "滚动|rolling",
+     "w": 1
+    },
+    {
+     "name": "蓝绿",
+     "type": "regex",
+     "val": "蓝绿|blue.?green",
+     "w": 1
+    },
+    {
+     "name": "适用",
+     "type": "regex",
+     "val": "适用|回滚|流量",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M14",
+   "domain": "运维",
+   "prompt": "k8s 里 Pod 一直 Pending，列出 3 个排查方向。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "资源不足",
+     "type": "regex",
+     "val": "资源|cpu|内存|resource",
+     "w": 1
+    },
+    {
+     "name": "调度约束",
+     "type": "regex",
+     "val": "亲和|污点|taint|nodeSelector",
+     "w": 1
+    },
+    {
+     "name": "存储/PVC",
+     "type": "regex",
+     "val": "pvc|存储|volume",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M15",
+   "domain": "协议",
+   "prompt": "HTTPS 握手过程简述，为什么能防中间人。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "证书",
+     "type": "regex",
+     "val": "证书|certificate|CA",
+     "w": 1
+    },
+    {
+     "name": "密钥交换",
+     "type": "regex",
+     "val": "密钥交换|ECDHE|DH",
+     "w": 1
+    },
+    {
+     "name": "中间人",
+     "type": "regex",
+     "val": "中间人|MITM|身份",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M16",
+   "domain": "协议",
+   "prompt": "gRPC 相比 REST 的优势与代价。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "二进制/HTTP2",
+     "type": "regex",
+     "val": "protobuf|二进制|HTTP/2|http2",
+     "w": 1
+    },
+    {
+     "name": "流式",
+     "type": "regex",
+     "val": "流式|stream",
+     "w": 1
+    },
+    {
+     "name": "代价",
+     "type": "regex",
+     "val": "代价|调试|可读|浏览器",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M17",
+   "domain": "代码",
+   "prompt": "写一个函数，从 URL 中提取 query 参数为字典（不允许用 urllib.parse）。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "函数",
+     "type": "regex",
+     "val": "def ",
+     "w": 1
+    },
+    {
+     "name": "切分",
+     "type": "regex",
+     "val": "split|\\?",
+     "w": 1
+    },
+    {
+     "name": "字典",
+     "type": "regex",
+     "val": "dict|\\{",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M18",
+   "domain": "代码",
+   "prompt": "实现一个带超时的 HTTP 请求封装（Python），失败重试 2 次。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "超时",
+     "type": "regex",
+     "val": "timeout",
+     "w": 1
+    },
+    {
+     "name": "重试",
+     "type": "regex",
+     "val": "retry|for .*range|while",
+     "w": 1
+    },
+    {
+     "name": "异常处理",
+     "type": "regex",
+     "val": "except|raise",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M19",
+   "domain": "调试",
+   "prompt": "线上偶发 503，日志无异常，你会怎么定位？给出 3 步。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "指标",
+     "type": "regex",
+     "val": "监控|指标|metric|QPS",
+     "w": 1
+    },
+    {
+     "name": "上下游",
+     "type": "regex",
+     "val": "上游|下游|依赖|网关",
+     "w": 1
+    },
+    {
+     "name": "抓包/链路",
+     "type": "regex",
+     "val": "抓包|trace|链路|tcpdump",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "M20",
+   "domain": "设计",
+   "prompt": "设计一个可观测性方案（日志/指标/追踪三件套），说明各自的采样与成本。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "日志",
+     "type": "regex",
+     "val": "日志|log",
+     "w": 1
+    },
+    {
+     "name": "指标",
+     "type": "regex",
+     "val": "指标|metric|Prometheus",
+     "w": 1
+    },
+    {
+     "name": "追踪",
+     "type": "regex",
+     "val": "追踪|trace|span",
+     "w": 1
+    },
+    {
+     "name": "成本/采样",
+     "type": "regex",
+     "val": "采样|成本|cardinality|基数",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}
