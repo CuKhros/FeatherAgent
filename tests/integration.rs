@@ -327,6 +327,14 @@ fn llama_cpp_and_ninfer_openai_chat_use_api_key() {
             "{provider} 未带 Key 调用 /v1/chat/completions: {:?}",
             reqs.iter().take(2).collect::<Vec<_>>()
         );
+        let chat = reqs
+            .iter()
+            .find(|r| r.starts_with("POST /v1/chat/completions "))
+            .unwrap();
+        assert!(
+            chat.contains("\"max_tokens\":2048"),
+            "N33 输出上限未传: {chat}"
+        );
     }
 }
 
@@ -406,6 +414,10 @@ fn ollama_native_chat_without_key_still_sends_body() {
     );
     assert!(chat.contains("\"messages\""), "请求体丢失: {chat}");
     assert!(chat.contains("\"stream\":true"), "请求体不完整: {chat}");
+    assert!(
+        chat.contains("\"num_predict\":2048"),
+        "N33 Ollama 输出上限未传: {chat}"
+    );
     let embed = reqs
         .iter()
         .find(|r| r.starts_with("POST /api/embed "))

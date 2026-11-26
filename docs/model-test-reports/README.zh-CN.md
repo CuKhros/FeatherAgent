@@ -37,8 +37,9 @@
 | [v1.2.1-rc.4.2](reports/Windows真机复测报告-v1.2.1-rc.4.2.md) | 七题 24 分试卷：24/24 vs 17/24；143s vs 332s | 更大的混合任务对照，包含两次裸跑空响应 |
 | [v1.2.1-rc.4.3](reports/Windows真机复测报告-v1.2.1-rc.4.3.md) | 七题 24 分试卷：22/24 vs 11/24；123s vs 335s；裸跑 Q4–Q7 在 50–66 秒后空响应 | 确认代码答复形态，同时暴露写文件 judge 假阴性与 bench 卡死（阻断 N19） |
 | [v1.2.1-rc.4.4](reports/Windows真机复测报告-v1.2.1-rc.4.4.md) | 大试卷 1（20 题 / 54 分）：50.5/54 vs 30.0/54；319s vs 856s；裸跑 8 题空响应；bench 47.1ms、冷启动 214.1ms | 确认 N23/N19 已修，并暴露写文件任务 N29 的规则冲突 |
+| [v1.2.1-rc.4.5](reports/Windows真机复测报告-v1.2.1-rc.4.5.md) | 大试卷 2（20 题 / 60 分）：48.0/60 vs 45.0/60；1,653s vs 1,059s；judge 因 Windows 路径非法转义 3/3 degraded；FA 两题截断为 136 / 390 字 | 区分“避免空响应”与“内容质量”，并暴露 N32–N35 |
 
-共 11 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
+共 12 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
 
 ## 试卷库
 
@@ -51,6 +52,7 @@
 | [`data/small-model-comparison.csv`](data/small-model-comparison.csv) | rc.4.1 的四类任务得分、耗时和答案长度 |
 | [`data/seven-question-exam.csv`](data/seven-question-exam.csv) | rc.4.2 的逐题得分与耗时 |
 | [`data/review-gate-real-model-runs.csv`](data/review-gate-real-model-runs.csv) | rc.2 至 rc.4 的真实模型 review-gate 里程碑 |
+| [`data/large-2-rc.4.5.csv`](data/large-2-rc.4.5.csv) | 大试卷 2 的 20 题逐题分数、耗时与答案长度（裸跑 vs FeatherAgent） |
 
 ## 读数据时要注意
 

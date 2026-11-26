@@ -1,6 +1,25 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.5` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.6` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.6] - 2026-11-26
+
+### Fixed
+- N32: judge output no longer dies on Windows path backslashes. `src/review.rs` parses standard JSON first, then repairs only invalid escapes / raw control characters inside strings; `json_slice` accepts objects and arrays. Evidence paths sent to the judge use `/`, and the judge prompt requires `/` and `\\`. Tests: `verdict_repairs_windows_backslash_escapes`, `rubric_repairs_windows_backslash_escapes`, `json_slice_accepts_top_level_array`.
+- N33: `Config.max_output` (default 2048, range 128–8192) replaces the two hard-coded 512 `ModelProfile` caps; `run_model` and review calls pass it to the provider; Ollama gets `options.num_predict`, OpenAI-compatible gets `max_tokens`. `ModelMessage` exposes `truncated`, and a review role ending with `finish=length` fails and retries. Tests: `truncated_review_output_is_an_error`, provider request assertions.
+- N34: `bench --json` `gates` now contains only boolean verdicts; `diagnostics` holds platform, raw readings, status, thresholds and reliability; `advisory_gates` holds advisory items. CI rejects non-boolean `gates`. Consumers must read `write_gate_status` / `write_gate_raw` from `diagnostics`.
+- N35: `env_fingerprint` adds `cpu_load_pct` from Linux `loadavg_1m/cpu_count` or Windows `GetSystemTimes`; `merge_reliability` takes the worse of memory and CPU (≥70 medium, ≥85 low). `reliability_basis` reports both dimensions. Tests: `reliability_uses_worse_of_memory_and_cpu`, `env_fingerprint_reports_cpu_and_memory_basis`.
+
+### Changed
+- Extracted `src/review.rs` (924 lines) from `src/bin/plugin.rs`; `plugin.rs` drops from 3,028 to 2,219 lines. `parse_rubric_with_input` keeps one early `file_task` branch and removes the unreachable duplicate.
+- Rebuilt the Chinese/English Rust UI generation chain from the rc.3.6 166/72 baseline; `tui_en.rs` and `kernel_en.rs` are regenerated, have no Chinese residue, and regeneration is deterministic.
+- `gen-en-ui.py` generates Rust UI only. `web/app.en.js` + `web/index.en.html` are an independent bundle checked by `scripts/check-en-web.py`; the English attachment send path and `file.attach` 60 s timeout are restored.
+- `scripts/ci.sh` now checks generated-source consistency, Web bundle structure and boolean-only `gates`.
+
+### Documentation
+- Added the code-accumulation audit (Chinese and English) and the rc.4.6 change notes.
+- Archived `Windows真机复测报告-v1.2.1-rc.4.5.md`; the report index now has 12 reports.
+- Linux suite: 206 items, 205 passed, 1 ignored. Release bench three runs: kernel 2,578,496 B; warm P50 1.276/1.275/1.285 ms; cold P50 4.469/5.033/5.272 ms; all boolean gates true, `write_gate_status:"pass"`, `write_gate_raw:true`, `reliability_basis:"mem=17%,cpu=68%"`.
 
 ## [1.2.1-rc.4.5] - 2026-11-26
 

@@ -1,10 +1,28 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.5)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.6)
 
-> Date: 2026-11-26 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.5` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-26 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.6` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.5 summary (current candidate)
+## v1.2.1-rc.4.6 summary (current candidate)
+
+The rc.4.5 retest confirmed N30 (write P95 10.4–10.8 ms as advisory) and N31 (bold numbering), and confirmed that N29's write-task routing worked, but it exposed N32: the judge copied Windows paths into JSON with invalid escapes, so 3/3 runs degraded. It also found N33 (answers truncated at 136 / 390 characters), N34 (`*_raw` diagnostics mixed into `gates`) and N35 (`reliability` ignored CPU). The large-2 paper scored FeatherAgent 48.0/60 vs bare 45.0/60; the advantage was mainly avoiding empty responses, not answer quality.
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N32 judge JSON died on Windows paths | New `src/review.rs`; `parse_json_value` parses standard JSON first, then a string-local repair fixes invalid escapes and raw control characters; `json_slice` accepts objects and arrays; evidence paths use `/` and the judge prompt requires `/` and escaped backslashes | `verdict_repairs_windows_backslash_escapes`, `rubric_repairs_windows_backslash_escapes`, `json_slice_accepts_top_level_array`; real Windows retest required |
+| N33 answers truncated | `Config.max_output` default 2048 (128–8192) replaces two hard-coded 512 caps; `run_model` and review calls pass it to the provider (`num_predict` / `max_tokens`); `truncated` is exposed and `finish=length` fails a review role | `truncated_review_output_is_an_error`; mock-provider requests assert `num_predict:2048` and `max_tokens:2048`; real Ollama retest required |
+| N34 `*_raw` mixed into `gates` | `gates` is boolean-only; `diagnostics` holds platform, raw readings, status, thresholds, modes and reliability; `advisory_gates` holds advisory items; CI rejects non-boolean gates | Linux bench and Wine Windows bench: every `gates` value is boolean; `platform:"windows"` under Wine |
+| N35 reliability ignored CPU | `env_fingerprint` adds `cpu_load_pct` (Linux `loadavg_1m/cpu_count`, Windows `GetSystemTimes/250ms`); `merge_reliability` takes the worse of memory and CPU (≥70 medium, ≥85 low) | `reliability_uses_worse_of_memory_and_cpu`, `env_fingerprint_reports_cpu_and_memory_basis`; Windows PE prints `cpu_load_source:"GetSystemTimes/250ms"` under Wine |
+| Five structural debts from the audit | Extracted `src/review.rs`, removed an unreachable `file_task` branch, rebuilt the rc.3.6 166/72 Chinese→English UI mapping, made WebUI English a checked independent bundle | `plugin.rs` 3,028 → 2,219 lines; generator deterministic and no Chinese residue; `check-en-web.py` OK |
+
+Linux full suite: **206 items, 205 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 80 lib, 34 plugin ×2, 5 kernel, 6 TUI, 4 WebUI ×2, 2 golden, 36 integration (1 ignored). `cargo fmt --check` and `cargo clippy --locked --all-targets -- -D warnings` pass. Release bench (3 consecutive runs): kernel **2,578,496 B (2.46 MiB)**; warm P50 **1.276 / 1.275 / 1.285 ms**, P90 **1.318 / 1.299 / 1.304 ms**; cold P50 **4.469 / 5.033 / 5.272 ms**; RSS **3,456 / 3,712 / 3,456 KiB**; write P95 **2.754 / 4.106 / 4.036 µs**; assemble P95 **0.162 / 0.139 / 0.139 ms**; RPC P95 **0.064 / 0.060 / 0.058 ms**; all boolean gates true, `diagnostics.platform:"linux"`, `write_gate_status:"pass"`, `write_gate_raw:true`, `reliability:"high"`, `reliability_basis:"mem=17%,cpu=68%"`.
+
+Windows x64 cross-compiled **10 exes** with `x86_64-pc-windows-gnu`; kernel exe **2,320,896 B (2.21 MiB)**; objdump imports are system DLLs only (advapi32, kernel32, ws2_32, bcrypt, bcryptprimitives, ntdll, msvcrt, api-ms-win-core-synch) with no libgcc/libwinpthread/libstdc++. Wine 6.0.3 smoke on the unzipped package with a temporary `bcryptprimitives` stub: `version` prints `FeatherAgent 1.2.1-rc.4.6 (contract 1.0)`; three `bench --json` runs complete. Warm P50 **81.3 / 82.1 / 87.1 ms**; cold spawn **580.2 / 584.8 / 543.7 ms** and RSS **18,432 KiB** fail under Wine and are not a Windows baseline; write P95 **4.676 / 4.587 / 4.586 ms** with `write_gate_status:"pass"` and `write_gate_raw:true`; `platform:"windows"`; `cpu_load_source:"GetSystemTimes/250ms"`, `reliability_basis:"mem=20%,cpu=0/0/1%"`. The stub was in the test directory only and is not shipped.
+
+Not verified: v1.2.1-rc.4.6 Windows real hardware (N32, N33, N35, TUI feel, bilingual package), real Ollama 4B/7B long answers, medium/low reliability, high-DPI/Chinese rendering, network-drive/24h soak, macOS/arm64. Wine remains a startup/protocol smoke test, not a Windows conclusion.
+
+## v1.2.1-rc.4.5 summary (historical, released)
 
 The rc.4.4 retest confirmed N23 and that N25 no longer appears. It found N29: a write task still ended `degraded rounds=0` because the guide was rejected first for having no hard criterion, then for `must_include:["-"]` being one character; N30: `write_p95_lt_10ms` occasionally red while `reliability` stayed high; and N31: L17 was scored 1.5/3 because bold `**1.**` items were not counted. The large exam scored FeatherAgent 50.5/54 vs bare 30.0/54, 319 s vs 856 s, with 8 bare-model empty responses.
 

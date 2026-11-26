@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.5 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.6 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4.5-windows-x64.zip`
-> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.4 retest (N29–N31)
-> Note: v1.2.1-rc.4.5 fixes N29–N31 from the rc.4.4 retest. N29: explicit write-file tasks no longer require guide hard criteria; all criteria go to the judge, and symbolic hard keys such as `must_include:["-"]` no longer trip the two-character term rule. N30: on Windows the write gate marks 10–20 ms edge jitter as `advisory` instead of failing a high-reliability host; above 20 ms still fails. N31: the L17 list scorer now recognises `**1.**` bold numbering. The rc.4.4 N23–N27 fixes, TUI top clamping and all earlier fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 is only a startup/protocol smoke test, and cold-spawn/RSS/write-gate under Wine are not Windows conclusions.
+> Package under test: `FeatherAgent-1.2.1-rc.4.6-windows-x64.zip`
+> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.5 retest (N32–N35)
+> Note: v1.2.1-rc.4.6 fixes N32–N35 from the rc.4.5 retest and removes five structural debts found by a code audit. N32: Windows path backslashes in judge output no longer break JSON (parse standard JSON first, then repair only string-local invalid escapes, and send evidence paths with forward slashes). N33: the hard-coded 512 output cap becomes `Config.max_output` (default 2048), sent as `num_predict`/`max_tokens`; `finish=length` fails a review role and retries. N34: `bench --json` `gates` is boolean-only, with status/raw/thresholds moved to `diagnostics`. N35: `reliability` takes the worse of memory and CPU. The rc.4.5 N29–N31 fixes, rc.4.4 N23–N27, TUI top clamping and all earlier fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 is only a startup/protocol smoke test, and cold-spawn/RSS/write-gate under Wine are not Windows conclusions.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.5\
+D:\FeatherAgent-1.2.1-rc.4.6\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +20,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4.5`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.6`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.5
+cd D:\FeatherAgent-1.2.1-rc.4.6
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -205,14 +205,23 @@ v1.2.1-rc.4 regression checks:
 3. **N4 regression.** The rc.3.5 raw fixture item (`must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]`) must still be dropped by itself with `review.warn` naming its id.
 4. **N7: bench temp/error contract.** Run `bench --json` several times; every run must have a distinct temp directory and no `os error 2`. If a path is deliberately broken, the JSON must be one line with `ok:false`, `code:"artifact_missing"` or `"bench_failed"`, and the path in `error`.
 5. **N8: duplicate tool calls.** Trigger the retry chain with a model that repeats the same tool call. `tool.call` must carry `attempt` and `call_index`; identical name+arguments in one reply must execute once. A different path must still execute separately.
-6. **N9: advisory boot gate.** Under memory pressure (`reliability` medium or low), `gates.boot_gate_status` must be `"advisory"`, `boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` must not alone turn the run red, and `reliability` must appear in both `metrics` and `gates`; `boot_gate_trusted` must appear under `advisory_gates`, not inside `gates`.
+6. **N9: advisory boot gate.** Under memory/CPU pressure (`reliability` medium or low), `diagnostics.boot_gate_status` must be `"advisory"`, `diagnostics.boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` carries the effective result, and `reliability` appears in `metrics.env` and `diagnostics`; `boot_gate_trusted` appears under `advisory_gates`, not inside `gates`.
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
+
+v1.2.1-rc.4.6 regression checks:
+
+1. **N32: judge path tolerance.** With review-gate on, run the rc.4.5 write task three times: `请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头`. None of the three runs may show `invalid escape` / `审批结果不是合法 JSON`; each must reach the judge and produce `review.verdict`, and `review.finished status` must not be `degraded`. Inspect the raw verdict under `data/review-artifacts/<session>/`; paths may contain a backslash or `/` but must parse.
+2. **N33: long answers not truncated.** Run `large-2` M15 (HTTPS handshake stages) and M20 (observability trio) once each, asking for three-part answers. Length must clearly exceed rc.4.5's 136 / 390 characters; the event stream must not contain `finish:"length"` or `truncated:true`. If it still stops early, record `done_reason`, `finish_reason`, output length and model name to distinguish `num_predict` from a model stop.
+3. **N34: boolean-only gates.** `bench --json` top level must be `metrics/gates/diagnostics/advisory_gates`; every `gates` value must be `true/false`, with no `platform`, `reliability`, `*_gate_status`, `*_gate_raw` or thresholds. Read `write_gate_status` / `write_gate_raw` from `diagnostics`; confirm the test script no longer counts `false` values in `gates` as failures.
+4. **N35: CPU in reliability.** `bench --json` `metrics.env` must contain `cpu_load_pct` and `cpu_load_source` (Windows should be `GetSystemTimes/250ms`), and `reliability_basis` must contain both `mem=` and `cpu=`. Run three times under normal background load and record `cpu_load_pct`, `reliability` and warm P50; CPU ≥70% should be at least medium, ≥85% low.
+5. **Bilingual package regression.** `featheragent-tui-en.exe` / `featheragent-webui-en.exe` must show English; in the English WebUI click `+`, pick a file and send it, and confirm the attachment reaches the session (rc.4.5 English `send()` lacked attachment sending). The Chinese package stays Chinese.
+6. **rc.4.5 N29–N31 regression.** Rerun the rc.4.5 N29/N30/N31 checks below; N30 status fields now come from `diagnostics`.
 
 v1.2.1-rc.4.5 regression checks:
 
 1. **N29: write-file tasks skip hard criteria.** With review-gate on, use the original task `请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头`. The first guide pass should be accepted with judge-only `criterion/check` items; `rubric-final.json` should show `file_task:true`, `hard_items:0`, and no `must_include` / `min_points` / `pattern`. The turn must run `tool.fs.write`, reach the judge with `votes>0`, and no longer report `review.finished status=degraded rounds=0`. Verify `workspace/notes3.txt` has exactly three lines, each starting with `- `.
-2. **N30: write-gate advisory.** `bench --json` must contain `write_gate_status` and `write_gate_raw`. On Windows, a write P95 of 10–20 ms should set the platform write key true, `write_gate_status:"advisory"` and `write_gate_raw:false`, without turning the run red; above 20 ms must be `"fail"`. Linux stays strict at 100 µs. Record three samples.
+2. **N30: write-gate advisory.** `bench --json` `diagnostics` must contain `write_gate_status` and `write_gate_raw` (`gates` has neither). On Windows, a write P95 of 10–20 ms should set the platform write key true, `write_gate_status:"advisory"` and `write_gate_raw:false`, without turning the run red; above 20 ms must be `"fail"`. Linux stays strict at 100 µs. Record three samples.
 3. **N31: bold numbering.** Answer L17 from `large-1` with `**1.**` / `**2.**` / `**3.**`; the scorer must count 3/3, not 1.5/3. This is a test-scoring rule, not a product gate.
 4. **N23–N28 regression.** Re-run the rc.4.4 checks below: bench completion, write-file review, XML recovery, comparison axes, temp-dir cleanup and TUI top scrolling must all stay green.
 
@@ -286,13 +295,13 @@ v1.2.1 additional checks:
 - N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- Wine smoke (unzipped rc.4.5 package): `version` prints `FeatherAgent 1.2.1-rc.4.5 (contract 1.0)`; three `bench --json` runs complete with no `[bench:rpc_connect]` failure. Warm P50 is **79.8 / 75.0 / 81.1 ms**; cold spawn **476.8 / 449.0 / 511.7 ms** and RSS **18,688 / 18,688 / 18,560 KiB** are red because Wine's process startup is much slower. Write P95 is **4.864 / 4.898 / 4.897 ms** with `write_gate_status:"pass"` and `write_gate_raw:true`. A temporary `bcryptprimitives.dll` stub was used for Wine only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
+- Wine smoke (unzipped rc.4.6 package, temporary `bcryptprimitives` stub): `version` prints `FeatherAgent 1.2.1-rc.4.6 (contract 1.0)`; three `bench --json` runs complete. Warm P50 is **81.3 / 82.1 / 87.1 ms**; cold spawn **580.2 / 584.8 / 543.7 ms** and RSS **18,432 KiB** are red because Wine's process startup is much slower. Write P95 is **4.676 / 4.587 / 4.586 ms** with `write_gate_status:"pass"` and `write_gate_raw:true`; `gates` is all boolean, `diagnostics.platform:"windows"`, `cpu_load_source:"GetSystemTimes/250ms"`, `reliability_basis:"mem=20%,cpu=0/0/1%"`. The stub was in the test directory only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.5-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.6-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

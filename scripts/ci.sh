@@ -9,6 +9,9 @@ CARGO_BIN="${CARGO:-cargo}"
 "$CARGO_BIN" --version
 
 scripts/version-check.sh
+python3 scripts/gen-en-ui.py
+git diff --exit-code -- src/bin/tui_en.rs src/bin/kernel_en.rs
+python3 scripts/check-en-web.py
 "$CARGO_BIN" fmt --check
 "$CARGO_BIN" clippy --all-targets --locked -- -D warnings
 "$CARGO_BIN" test --locked --all-targets
@@ -32,10 +35,17 @@ required = ['binary_le_8mb', 'boot_lt_20ms', 'cold_spawn_lt_100ms',
 bad = [k for k in required if gates.get(k) is not True]
 if bad:
     raise SystemExit(f"bench 门禁未过: {bad}; gates={gates}")
-if gates.get('write_gate_status') not in ('pass', 'advisory'):
-    raise SystemExit(f"write_gate_status 非法: {gates.get('write_gate_status')!r}; gates={gates}")
-if not isinstance(gates.get('write_gate_raw'), bool):
-    raise SystemExit(f"write_gate_raw 缺失或类型错误; gates={gates}")
+# N34：gates 只允许布尔判定项，状态/原始读数在 diagnostics。
+non_bool = [k for k, x in gates.items() if not isinstance(x, bool)]
+if non_bool:
+    raise SystemExit(f"gates 混入非布尔项: {non_bool}; gates={gates}")
+diag = v.get('diagnostics') or {}
+if diag.get('write_gate_status') not in ('pass', 'advisory'):
+    raise SystemExit(f"write_gate_status 非法: {diag.get('write_gate_status')!r}; diagnostics={diag}")
+if not isinstance(diag.get('write_gate_raw'), bool):
+    raise SystemExit(f"write_gate_raw 缺失或类型错误; diagnostics={diag}")
+if diag.get('platform') not in ('linux', 'windows'):
+    raise SystemExit(f"diagnostics.platform 非法: {diag.get('platform')!r}")
 m = v.get('metrics') or {}
 print(f"bench 通过: boot_p50={m.get('boot_ms_p50')}ms cold_p50={m.get('cold_spawn_ms_p50')}ms")
 PY_BENCH

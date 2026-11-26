@@ -1,6 +1,25 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.5` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.6` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.6] - 2026-11-26
+
+### 修复
+- N32：judge 输出不再被 Windows 路径反斜杠打坏。新增 `src/review.rs`，先按标准 JSON 解析，失败后只修复字符串内的非法转义/裸控制字符；`json_slice` 同时接受对象和数组。交给 judge 的证据路径统一用 `/`，judge system prompt 要求引用路径用 `/`，JSON 字符串里的反斜杠必须写成两个反斜杠（`\\`）。测试：`verdict_repairs_windows_backslash_escapes`、`rubric_repairs_windows_backslash_escapes`、`json_slice_accepts_top_level_array`。
+- N33：`Config.max_output`（默认 2048，范围 128–8192）替换两处硬编码 512；`run_model` 与 review 调用都把它传给 provider；Ollama 写 `options.num_predict`，OpenAI 兼容写 `max_tokens`。`ModelMessage` 暴露 `truncated`，review 角色 `finish=length` 直接报错重试。测试：`truncated_review_output_is_an_error`、provider 请求断言。
+- N34：`bench --json` 的 `gates` 只保留布尔判定项；`diagnostics` 放平台、原始读数、状态、阈值与可信度；`advisory_gates` 放建议项。CI 拒绝非布尔 `gates`。旧消费者需从 `diagnostics` 读 `write_gate_status` / `write_gate_raw`。
+- N35：`env_fingerprint` 增加 `cpu_load_pct`（Linux `loadavg_1m/cpu_count`，Windows `GetSystemTimes`）；`merge_reliability` 取内存/CPU 更差者（≥70 medium、≥85 low）；`reliability_basis` 同时报告两个维度。测试：`reliability_uses_worse_of_memory_and_cpu`、`env_fingerprint_reports_cpu_and_memory_basis`。
+
+### 变更
+- 从 `src/bin/plugin.rs` 抽出 `src/review.rs`（924 行）；`plugin.rs` 从 3,028 行降到 2,219 行。`parse_rubric_with_input` 只保留一个早 `file_task` 分支，删除不可达的重复分支。
+- 按 rc.3.6 的 166/72 基线重建中英 Rust UI 生成链；`tui_en.rs`、`kernel_en.rs` 重新生成、无中文残留，且生成结果确定。
+- `gen-en-ui.py` 只生成 Rust UI。`web/app.en.js` + `web/index.en.html` 为独立 bundle，由 `scripts/check-en-web.py` 校验；补回英文附件发送与 `file.attach` 60 秒超时。
+- `scripts/ci.sh` 增加生成物一致性、Web bundle 结构与 `gates` 全布尔检查。
+
+### 文档
+- 新增代码堆积审计（中英）与 rc.4.6 变更说明。
+- 归档 `Windows真机复测报告-v1.2.1-rc.4.5.md`；报告索引改为 12 份。
+- Linux 全量 206 项、205 通过、1 ignored。Release bench 三连跑：内核 2,578,496 B；热启动 P50 1.276/1.275/1.285 ms；冷启动 P50 4.469/5.033/5.272 ms；布尔门禁全绿，`write_gate_status:"pass"`、`write_gate_raw:true`、`reliability_basis:"mem=17%,cpu=68%"`。
 
 ## [1.2.1-rc.4.5] - 2026-11-26
 

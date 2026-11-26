@@ -47,6 +47,9 @@ pub struct Config {
     pub strict_temp: bool,
     pub segment_size: u64,
     pub context_window: usize,
+    /// 单次模型输出的 token 上限；默认 2048。
+    #[serde(default = "default_max_output")]
+    pub max_output: usize,
     pub quota_bytes: u64,
     pub auto_allow_safe: bool,
     pub allowed_sync_names: Vec<String>,
@@ -252,6 +255,7 @@ impl Default for Config {
             strict_temp: true,
             segment_size: 4 * 1024 * 1024,
             context_window: 8192,
+            max_output: default_max_output(),
             quota_bytes: 4 * 1024 * 1024 * 1024,
             auto_allow_safe: true,
             allowed_sync_names: Vec::new(),
@@ -269,6 +273,9 @@ impl Default for Config {
 
 fn default_temperature() -> f64 {
     0.7
+}
+fn default_max_output() -> usize {
+    2048
 }
 fn default_search_provider() -> String {
     "local".into()
@@ -1159,7 +1166,7 @@ impl Kernel {
             let profile = ModelProfile {
                 name: cfg.model.clone(),
                 context_window: cfg.context_window,
-                max_output: 512,
+                max_output: cfg.max_output,
                 capabilities: vec!["chat".into(), "stream".into(), "tools".into()],
             };
             let recalls = self.recall(&text, &cfg.provider_plugin);
@@ -1312,10 +1319,11 @@ impl Kernel {
                 session.interrupt.store(0, Ordering::SeqCst);
                 continue;
             }
+            let truncated = reply.finish == "length";
             self.emit(
                 &session.id,
                 EventKind::ModelMessage,
-                json!({"text": reply.text, "finish": reply.finish}),
+                json!({"text": reply.text, "finish": reply.finish, "truncated": truncated}),
             );
 
             // ---- 工具 ----
@@ -1752,7 +1760,7 @@ impl Kernel {
         let profile = ModelProfile {
             name: cfg.model.clone(),
             context_window: cfg.context_window,
-            max_output: 512,
+            max_output: cfg.max_output,
             capabilities: vec!["chat".into(), "stream".into(), "tools".into()],
         };
         let tools = self.available_tools(&s.locked_tools);
@@ -1937,6 +1945,20 @@ impl Kernel {
             })
     }
 
+    /// N33：三段校验的输出若被 max_output 截断，必须显式失败并触发重试，
+    /// 不能把半截 JSON/半截判据当成有效结果。
+    fn review_output_error(text: &str, finish: &str, max_output: usize) -> Option<String> {
+        if text.trim().is_empty() {
+            return Some("三段校验模型返回空响应".into());
+        }
+        if finish == "length" {
+            return Some(format!(
+                "三段校验模型输出达到 max_output={max_output} 上限（finish=length），结果可能不完整"
+            ));
+        }
+        None
+    }
+
     fn review_model_call_once(
         &self,
         session: &Arc<Session>,
@@ -1961,11 +1983,13 @@ impl Kernel {
                     "base_url": cfg.base_url,
                     "api_key": cfg.provider_api_key,
                     "temperature": temperature,
+                    "max_output": cfg.max_output,
                 }),
             )
             .map_err(|e| e.to_string())?;
         *session.active_req.lock() = Some((cfg.provider_plugin.clone(), req));
         let mut acc = String::new();
+        let mut finish = "stop".to_string();
         let deadline = Instant::now() + timeout;
         loop {
             if session.interrupt.load(Ordering::SeqCst) != 0
@@ -1991,7 +2015,12 @@ impl Kernel {
                                 acc.push_str(t);
                             }
                         }
-                        "done" => break,
+                        "done" => {
+                            if let Some(f) = p.get("finish_reason").and_then(|x| x.as_str()) {
+                                finish = f.to_string();
+                            }
+                            break;
+                        }
                         "error" => {
                             proc.finish_stream(req);
                             *session.active_req.lock() = None;
@@ -2014,8 +2043,8 @@ impl Kernel {
         }
         proc.finish_stream(req);
         *session.active_req.lock() = None;
-        if acc.trim().is_empty() {
-            return Err("三段校验模型返回空响应".into());
+        if let Some(e) = Self::review_output_error(&acc, &finish, cfg.max_output) {
+            return Err(e);
         }
         Ok(acc)
     }
@@ -2567,6 +2596,7 @@ impl Kernel {
             "base_url": cfg.base_url,
             "api_key": cfg.provider_api_key,
             "temperature": cfg.temperature,
+            "max_output": cfg.max_output,
         });
         if let Some(t) = temperature {
             params["temperature"] = json!(t);
@@ -3225,6 +3255,9 @@ fn validate_config(cfg: &Config, plugins: &PluginHost) -> Result<(), String> {
     if !(512..=131_072).contains(&cfg.context_window) {
         return Err("context_window 必须在 512–131072 之间".into());
     }
+    if !(128..=8192).contains(&cfg.max_output) {
+        return Err("max_output 必须在 128–8192 之间".into());
+    }
     if !plugins
         .specs()
         .iter()
@@ -3347,6 +3380,11 @@ fn file_write_fallback(files: &[(String, String)]) -> String {
     }
 }
 
+/// 证据通道里的路径表示：Windows 反斜杠改为正斜杠，避免污染 judge 的 JSON。
+fn evidence_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 /// review-gate 只审最终答复，写文件任务却应该审“文件里到底写了什么”。
 /// 把本轮成功写入的内容附在待审答案前，并明确标成验收证据，避免模型为了
 /// 让 judge 看到内容而在最终答复里复述全文。
@@ -3358,8 +3396,14 @@ fn review_answer_with_written_files(answer: &str, files: &[(String, String)]) ->
     }
     let mut out =
         String::from("[本轮成功写入的文件，供验收核对，不属于用户可见答复]\n[工具执行]\n");
+    // N32：证据通道里的路径统一用正斜杠。judge 在 JSON 字符串里会原样复述
+    // 路径，Windows 反斜杠很容易变成非法转义；正斜杠既不影响判据语义，也让
+    // judge 的输出保持可解析。原始路径仍保留在工具事件与最终答复里。
     for (path, _) in files {
-        out.push_str(&format!("tool.fs.write path={path} status=success\n"));
+        out.push_str(&format!(
+            "tool.fs.write path={} status=success\n",
+            evidence_path(path)
+        ));
     }
     let mut budget = TOTAL_MAX_CHARS;
     for (path, content) in files {
@@ -3369,7 +3413,7 @@ fn review_answer_with_written_files(answer: &str, files: &[(String, String)]) ->
         let cap = budget.min(PER_FILE_MAX_CHARS);
         let total = content.chars().count();
         let kept: String = content.chars().take(cap).collect();
-        out.push_str(&format!("\n--- {path} ---\n{kept}"));
+        out.push_str(&format!("\n--- {} ---\n{kept}", evidence_path(path)));
         if total > cap {
             out.push_str(&format!("\n…（文件内容已截断，共 {total} 字符）"));
         }
@@ -3577,6 +3621,15 @@ fn tool_format_correction() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncated_review_output_is_an_error() {
+        assert!(Kernel::review_output_error("", "stop", 2048).is_some());
+        assert!(Kernel::review_output_error("partial", "length", 2048)
+            .unwrap()
+            .contains("max_output=2048"));
+        assert!(Kernel::review_output_error("complete", "stop", 2048).is_none());
+    }
 
     #[test]
     fn review_file_evidence_is_only_for_explicit_write_tasks() {

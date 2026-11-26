@@ -1,6 +1,6 @@
 [package]
 name = "featheragent"
-version = "1.2.1-rc.4.5"
+version = "1.2.1-rc.4.6"
 edition = "2021"
 description = "FeatherAgent（轻羽）：把机械重复的步骤交给同机 1B~14B 小模型执行——上下文引擎 + 极轻量可移植 Agent 内核，供上层 Agent 调度"
 license = "MIT"

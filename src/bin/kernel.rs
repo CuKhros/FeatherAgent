@@ -1087,23 +1087,14 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     let write_p95 = percentile(&lat, 0.95);
     let (write_gate_status, write_raw, write_gate_effective) =
         write_gate_result(windows, boot_trusted, write_p95, write_limit);
+    // N34：gates 只放“判定项”，全部是布尔值。状态、原始读数、阈值和可信度
+    // 都是诊断信息，放 diagnostics，避免消费者按“数 False”把诊断值当成失败。
     let mut gates = serde_json::json!({
-        "platform": platform,
         "binary_le_8mb": size_bytes <= 8 * 1024 * 1024,
         "rss_le_15mb": rss_kb <= 15 * 1024,
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
         "metrics_consistent": boot_consistent,
-        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
-        "boot_gate_raw": boot_gate_raw,
-        "reliability": reliability,
-        "boot_mode": "warm_in_process_same_install_root",
-        "boot_limit_ms": boot_limit,
-        "cold_spawn_mode": "real_process_spawn",
-        "cold_spawn_limit_ms": cold_spawn_limit,
-        "write_limit_us": write_limit,
-        "write_gate_status": write_gate_status,
-        "write_gate_raw": write_raw,
     });
     if let Some(o) = gates.as_object_mut() {
         // N9：reliability 非 high 时启动门禁标成 advisory，不用红门禁惩罚环境抖动。
@@ -1114,6 +1105,21 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         );
         o.insert(write_key.into(), serde_json::json!(write_gate_effective));
     }
+    // N34：状态/原始读数/阈值/可信度统一放这里；gates 里不再混入非判定值。
+    let diagnostics = serde_json::json!({
+        "platform": platform,
+        "boot_gate_raw": boot_gate_raw,
+        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
+        "boot_gate_trusted": boot_trusted,
+        "write_gate_raw": write_raw,
+        "write_gate_status": write_gate_status,
+        "reliability": reliability,
+        "boot_mode": "warm_in_process_same_install_root",
+        "boot_limit_ms": boot_limit,
+        "cold_spawn_mode": "real_process_spawn",
+        "cold_spawn_limit_ms": cold_spawn_limit,
+        "write_limit_us": write_limit,
+    });
     // N17：可信度是环境的“建议项”，不是版本门禁；单独列出，避免
     // reliability=low 时被人工统计成 passed/total 失败。
     let advisory_gates = serde_json::json!({
@@ -1127,6 +1133,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             serde_json::to_string(&serde_json::json!({
                 "metrics": m,
                 "gates": gates,
+                "diagnostics": diagnostics,
                 "advisory_gates": advisory_gates
             }))
             .unwrap()
@@ -1199,6 +1206,66 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     Ok(())
 }
 
+fn reliability_grade(pct: Option<u64>) -> &'static str {
+    match pct {
+        Some(p) if p >= 85 => "low",
+        Some(p) if p >= 70 => "medium",
+        Some(_) => "high",
+        None => "unknown",
+    }
+}
+
+/// 内存与 CPU 任一维度吃紧都降低可信度；两者都未知才算 unknown。
+fn merge_reliability(a: &'static str, b: &'static str) -> &'static str {
+    if a == "unknown" {
+        return b;
+    }
+    if b == "unknown" {
+        return a;
+    }
+    if a == "low" || b == "low" {
+        return "low";
+    }
+    if a == "medium" || b == "medium" {
+        return "medium";
+    }
+    "high"
+}
+
+#[cfg(windows)]
+fn sample_cpu_load_pct() -> Option<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+
+    fn ticks(ft: FILETIME) -> u64 {
+        ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64
+    }
+    unsafe {
+        let mut idle: FILETIME = std::mem::zeroed();
+        let mut kernel: FILETIME = std::mem::zeroed();
+        let mut user: FILETIME = std::mem::zeroed();
+        if GetSystemTimes(&mut idle, &mut kernel, &mut user) == 0 {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+        let mut idle2: FILETIME = std::mem::zeroed();
+        let mut kernel2: FILETIME = std::mem::zeroed();
+        let mut user2: FILETIME = std::mem::zeroed();
+        if GetSystemTimes(&mut idle2, &mut kernel2, &mut user2) == 0 {
+            return None;
+        }
+        let d_idle = ticks(idle2).saturating_sub(ticks(idle));
+        let d_kernel = ticks(kernel2).saturating_sub(ticks(kernel));
+        let d_user = ticks(user2).saturating_sub(ticks(user));
+        // Windows 的 kernel time 已包含 idle time。
+        let total = d_kernel.saturating_add(d_user);
+        if total == 0 {
+            return None;
+        }
+        Some((total.saturating_sub(d_idle) * 100 / total).min(100))
+    }
+}
+
 /// J3：bench 数字必须带环境指纹，否则跨时段/跨机器无法比较。
 /// Linux 取 /proc 的负载、可用内存与 uptime；Windows 取 GlobalMemoryStatusEx 与 GetTickCount64。
 fn env_fingerprint() -> serde_json::Value {
@@ -1214,6 +1281,19 @@ fn env_fingerprint() -> serde_json::Value {
                 obj["loadavg_1m"] = serde_json::json!(parts[0].parse::<f64>().unwrap_or(-1.0));
                 obj["loadavg_5m"] = serde_json::json!(parts[1].parse::<f64>().unwrap_or(-1.0));
                 obj["loadavg_15m"] = serde_json::json!(parts[2].parse::<f64>().unwrap_or(-1.0));
+                let cpu = obj
+                    .get("cpu_count")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(1)
+                    .max(1) as f64;
+                let load1 = parts[0].parse::<f64>().unwrap_or(-1.0);
+                if load1 >= 0.0 {
+                    // N35：loadavg 是可运行队列长度；除以 CPU 数得到近似占用率，
+                    // 让 reliability 不再只看内存。
+                    obj["cpu_load_pct"] =
+                        serde_json::json!(((load1 / cpu * 100.0).round() as u64).min(100));
+                    obj["cpu_load_source"] = serde_json::json!("loadavg_1m/cpu_count");
+                }
             }
         }
         if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
@@ -1258,6 +1338,10 @@ fn env_fingerprint() -> serde_json::Value {
             }
             obj["uptime_s"] = serde_json::json!(GetTickCount64() / 1000);
         }
+        if let Some(pct) = sample_cpu_load_pct() {
+            obj["cpu_load_pct"] = serde_json::json!(pct);
+            obj["cpu_load_source"] = serde_json::json!("GetSystemTimes/250ms");
+        }
     }
     // K4：整机内存压力只做“读数可信度”标注，不参与门禁。Windows 用 dwMemoryLoad；
     // Linux 用 (MemTotal - MemAvailable) / MemTotal 近似，便于跨平台对照。
@@ -1276,23 +1360,25 @@ fn env_fingerprint() -> serde_json::Value {
                 }
             }
         }
-        let load = o.get("mem_load_pct").and_then(|x| x.as_u64());
-        let reliability = match load {
-            Some(p) if p >= 85 => "low",
-            Some(p) if p >= 70 => "medium",
-            Some(_) => "high",
-            None => "unknown",
-        };
+        let mem = o.get("mem_load_pct").and_then(|x| x.as_u64());
+        let cpu = o.get("cpu_load_pct").and_then(|x| x.as_u64());
+        let reliability = merge_reliability(reliability_grade(mem), reliability_grade(cpu));
         o.insert("reliability".into(), serde_json::json!(reliability));
-        if let Some(p) = load {
-            if p >= 85 {
-                o.insert(
-                    "note".into(),
-                    serde_json::json!(format!(
-                        "整机内存占用 {p}%，启动/写入读数可能偏高，仅作参考、不作门禁失败"
-                    )),
-                );
-            }
+        o.insert(
+            "reliability_basis".into(),
+            serde_json::json!(format!(
+                "mem={}%,cpu={}%",
+                mem.map(|x| x.to_string()).unwrap_or_else(|| "n/a".into()),
+                cpu.map(|x| x.to_string()).unwrap_or_else(|| "n/a".into())
+            )),
+        );
+        if mem.is_some_and(|p| p >= 85) || cpu.is_some_and(|p| p >= 85) {
+            o.insert(
+                "note".into(),
+                serde_json::json!(
+                    "整机内存或 CPU 占用偏高，启动/写入读数可能偏高，仅作参考、不作门禁失败"
+                ),
+            );
         }
     }
     obj
@@ -1357,7 +1443,10 @@ impl XorShift {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_workspace, tool_matches, write_gate_result};
+    use super::{
+        apply_workspace, env_fingerprint, merge_reliability, reliability_grade, tool_matches,
+        write_gate_result,
+    };
 
     #[test]
     fn write_gate_marks_windows_edge_jitter_as_advisory() {
@@ -1382,6 +1471,34 @@ mod tests {
             write_gate_result(true, false, 35_000.0, 10_000.0),
             ("advisory", false, true)
         );
+    }
+
+    #[test]
+    fn env_fingerprint_reports_cpu_and_memory_basis() {
+        let fp = env_fingerprint();
+        let basis = fp
+            .get("reliability_basis")
+            .and_then(|x| x.as_str())
+            .expect("reliability_basis");
+        assert!(basis.contains("mem="), "{basis}");
+        assert!(basis.contains("cpu="), "{basis}");
+        #[cfg(target_os = "linux")]
+        assert!(
+            fp.get("cpu_load_pct").and_then(|x| x.as_u64()).is_some(),
+            "Linux 缺少 cpu_load_pct: {fp}"
+        );
+    }
+
+    #[test]
+    fn reliability_uses_worse_of_memory_and_cpu() {
+        assert_eq!(merge_reliability("high", "high"), "high");
+        assert_eq!(merge_reliability("high", "medium"), "medium");
+        assert_eq!(merge_reliability("medium", "low"), "low");
+        assert_eq!(merge_reliability("unknown", "high"), "high");
+        assert_eq!(merge_reliability("unknown", "unknown"), "unknown");
+        assert_eq!(reliability_grade(Some(69)), "high");
+        assert_eq!(reliability_grade(Some(70)), "medium");
+        assert_eq!(reliability_grade(Some(85)), "low");
     }
 
     #[test]

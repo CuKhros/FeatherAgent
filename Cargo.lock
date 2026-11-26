@@ -314,7 +314,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "featheragent"
-version = "1.2.1-rc.4.5"
+version = "1.2.1-rc.4.6"
 dependencies = [
  "blake3",
  "crc32c",

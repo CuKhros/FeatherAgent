@@ -18,6 +18,7 @@ pub mod local_search;
 pub mod log;
 pub mod net;
 pub mod proto;
+pub mod review;
 pub mod runtime;
 pub mod server;
 pub mod util;

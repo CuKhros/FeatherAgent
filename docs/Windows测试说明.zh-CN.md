@@ -1,15 +1,15 @@
-# FeatherAgent 1.2.1-rc.4.5 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4.6 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.4.5-windows-x64.zip`
-> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.4 复测（N29–N31）
-> 说明：v1.2.1-rc.4.5 修复 rc.4.4 复测的 N29–N31。N29：明确写文件任务不再要求 guide 产出硬判据，判据全部交 judge，`must_include:["-"]` 这类符号硬键不再触发“术语至少 2 字”校验；N30：Windows 写入门禁在 10–20 ms 边缘抖动时标 `advisory`，不再把高可靠主机整轮判红，超过 20 ms 仍 fail；N31：试卷 L17 的列表判据识别 `**1.**` 粗体编号。rc.4.4 的 N23–N27、TUI 到顶夹紧和更早修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 冒烟仅作启动与协议检查，冷启动/RSS/写入门禁不作 Windows 结论。
+> 被测包：`FeatherAgent-1.2.1-rc.4.6-windows-x64.zip`
+> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.5 复测（N32–N35）
+> 说明：v1.2.1-rc.4.6 修复 rc.4.5 复测的 N32–N35，并清掉代码审计确认的五处结构性技术债。N32：judge 输出里的 Windows 路径反斜杠不再把 JSON 打坏（标准解析失败后只修字符串内部非法转义，证据路径改用正斜杠）；N33：输出上限从硬编码 512 改为 `Config.max_output` 默认 2048，并按 provider 传 `num_predict`/`max_tokens`，`finish=length` 会让 review 角色失败重试；N34：`bench --json` 的 `gates` 只保留布尔判定项，状态/原始读数/阈值移到 `diagnostics`；N35：`reliability` 取内存与 CPU 更差者。rc.4.5 的 N29–N31、rc.4.4 的 N23–N27、TUI 到顶夹紧和更早修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 冒烟仅作启动与协议检查，冷启动/RSS/写入门禁不作 Windows 结论。
 
 ## 1. 解压与启动
 
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.5\
+D:\FeatherAgent-1.2.1-rc.4.6\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -20,10 +20,10 @@ D:\FeatherAgent-1.2.1-rc.4.5\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.4.5` 后再操作。
+看到 `serve ready: 1.2.1-rc.4.6` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.5
+cd D:\FeatherAgent-1.2.1-rc.4.6
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -205,14 +205,23 @@ v1.2.1-rc.4 回归核对：
 3. **N4 回归。** rc.3.5 原始 fixture 项（`must_not_include:["REVIEW-FINAL","REVIEW-START","<...>"]`）仍必须整条丢弃，`review.warn` 指明 id。
 4. **N7：bench 临时目录/错误契约。** 连续跑 `bench --json` 多次，每次临时目录唯一，不得出现 `os error 2`。故意破坏路径时，stdout 必须只有一行 JSON：`ok:false`、`code:"artifact_missing"` 或 `"bench_failed"`，`error` 里带路径。
 5. **N8：重复工具调用。** 用会重复调用的模型触发重试链；`tool.call` 必须带 `attempt` 与 `call_index`；同一回复内同名同参数只执行一次，不同路径仍分别执行。
-6. **N9：启动门禁 advisory。** 内存压力下（`reliability` medium/low）`gates.boot_gate_status` 必须为 `"advisory"`，`boot_gate_raw` 保留原始结果，`gates.boot_lt_*` 不单独判红，`reliability` 同时出现在 `metrics` 与 `gates`；`boot_gate_trusted` 必须位于 `advisory_gates`，不在 `gates` 内。
+6. **N9：启动门禁 advisory。** 内存/CPU 压力下（`reliability` medium/low）`diagnostics.boot_gate_status` 必须为 `"advisory"`，`diagnostics.boot_gate_raw` 保留原始结果，`gates.boot_lt_*` 为 effective 结果，`reliability` 出现在 `metrics.env` 与 `diagnostics`；`boot_gate_trusted` 位于 `advisory_gates`，不在 `gates` 内。
 7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
 8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
+
+v1.2.1-rc.4.6 回归核对：
+
+1. **N32：judge 路径容错。** review-gate 开启，用 rc.4.5 的写文件任务连跑 3 次：`请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头`。3/3 都不得出现 `invalid escape` / `审批结果不是合法 JSON`；必须进入 judge 并给出 `review.verdict`，`review.finished status` 不能是 `degraded`。核对 `data/review-artifacts/<session>/` 的 verdict 原文，路径里允许有 `\` 或 `/`，但必须能解析。
+2. **N33：长答案不截断。** 用 `large-2` 的 M15（HTTPS 握手三阶段）和 M20（可观测性三件套）各跑一次，要求三段式展开。答案长度应明显超过 rc.4.5 的 136 / 390 字；事件流里不得出现 `finish:"length"` 或 `truncated:true`。若仍提前停，记录 `done_reason`、`finish_reason`、输出字数与模型名，判断是 `num_predict` 还是模型自身 stop。
+3. **N34：gates 只含布尔。** `bench --json` 顶层必须是 `metrics/gates/diagnostics/advisory_gates`；`gates` 每个值都是 `true/false`，不得出现 `platform`、`reliability`、`*_gate_status`、`*_gate_raw` 或阈值。`write_gate_status` / `write_gate_raw` 从 `diagnostics` 读；确认测试脚本不再按 `gates` 里的 False 个数判失败。
+4. **N35：reliability 纳入 CPU。** `bench --json` 的 `metrics.env` 必须含 `cpu_load_pct` 与 `cpu_load_source`（Windows 应为 `GetSystemTimes/250ms`），`reliability_basis` 必须同时有 `mem=` 和 `cpu=`。在机器有常驻负载时跑 3 次，记录 `cpu_load_pct`、`reliability` 与 warm P50；CPU ≥70% 应至少降到 medium，≥85% 应为 low。
+5. **中英双包回归。** `featheragent-tui-en.exe` / `featheragent-webui-en.exe` 启动后显示英文；英文 WebUI 点 `+` 选一个文件并发送，确认附件进入会话（rc.4.5 英文 `send()` 曾漏附件逻辑）。中文包保持中文。
+6. **rc.4.5 N29–N31 回归。** 重跑下方 rc.4.5 的 N29/N30/N31 核对；N30 的状态字段改从 `diagnostics` 读。
 
 v1.2.1-rc.4.5 回归核对：
 
 1. **N29：写文件任务跳过硬判据。** review-gate 开启，用原任务 `请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头`。guide 第一次只需产出 `criterion/check` 的 judge-only 判据就应被接受；`rubric-final.json` 中 `file_task:true`、`hard_items:0`，不得出现 `must_include` / `min_points` / `pattern`。整轮应 `tool.fs.write` 成功并进入 judge，`review.verdict` 的 `votes>0`；不得再出现 `review.finished status=degraded rounds=0`。核对 `workspace/notes3.txt` 确有三行且都以 `- ` 开头。
-2. **N30：写入门禁 advisory。** `bench --json` 必须含 `write_gate_status` 与 `write_gate_raw`。Windows 上写 P95 在 10–20 ms 时，平台写 key 为 true、`write_gate_status:"advisory"`、`write_gate_raw:false`，整轮不得因此判红；超过 20 ms 必须为 `"fail"`。Linux 仍按 100 µs 严格判定；记录三次样本。
+2. **N30：写入门禁 advisory。** `bench --json` 的 `diagnostics` 必须含 `write_gate_status` 与 `write_gate_raw`（`gates` 里没有这两个字段）。Windows 上写 P95 在 10–20 ms 时，平台写 key 为 true、`write_gate_status:"advisory"`、`write_gate_raw:false`，整轮不得因此判红；超过 20 ms 必须为 `"fail"`。Linux 仍按 100 µs 严格判定；记录三次样本。
 3. **N31：粗体编号。** 用 `large-1` 的 L17 作答，三条用 `**1.**` / `**2.**` / `**3.**` 开头；判据应识别为 3/3，而不是 1.5/3。此项是测试评分规则，不是产品门禁。
 4. **N23–N28 回归。** 重跑下方 rc.4.4 核对；bench 不卡死、写文件 review、XML 恢复、对比轴、临时目录与 TUI 到顶回翻必须保持通过。
 
@@ -277,13 +286,13 @@ v1.2.1 追加核对：
 - N14：4B 在多任务长流程上会漂移；建议用 ≥7B exec，并对基线多次取样。单次 4B 结果只作观测。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- Wine 冒烟（解压后的 rc.4.5 包内）：`version` 打印 `FeatherAgent 1.2.1-rc.4.5 (contract 1.0)`；三次 `bench --json` 均完整结束，无 `[bench:rpc_connect]` 失败；热启动 P50 **79.8 / 75.0 / 81.1 ms**，冷启动 **476.8 / 449.0 / 511.7 ms**、RSS **18,688 / 18,688 / 18,560 KiB** 因 Wine 进程开销判红；写入 P95 **4.864 / 4.898 / 4.897 ms**，`write_gate_status:"pass"`、`write_gate_raw:true`。Wine 使用临时 `bcryptprimitives.dll` stub，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
+- Wine 冒烟（解压后的 rc.4.6 包内，临时 `bcryptprimitives` stub）：`version` 打印 `FeatherAgent 1.2.1-rc.4.6 (contract 1.0)`；三次 `bench --json` 均完整结束。热启动 P50 **81.3 / 82.1 / 87.1 ms**；冷启动 **580.2 / 584.8 / 543.7 ms**、RSS **18,432 KiB** 因 Wine 进程开销判红；写入 P95 **4.676 / 4.587 / 4.586 ms**，`write_gate_status:"pass"`、`write_gate_raw:true`；`gates` 全为布尔，`diagnostics.platform:"windows"`，`cpu_load_source:"GetSystemTimes/250ms"`、`reliability_basis:"mem=20%,cpu=0/0/1%"`。stub 只在测试目录，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.5-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.6-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

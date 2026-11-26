@@ -1767,7 +1767,7 @@ impl App {
             "clear" => self.messages.clear(),
             "help" => self.messages.push((
                 "System".into(),
-                "/new [id] [project] /workspace <project> /workspaces /use <id> /fork [id]\n/stop /steer <guidance> /compact /settings /plugins /clear /quit\n@<path> attaches a file; typing during a run = steer; /stop = emergency stop and save context".into(),
+                "/new [id] [project] /workspace <project> /workspaces /use <id> /fork [id]\\n/stop /steer <guidance> /compact /settings /plugins /clear /quit\\n@<path> add attachment; typing during a run = steer; /stop = emergency stop and save context".into(),
             )),
             _ => self.status = format!("Unknown command /{name}"),
         }
@@ -1780,15 +1780,15 @@ impl App {
         };
         self.focus = Focus::Chat;
         self.chat_scroll = 0;
-        // Verify @ paths in the TUI first, then hand them to the kernel. The kernel rechecks
-        // existence and copies files outside the install dir into the default workspace.
+        // TUI 侧先核实 @ 路径存在，再交给内核；内核会复核并把安装目录外的文件
+        // 复制到默认工作区，返回最终模型路径。
         let (clean, paths) = split_at_attachments(text);
         if !paths.is_empty() {
             for path in &paths {
                 if !Path::new(path).is_file() {
                     self.messages
-                        .push(("System".into(), format!("Attachment not found: {path}")));
-                    self.status = format!("Attachment not found: {path}");
+                        .push(("System".into(), format!("attachment not found: {path}")));
+                    self.status = format!("attachment not found: {path}");
                     return;
                 }
             }
@@ -1811,18 +1811,20 @@ impl App {
                     if !final_text.is_empty() {
                         final_text.push_str("\n\n");
                     }
-                    final_text.push_str(&format!("[Attachment] {resolved}"));
+                    final_text.push_str(&format!("[attachment] {resolved}"));
                 }
                 Err(e) => {
-                    self.messages
-                        .push(("System".into(), format!("Failed to attach file: {e}")));
+                    self.messages.push((
+                        "System".into(),
+                        format!("failed to hand attachment to kernel: {e}"),
+                    ));
                     self.status = e;
                     return;
                 }
             }
         }
         if final_text.is_empty() {
-            self.status = "Message and attachments are both empty".into();
+            self.status = "message and attachment are both empty".into();
             return;
         }
         let running = matches!(
@@ -3202,17 +3204,4 @@ fn split_at_attachments(text: &str) -> (String, Vec<String>) {
         i += 1;
     }
     (clean, paths)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_scroll_is_clamped_after_overscrolling_at_top() {
-        assert_eq!(clamp_chat_scroll(usize::MAX, 8), 8);
-        assert_eq!(clamp_chat_scroll(8, 8), 8);
-        assert_eq!(clamp_chat_scroll(8, 8).saturating_sub(1), 7);
-        assert_eq!(clamp_chat_scroll(0, 8).saturating_sub(1), 0);
-    }
 }

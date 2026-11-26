@@ -696,12 +696,32 @@ fn stress_log(n: usize) -> Result<(), String> {
     Ok(())
 }
 
+fn write_gate_result(
+    windows: bool,
+    boot_trusted: bool,
+    write_p95: f64,
+    write_limit: f64,
+) -> (&'static str, bool, bool) {
+    let raw = write_p95 < write_limit;
+    let margin = windows && write_p95 < write_limit * 2.0;
+    let effective = raw || margin || (!boot_trusted && write_p95 < write_limit * 4.0);
+    if raw {
+        ("pass", true, true)
+    } else if effective {
+        ("advisory", false, true)
+    } else {
+        ("fail", false, false)
+    }
+}
+
 fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     let json_only = args.has("--json");
     match bench_run(args) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let code = if e.contains("os error 2") {
+            let code = if e.contains("os error 2")
+                || e.contains("The system cannot find the file specified")
+            {
                 "artifact_missing"
             } else {
                 "bench_failed"
@@ -713,7 +733,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
                         "ok": false,
                         "code": code,
                         "error": e,
-                        "hint": "Check the path in the error; each bench run uses a unique temporary directory"
+                        "hint": "Check the path in the error; temporary artifacts use a per-bench unique directory and should not conflict with leftovers"
                     }))
                     .unwrap()
                 );
@@ -723,7 +743,7 @@ fn bench(args: &featheragent::util::Args) -> Result<(), String> {
     }
 }
 
-/// N27: always clean the bench temp dir on success, error, or panic.
+/// N27：bench 无论正常结束、中途报错还是 panic，临时目录都要清理。
 struct BenchTempDir {
     path: std::path::PathBuf,
 }
@@ -734,7 +754,7 @@ impl Drop for BenchTempDir {
     }
 }
 
-/// Remove stale fa-bench-* dirs older than 24h; leave fresh dirs alone.
+/// 清理超过 24 小时的旧 fa-bench-* 残留；不动其他进程的新目录。
 fn cleanup_stale_bench_dirs() {
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
         return;
@@ -758,7 +778,7 @@ fn cleanup_stale_bench_dirs() {
     }
 }
 
-/// N23: never join the server thread forever; time out with a readable error.
+/// N23：不无限 join 服务线程；超时返回可读错误，避免 bench 卡死 150 秒。
 fn wait_server_stop(
     handle: thread::JoinHandle<()>,
     socket: &std::path::Path,
@@ -768,7 +788,7 @@ fn wait_server_stop(
     while !handle.is_finished() {
         if Instant::now() >= deadline {
             return Err(format!(
-                "{step} server thread did not exit within 5s: {}",
+                "{step} service thread did not exit within 5s: {}",
                 socket.display()
             ));
         }
@@ -808,7 +828,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         // 明确以专用退出码结束，避免 Windows 下被包装脚本/管道吞成 0。
         std::process::exit(2);
     }
-    // N7: use a unique temp dir per run; do not reuse PID-only names.
+    // N7：每次 bench 使用唯一临时目录；不要只用 pid（Windows 会复用 pid，残留目录会制造 os error 2）。
     let dir = std::env::temp_dir().join(format!(
         "fa-bench-{}-{}",
         std::process::id(),
@@ -845,7 +865,8 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     for i in 0..6 {
         let cfg = Config::default();
         let t0 = Instant::now();
-        let k = Kernel::new(paths.clone(), cfg, true)?;
+        let k = Kernel::new(paths.clone(), cfg, true)
+            .map_err(|e| format!("[bench:kernel_init] {}: {e}", boot_dir.display()))?;
         let socket = paths.socket();
         let srv = Server::new(
             k.clone(),
@@ -858,7 +879,8 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
                 let _ = s.run();
             })
         };
-        server::wait_ready(&socket, Duration::from_secs(10)).map_err(|e| e.to_string())?;
+        server::wait_ready(&socket, Duration::from_secs(10))
+            .map_err(|e| format!("[bench:boot_ready] {}: {e}", socket.display()))?;
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         if i == 0 {
             boot_warmup_ms = ms;
@@ -914,7 +936,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             ..Default::default()
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("[bench:log_store] {}: {e}", dir.join("log").display()))?;
     let mut lat = Vec::new();
     for i in 0..2000 {
         let t = Instant::now();
@@ -962,7 +984,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     if !json_only {
         eprintln!("bench[6/6] RPC round-trip");
     }
-    // 6) RPC round-trip P95
+    // 6) RPC 往返 P95
     let rdir = dir.join("rpc");
     std::fs::create_dir_all(&rdir)
         .map_err(|e| format!("[bench:rpc_mkdir] {}: {e}", rdir.display()))?;
@@ -973,7 +995,8 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             ..Default::default()
         },
     );
-    let k = Kernel::new(paths.clone(), Config::default(), true)?;
+    let k = Kernel::new(paths.clone(), Config::default(), true)
+        .map_err(|e| format!("[bench:rpc_kernel] {}: {e}", rdir.display()))?;
     let socket = paths.socket();
     let srv = Server::new(
         k.clone(),
@@ -986,8 +1009,10 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             let _ = s.run();
         })
     };
-    server::wait_ready(&socket, Duration::from_secs(10)).map_err(|e| e.to_string())?;
-    // N16: retry briefly after wait_ready disconnects its probe connection.
+    server::wait_ready(&socket, Duration::from_secs(10))
+        .map_err(|e| format!("[bench:rpc_ready] {}: {e}", socket.display()))?;
+    // wait_ready 探测成功后会断开一次；Windows 命名管道在重建窗口里可能短暂
+    // 返回 ERROR_FILE_NOT_FOUND(2)，因此这里再做有界重试，而不是只 connect 一次。
     let conn = {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -1039,9 +1064,6 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         "boot_ms_p50": boot_p50,
         "boot_ms_p90": boot_p90,
         "boot_percentiles_consistent": boot_consistent,
-        "reliability": reliability,
-        "boot_gate_raw": boot_gate_raw,
-        "boot_gate_trusted": boot_trusted,
         "cold_spawn_mode": "real_process_spawn",
         "cold_spawn_ms_p50": percentile(&spawn_ms, 0.5),
         "cold_spawn_ms_min": if spawn_ms.is_empty() { 0.0 } else { spawn_ms.iter().cloned().fold(f64::INFINITY, f64::min) },
@@ -1053,6 +1075,9 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         "ctx_assemble_p95_ms": percentile(&asm_lat, 0.95),
         "rpc_p50_ms": percentile(&rpc, 0.5),
         "rpc_p95_ms": percentile(&rpc, 0.95),
+        "reliability": reliability,
+        "boot_gate_raw": boot_gate_raw,
+        "boot_gate_trusted": boot_trusted,
     });
     let platform = if windows { "windows" } else { "linux" };
     let cold_spawn_limit = if windows { 250.0 } else { 100.0 };
@@ -1076,37 +1101,19 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
     // reliability 高时，10–20 ms 仍算边缘抖动，标成 advisory 而不把整轮判红；
     // 超过 20 ms 才保留 fail。Linux 门禁仍是 100 us，不放宽。
     let write_p95 = percentile(&lat, 0.95);
-    let write_raw = write_p95 < write_limit;
-    let write_margin = windows && write_p95 < write_limit * 2.0;
-    let write_gate_effective =
-        write_raw || write_margin || (!boot_trusted && write_p95 < write_limit * 4.0);
-    let write_gate_status = if write_raw {
-        "pass"
-    } else if write_gate_effective {
-        "advisory"
-    } else {
-        "fail"
-    };
+    let (write_gate_status, write_raw, write_gate_effective) =
+        write_gate_result(windows, boot_trusted, write_p95, write_limit);
+    // N34：gates 只放“判定项”，全部是布尔值。状态、原始读数、阈值和可信度
+    // 都是诊断信息，放 diagnostics，避免消费者按“数 False”把诊断值当成失败。
     let mut gates = serde_json::json!({
-        "platform": platform,
         "binary_le_8mb": size_bytes <= 8 * 1024 * 1024,
         "rss_le_15mb": rss_kb <= 15 * 1024,
         "assemble_p95_lt_30ms": percentile(&asm_lat, 0.95) < 30.0,
         "rpc_p95_lt_1ms": percentile(&rpc, 0.95) < 1.0,
         "metrics_consistent": boot_consistent,
-        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
-        "boot_gate_raw": boot_gate_raw,
-        "reliability": reliability,
-        "boot_mode": "warm_in_process_same_install_root",
-        "boot_limit_ms": boot_limit,
-        "cold_spawn_mode": "real_process_spawn",
-        "cold_spawn_limit_ms": cold_spawn_limit,
-        "write_limit_us": write_limit,
-        "write_gate_status": write_gate_status,
-        "write_gate_raw": write_raw,
     });
     if let Some(o) = gates.as_object_mut() {
-        // N9: when reliability is not high, report the boot gate as advisory.
+        // N9：reliability 非 high 时启动门禁标成 advisory，不用红门禁惩罚环境抖动。
         o.insert(boot_key.into(), serde_json::json!(boot_gate_effective));
         o.insert(
             cold_key.into(),
@@ -1114,8 +1121,23 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         );
         o.insert(write_key.into(), serde_json::json!(write_gate_effective));
     }
-    // N17: trust is an environment advisory, not a release gate; list it
-    // separately so reliability=low is not counted as a failed gate.
+    // N34：状态/原始读数/阈值/可信度统一放这里；gates 里不再混入非判定值。
+    let diagnostics = serde_json::json!({
+        "platform": platform,
+        "boot_gate_raw": boot_gate_raw,
+        "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
+        "boot_gate_trusted": boot_trusted,
+        "write_gate_raw": write_raw,
+        "write_gate_status": write_gate_status,
+        "reliability": reliability,
+        "boot_mode": "warm_in_process_same_install_root",
+        "boot_limit_ms": boot_limit,
+        "cold_spawn_mode": "real_process_spawn",
+        "cold_spawn_limit_ms": cold_spawn_limit,
+        "write_limit_us": write_limit,
+    });
+    // N17：可信度是环境的“建议项”，不是版本门禁；单独列出，避免
+    // reliability=low 时被人工统计成 passed/total 失败。
     let advisory_gates = serde_json::json!({
         "boot_gate_trusted": boot_trusted,
         "boot_gate_status": if !boot_trusted { "advisory" } else if boot_gate_raw { "pass" } else { "fail" },
@@ -1127,6 +1149,7 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
             serde_json::to_string(&serde_json::json!({
                 "metrics": m,
                 "gates": gates,
+                "diagnostics": diagnostics,
                 "advisory_gates": advisory_gates
             }))
             .unwrap()
@@ -1190,13 +1213,73 @@ fn bench_run(args: &featheragent::util::Args) -> Result<(), String> {
         );
         println!("gate: {}", serde_json::to_string_pretty(&gates).unwrap());
         println!(
-            "advisory (not counted in gates): {}",
+            "advisory (not a gate): {}",
             serde_json::to_string(&advisory_gates).unwrap()
         );
         let _ = human_bytes(size_bytes);
         let _ = std::io::stdout().flush();
     }
     Ok(())
+}
+
+fn reliability_grade(pct: Option<u64>) -> &'static str {
+    match pct {
+        Some(p) if p >= 85 => "low",
+        Some(p) if p >= 70 => "medium",
+        Some(_) => "high",
+        None => "unknown",
+    }
+}
+
+/// 内存与 CPU 任一维度吃紧都降低可信度；两者都未知才算 unknown。
+fn merge_reliability(a: &'static str, b: &'static str) -> &'static str {
+    if a == "unknown" {
+        return b;
+    }
+    if b == "unknown" {
+        return a;
+    }
+    if a == "low" || b == "low" {
+        return "low";
+    }
+    if a == "medium" || b == "medium" {
+        return "medium";
+    }
+    "high"
+}
+
+#[cfg(windows)]
+fn sample_cpu_load_pct() -> Option<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+
+    fn ticks(ft: FILETIME) -> u64 {
+        ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64
+    }
+    unsafe {
+        let mut idle: FILETIME = std::mem::zeroed();
+        let mut kernel: FILETIME = std::mem::zeroed();
+        let mut user: FILETIME = std::mem::zeroed();
+        if GetSystemTimes(&mut idle, &mut kernel, &mut user) == 0 {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+        let mut idle2: FILETIME = std::mem::zeroed();
+        let mut kernel2: FILETIME = std::mem::zeroed();
+        let mut user2: FILETIME = std::mem::zeroed();
+        if GetSystemTimes(&mut idle2, &mut kernel2, &mut user2) == 0 {
+            return None;
+        }
+        let d_idle = ticks(idle2).saturating_sub(ticks(idle));
+        let d_kernel = ticks(kernel2).saturating_sub(ticks(kernel));
+        let d_user = ticks(user2).saturating_sub(ticks(user));
+        // Windows 的 kernel time 已包含 idle time。
+        let total = d_kernel.saturating_add(d_user);
+        if total == 0 {
+            return None;
+        }
+        Some((total.saturating_sub(d_idle) * 100 / total).min(100))
+    }
 }
 
 /// J3：bench 数字必须带环境指纹，否则跨时段/跨机器无法比较。
@@ -1214,6 +1297,19 @@ fn env_fingerprint() -> serde_json::Value {
                 obj["loadavg_1m"] = serde_json::json!(parts[0].parse::<f64>().unwrap_or(-1.0));
                 obj["loadavg_5m"] = serde_json::json!(parts[1].parse::<f64>().unwrap_or(-1.0));
                 obj["loadavg_15m"] = serde_json::json!(parts[2].parse::<f64>().unwrap_or(-1.0));
+                let cpu = obj
+                    .get("cpu_count")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(1)
+                    .max(1) as f64;
+                let load1 = parts[0].parse::<f64>().unwrap_or(-1.0);
+                if load1 >= 0.0 {
+                    // N35：loadavg 是可运行队列长度；除以 CPU 数得到近似占用率，
+                    // 让 reliability 不再只看内存。
+                    obj["cpu_load_pct"] =
+                        serde_json::json!(((load1 / cpu * 100.0).round() as u64).min(100));
+                    obj["cpu_load_source"] = serde_json::json!("loadavg_1m/cpu_count");
+                }
             }
         }
         if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
@@ -1258,6 +1354,10 @@ fn env_fingerprint() -> serde_json::Value {
             }
             obj["uptime_s"] = serde_json::json!(GetTickCount64() / 1000);
         }
+        if let Some(pct) = sample_cpu_load_pct() {
+            obj["cpu_load_pct"] = serde_json::json!(pct);
+            obj["cpu_load_source"] = serde_json::json!("GetSystemTimes/250ms");
+        }
     }
     // K4：整机内存压力只做“读数可信度”标注，不参与门禁。Windows 用 dwMemoryLoad；
     // Linux 用 (MemTotal - MemAvailable) / MemTotal 近似，便于跨平台对照。
@@ -1276,23 +1376,25 @@ fn env_fingerprint() -> serde_json::Value {
                 }
             }
         }
-        let load = o.get("mem_load_pct").and_then(|x| x.as_u64());
-        let reliability = match load {
-            Some(p) if p >= 85 => "low",
-            Some(p) if p >= 70 => "medium",
-            Some(_) => "high",
-            None => "unknown",
-        };
+        let mem = o.get("mem_load_pct").and_then(|x| x.as_u64());
+        let cpu = o.get("cpu_load_pct").and_then(|x| x.as_u64());
+        let reliability = merge_reliability(reliability_grade(mem), reliability_grade(cpu));
         o.insert("reliability".into(), serde_json::json!(reliability));
-        if let Some(p) = load {
-            if p >= 85 {
-                o.insert(
-                    "note".into(),
-                    serde_json::json!(format!(
-                        "system memory usage {p}%; startup/write readings may be high, for reference only and not a gate failure"
-                    )),
-                );
-            }
+        o.insert(
+            "reliability_basis".into(),
+            serde_json::json!(format!(
+                "mem={}%,cpu={}%",
+                mem.map(|x| x.to_string()).unwrap_or_else(|| "n/a".into()),
+                cpu.map(|x| x.to_string()).unwrap_or_else(|| "n/a".into())
+            )),
+        );
+        if mem.is_some_and(|p| p >= 85) || cpu.is_some_and(|p| p >= 85) {
+            o.insert(
+                "note".into(),
+                serde_json::json!(
+                    "System memory or CPU usage is high; startup/write readings may be high, for reference only and not a gate failure"
+                ),
+            );
         }
     }
     obj
