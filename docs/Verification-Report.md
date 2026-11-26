@@ -1,10 +1,27 @@
-# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.7)
+# FeatherAgent Verification Report (v1.1.1 – v1.2.1-rc.4.8)
 
-> Date: 2026-11-26 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.7` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
+> Date: 2026-11-27 · Code: `v1.1.1` baseline, `v1.1.2`–`v1.1.9` fixes, `v1.2.1-rc.4.8` candidate · Reference: FeatherAgent Architecture Design v1.1 (including erratum R1)
 >
 > Principle: **no number without a measurement**. Every number below comes from a real local run. Uncovered items are listed in §8; inference is never presented as measurement.
 
-## v1.2.1-rc.4.7 summary (current candidate)
+## v1.2.1-rc.4.8 summary (current candidate)
+
+The rc.4.7 real-hardware retest confirmed two practical gains: with `tool.shell` allowed, the math small paper rose 19.5→21.5 and the large paper 40.7→41.6, while FA time dropped from 638 s/1,449 s to 126 s/446 s; N38 recovered from MS2 37 / ML02 109 characters to 729 / 1,568. N36 produced no valid reading because leaked turns kept returning `interrupted/stopped`. The same report exposed N40 (formula-notation scoring), N41 (coarse partial credit) and N42 (stale turn after force-kill).
+
+| Item | Treatment | Verification |
+|---|---|---|
+| N40 formula checks miss equivalent notation | ML02 accepts `π²/6`, `π^2/6`, `π^{2}/6`, `pi^2/6`, `(π^2)/6`, `(π²)/6`, `\frac{\pi^2}{6}`, `\dfrac{\pi^2}{6}`, `\frac{\pi^{2}}{6}`, `\frac{1}{6}\pi^2`, `\zeta(2)` and `ζ(2)`; ML10's result accepts `\frac{\pi}{16}` and `\dfrac{\pi}{16}` | `math_paper_formula_variants_and_steps_are_scored` checks positive forms and rejects `π^2/5`; regex coverage only, no numeric equivalence |
+| N41 ML10 partial credit too coarse | Four one-point checks: substitution method, substitution expansion, reduction/double angle, result `π/16`; trig and Beta routes can both earn steps | Same regression test asserts four checks and a full trig derivation matches all four |
+| N42 stale turn contaminates the next client | Per-`chat.send` `Session.run_id`; stale `run_turn` exits silently at every checkpoint; disconnect bumps the generation and marks `Cancelled`; `session.create` cancels an old holder; `chat.finished` carries `run`; CLI filters by it | Reproduced on rc.4.7: 1/5 cycles delivered old `stopped` to the next client. rc.4.8: 5/5 `ok`, one finish each. Test: `killed_client_does_not_leak_or_block_next_run`; Wine smoke also passed once |
+| rc.4.7 report and per-question data archived | Report under `docs/model-test-reports/reports/`; new `data/math-papers-rc.4.7.csv` with 28 rows | Report index **14 reports**; CSV totals: small 25/14.5/21.5, large 56/32.3/41.6; paper library unchanged at 7/90/252 |
+
+Linux full suite: **211 items, 210 passed, 1 ignored** (`local_web_search_tool_via_kernel`, needs public network). Breakdown: 83 lib, 34 plugin ×2, 5 kernel, 6 TUI, 4 WebUI ×2, 2 golden, 38 integration (1 ignored). `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, version consistency, generated-source consistency and the English Web bundle check pass. Release bench (3 consecutive runs): kernel **2,581,016 B (2.46 MiB)**; warm P50 **1.408 / 1.356 / 1.338 ms**, P90 **1.726 / 1.450 / 1.417 ms**; cold P50 **5.786 / 5.432 / 5.320 ms**; RSS **3,712 / 3,584 / 3,456 KiB**; write P95 **2.844 / 2.824 / 2.794 µs**; assemble P95 **0.128 / 0.146 / 0.145 ms**; RPC P95 **0.092 / 0.086 / 0.071 ms**; all eight boolean gates true, `diagnostics.platform:"linux"`, `write_gate_status:"pass"`, `write_gate_raw:true`; `reliability` is high on all three (`mem=17%,cpu=63%`, `mem=17%,cpu=62%`, `mem=17%,cpu=62%`), so `boot_gate_trusted=true` and `boot_gate_status:"pass"`, with raw warm values far below 20 ms.
+
+Windows x64 cross-compiled **10 exes**; kernel exe **2,320,896 B (2.21 MiB)**; objdump imports are system DLLs only with no libgcc/libwinpthread/libstdc++. Wine 6.0.3 with a temporary `bcryptprimitives` stub (not shipped): `version` prints `FeatherAgent 1.2.1-rc.4.8 (contract 1.0)`; `doctor` passes; three `bench --json` runs complete. Warm P50 **80.621 / 81.726 / 80.013 ms**; cold **375.035 / 429.808 / 409.811 ms**, with only `cold_spawn_lt_250ms` and RSS red under Wine; RSS **18,432 / 18,560 / 18,304 KiB**; write P95 **4,520.8 / 4,552.2 / 4,442.0 µs**; `platform:"windows"`, `write_gate_status:"pass"`, `reliability:"high"` (`mem=19%,cpu=0/4/3%`). `serve` + `chat` returned `status=ok`, and one N42 kill/reconnect smoke returned `status=ok` with `run=3`. The stub is not shipped and Wine is not a Windows baseline.
+
+Not verified: N36 clean-environment retest; whether the real ML02 answer now scores 2/3 or 3/3 (the report did not include its text); whether ML10's four-step rules match a real 4B derivation; Windows named-pipe kill timing for N42; numeric-equivalence scoring; other formula variants; TUI feel; high-DPI; proxy; network-drive/24h; macOS/arm64. Wine remains a startup/protocol smoke test, not a Windows conclusion.
+
+## v1.2.1-rc.4.7 summary (historical, released)
 
 The rc.4.6 real-hardware retest confirmed all of N32–N35: no `invalid escape` remains; M15 grew from 136 to 1,463 characters and M20 from 390 to 3,508 with `truncated=false`; all eight `gates` are boolean, `diagnostics` carries raw/status/thresholds, and `cpu_load_pct` moved to 25/41 with load. The new report added four findings: N36, the judge's “at least 10 characters” floor rejected a valid 9-character Chinese evidence; N37, ML10 needed sympy but the turn allowed only file tools, shell was denied, and the model did not switch to prose; N38, the model sometimes stopped after a heading (MS2 37 characters, ML02 109, `truncated=false`); N39, scoring was sensitive to `π²/6`, `pi^2/6` and `\frac{\pi^2}{6}`. The new math papers: small 8 questions/25 points, FeatherAgent 19.5 vs bare 16.5; large 20 questions/56 points, FeatherAgent 40.7 vs bare 31.7, with 1 empty FeatherAgent response and 5 bare.
 

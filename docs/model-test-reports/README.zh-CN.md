@@ -39,8 +39,9 @@
 | [v1.2.1-rc.4.4](reports/Windows真机复测报告-v1.2.1-rc.4.4.md) | 大试卷 1（20 题 / 54 分）：50.5/54 vs 30.0/54；319s vs 856s；裸跑 8 题空响应；bench 47.1ms、冷启动 214.1ms | 确认 N23/N19 已修，并暴露写文件任务 N29 的规则冲突 |
 | [v1.2.1-rc.4.5](reports/Windows真机复测报告-v1.2.1-rc.4.5.md) | 大试卷 2（20 题 / 60 分）：48.0/60 vs 45.0/60；1,653s vs 1,059s；judge 因 Windows 路径非法转义 3/3 degraded；FA 两题截断为 136 / 390 字 | 区分“避免空响应”与“内容质量”，并暴露 N32–N35 |
 | [v1.2.1-rc.4.6](reports/Windows真机复测报告-v1.2.1-rc.4.6.md) | 数学小卷 19.5/25 vs 16.5/25；大卷 40.7/56 vs 31.7/56；大卷 FA 1 题空响应 vs 裸跑 5 题；N32–N35 真机通过；N36 的 9 字 evidence 被 10 字门限误杀 | 首次数学双卷对照，确认四项修复，暴露 N36–N39 |
+| [v1.2.1-rc.4.7](reports/Windows真机复测报告-v1.2.1-rc.4.7.md) | 数学小卷 21.5/25 vs 14.5/25；大卷 41.6/56 vs 32.3/56；放行 `tool.shell` 后 FA 耗时 126s / 446s；N37、N38 真机确认；N36 因残留 turn 连续 `interrupted` 未取得读数；暴露 N40/N41 | 量化放行 shell 的分数与耗时收益；把公式写法与分步判据噪声单独暴露出来 |
 
-共 13 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
+共 14 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
 
 ## 试卷库
 
@@ -55,6 +56,7 @@
 | [`data/review-gate-real-model-runs.csv`](data/review-gate-real-model-runs.csv) | rc.2 至 rc.4 的真实模型 review-gate 里程碑 |
 | [`data/large-2-rc.4.5.csv`](data/large-2-rc.4.5.csv) | 大试卷 2 的 20 题逐题分数、耗时与答案长度（裸跑 vs FeatherAgent） |
 | [`data/math-papers-rc.4.6.csv`](data/math-papers-rc.4.6.csv) | 数学小卷/大卷 28 题的逐题分数（裸跑 vs FeatherAgent） |
+| [`data/math-papers-rc.4.7.csv`](data/math-papers-rc.4.7.csv) | 同一 28 题在 rc.4.7 放行 shell 后的逐题分数，附 N37/N38/N40/N41 备注 |
 
 ## 读数据时要注意
 

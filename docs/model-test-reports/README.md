@@ -39,8 +39,9 @@ Reports that only contain build/UI defect checklists are intentionally excluded.
 | [v1.2.1-rc.4.4](reports/Windows真机复测报告-v1.2.1-rc.4.4.md) | Large exam 1 (20 questions, 54 points): 50.5/54 vs 30.0/54; 319 s vs 856 s; 8 bare-model empty responses; bench 47.1 ms, cold start 214.1 ms | Confirms N23/N19 are fixed and exposes the N29 rule conflict on write-file tasks |
 | [v1.2.1-rc.4.5](reports/Windows真机复测报告-v1.2.1-rc.4.5.md) | Large exam 2 (20 questions, 60 points): 48.0/60 vs 45.0/60; 1,653 s vs 1,059 s; judge JSON escaped Windows paths and degraded 3/3; two FA answers truncated at 136 and 390 characters | Separates "avoiding empty responses" from actual answer quality, and exposes N32–N35 |
 | [v1.2.1-rc.4.6](reports/Windows真机复测报告-v1.2.1-rc.4.6.md) | math-small 19.5/25 vs 16.5/25; math-large 40.7/56 vs 31.7/56; one FA empty response vs five bare on the large paper; N32–N35 confirmed on real hardware; N36's 9-character evidence rejected by the 10-character floor | First two-paper math comparison; confirms four fixes and exposes N36–N39 |
+| [v1.2.1-rc.4.7](reports/Windows真机复测报告-v1.2.1-rc.4.7.md) | math-small 21.5/25 vs 14.5/25; math-large 41.6/56 vs 32.3/56; FA time 126 s / 446 s with `tool.shell` allowed; N37 and N38 confirmed; N36 not measured because a leaked turn kept returning `interrupted`; N40/N41 exposed | Quantifies the shell-allowance gain in score and time; isolates formula-notation and per-step scoring noise |
 
-Thirteen reports are preserved in their original Chinese wording. Local Windows usernames were replaced before publication. Commands, ports, model names, and event traces are unchanged.
+Fourteen reports are preserved in their original Chinese wording. Local Windows usernames were replaced before publication. Commands, ports, model names, and event traces are unchanged.
 
 ## Exam papers
 
@@ -55,6 +56,7 @@ Thirteen reports are preserved in their original Chinese wording. Local Windows 
 | [`data/review-gate-real-model-runs.csv`](data/review-gate-real-model-runs.csv) | Real-model review-gate milestones from rc.2 through rc.4 |
 | [`data/large-2-rc.4.5.csv`](data/large-2-rc.4.5.csv) | Per-question scores, latency and answer lengths for the 20-question large-2 paper (bare vs FeatherAgent) |
 | [`data/math-papers-rc.4.6.csv`](data/math-papers-rc.4.6.csv) | Per-question scores for the 28 questions in math-small and math-large (bare vs FeatherAgent) |
+| [`data/math-papers-rc.4.7.csv`](data/math-papers-rc.4.7.csv) | Per-question rc.4.7 scores for the same 28 questions, with the shell-allowance run and N37/N38/N40/N41 notes |
 
 ## Caveats
 

@@ -164,7 +164,11 @@ fn cancel_connection(kernel: &Arc<Kernel>, conn_id: u64) {
                 | crate::engine::SessionState::ToolExecuting
         );
         if running {
+            // N42：先让当前 run 失效，再取消 provider；旧 run 在下一个检查点直接退出，
+            // 不能在新客户端接管后继续发 interrupted / chat.finished，也不能再次写会话状态。
+            s.run_id.fetch_add(1, Ordering::SeqCst);
             s.cancel.store(true, Ordering::SeqCst);
+            *s.state.write() = SessionState::Cancelled;
             let active = s.active_req.lock().clone();
             if let Some((plugin, req)) = active {
                 if let Ok(p) = kernel.plugins.get(&plugin) {
@@ -344,6 +348,14 @@ fn dispatch(
             let s = kernel
                 .session_in_workspace(&id, &workspace)
                 .map_err(|e| (rpc::ERR_INVALID_PARAMS, e))?;
+            // 同一会话复用：若旧连接仍占着写锁（例如客户端被强杀、清理尚未完成），
+            // 先取消旧 run 并让 holder 释放，避免新连接抢到 holder 后旧 turn 继续发事件。
+            let previous = *s.holder.read();
+            if let Some(prev) = previous {
+                if prev != conn_id {
+                    cancel_connection(kernel, prev);
+                }
+            }
             *s.holder.write() = Some(conn_id);
             kernel.emit(
                 &id,
@@ -514,21 +526,26 @@ fn dispatch(
             *s.state.write() = SessionState::Assembling;
             s.interrupt.store(0, Ordering::SeqCst);
             s.cancel.store(false, Ordering::SeqCst);
+            let run_id = s.begin_run();
             let k = kernel.clone();
             let ss = s.clone();
             let t = text.to_string();
             thread::spawn(move || {
-                if let Err(e) = k.run_turn(&ss, t) {
-                    *ss.state.write() = SessionState::Failed;
-                    *ss.error.write() = Some(e.clone());
-                    k.emit(
-                        &ss.id,
-                        EventKind::ChatFinished,
-                        json!({"status": "failed", "error": e}),
-                    );
+                if let Err(e) = k.run_turn(&ss, t, run_id) {
+                    if ss.run_is_current(run_id) {
+                        *ss.state.write() = SessionState::Failed;
+                        *ss.error.write() = Some(e.clone());
+                        k.emit(
+                            &ss.id,
+                            EventKind::ChatFinished,
+                            json!({"status": "failed", "error": e, "run": run_id}),
+                        );
+                    }
                 }
             });
-            Ok(json!({"session": id, "accepted": true, "turn": s.turn.load(Ordering::Relaxed)}))
+            Ok(
+                json!({"session": id, "accepted": true, "run": run_id, "turn": s.turn.load(Ordering::Relaxed)}),
+            )
         }
         "chat.stop" | "chat.cancel" => {
             let id = params

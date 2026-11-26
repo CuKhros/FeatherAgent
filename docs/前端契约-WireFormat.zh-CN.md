@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.4.7**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.4.8**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.7","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.8","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -114,7 +114,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 3. 发 `session.create`（`params.session` 可省略，默认 `cli`）。
 4. 发 `event.subscribe`（可选 `kinds` 数组；不传表示全部）。
 5. 发 `chat.send`（`params.text` 必填，`params.session` 与第 3 步一致）。
-6. 循环读帧，处理 `method == "event"` 的通知，直到 `params.kind == "chat.finished"`。
+6. 循环读帧，处理 `method == "event"` 的通知，直到 `params.kind == "chat.finished"` **且** `payload.run` 等于本次 `chat.send` 返回的 `run`；不要把其他 run 的 finish 当成自己的结果。
 
 ### 4.1 最小 Python 片段（JSON codec）
 
@@ -350,6 +350,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 安装目录内的本地文件返回 `copied:false` 和 canonical 路径；目录外文件复制到默认工作区。浏览器字节总是落到默认工作区。模型只拿 `result.path`，不拿浏览器路径或目录外原路径。
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.4.8：没有新增帧、端点、事件类型或错误码。`chat.send` 返回值在 `session`、`accepted`、`turn` 之外新增 `run`（u64）；`chat.finished.payload` 新增 `run`（u64），都是增量。订阅共享事件流的客户端应忽略 `run` 不是自己那次 `chat.send` 的 `chat.finished`；否则被强杀的旧回合可能被当成自己的 `stopped` 结果。`session.create` 现在可能先取消同会话旧 holder（属于其他连接）再接管；这是行为修正，不是新方法。
 - 1.2.1-rc.4.7：没有新增帧、端点、事件类型或错误码。`permission_denied` 的 `tool.result` 新增 `hint` 字符串，提示模型不要重复调用同一工具、改用文字完成；旧客户端可忽略。judge evidence 的接受条件只是语义调整（6 个汉字 / 3 个英文词 / 10 个 ASCII 字母数字字符），`review.verdict` 字段不变。数学推导要求是系统提示文本，不是 wire 变更。
 - 1.2.1-rc.4.6：没有新增帧、端点、事件类型或错误码。`model.message` 增加 `truncated: bool`（provider 结束原因为 `length` 时为 true），旧客户端可忽略。`config.get` / `config.set` 接受新增的 `max_output` 字段（默认 2048），属增量。`review.verdict` 字段不变。`bench --json` 是 CLI 诊断输出，不是 wire 方法：`gates` 现在只含布尔判定项，`platform`、`write_gate_status`、`write_gate_raw`、阈值与 `reliability` 移到 `diagnostics`；脚本需迁移读取位置。
 - 1.2.1-rc.4.5：没有新增帧、端点、事件类型或错误码。`review.verdict` 字段不变，写文件任务只是产出 judge-only 判据。`bench --json` 结构不变，`gates` 内新增 `write_gate_status` / `write_gate_raw`。

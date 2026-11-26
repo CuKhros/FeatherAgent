@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use regex::Regex;
 use serde_json::{json, Value};
 
 use featheragent::engine::{Config, Kernel};
@@ -1149,6 +1150,73 @@ fn cancel_propagation() {
 }
 
 #[test]
+fn killed_client_does_not_leak_or_block_next_run() {
+    // N42：客户端被强杀后，旧 run 不能继续占用会话，也不能把旧的
+    // interrupted / chat.finished 当成新客户端的结果。
+    let (h, conn) = start("killbleed", |_| {});
+    conn.client
+        .call("session.create", json!({"id": "sk"}))
+        .unwrap();
+    let old = conn
+        .client
+        .call("chat.send", json!({"session": "sk", "text": "SPIN"}))
+        .unwrap();
+    assert!(old.get("run").and_then(|x| x.as_u64()).is_some());
+    // 等模型真正进入流式生成，再模拟任务管理器强杀客户端进程。
+    thread::sleep(Duration::from_millis(500));
+    drop(conn);
+    thread::sleep(Duration::from_millis(100));
+
+    let conn2 = Client::connect(&h.kernel.paths.socket()).unwrap();
+    conn2.client.call("initialize", json!({})).unwrap();
+    conn2
+        .client
+        .call("session.create", json!({"id": "sk"}))
+        .unwrap();
+    let sent = conn2
+        .client
+        .call("chat.send", json!({"session": "sk", "text": "echo: clean"}))
+        .unwrap();
+    let run = sent
+        .get("run")
+        .and_then(|x| x.as_u64())
+        .expect("new run id");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut own_text = String::new();
+    while Instant::now() < deadline {
+        let Ok(v) = conn2.events.recv_timeout(Duration::from_millis(200)) else {
+            continue;
+        };
+        if !is_kind(&v, "model.message", "sk") && !is_kind(&v, "chat.finished", "sk") {
+            continue;
+        }
+        if is_kind(&v, "model.message", "sk") {
+            own_text.push_str(
+                v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or(""),
+            );
+            continue;
+        }
+        let got = v.pointer("/params/payload/run").and_then(|x| x.as_u64());
+        if got != Some(run) {
+            continue; // 旧回合的迟到事件，不属于本次请求
+        }
+        assert_eq!(
+            v.pointer("/params/payload/status").and_then(|x| x.as_str()),
+            Some("ok"),
+            "新回合不应被旧 turn 干扰: {v}"
+        );
+        assert!(
+            own_text.contains("echo: clean"),
+            "新回合正文缺失: {own_text:?}"
+        );
+        return;
+    }
+    panic!("20s 内未收到新 run 的 chat.finished；最后正文={own_text:?}");
+}
+
+#[test]
 fn crash_restart_retries_once() {
     let (_h, conn) = start("crash", |_| {});
     conn.client
@@ -1893,4 +1961,54 @@ fn plugin_settings_are_relayed_and_validated() {
         )
         .unwrap_err();
     assert!(err.to_string().contains("配置项不存在"), "{err}");
+}
+
+#[test]
+fn math_paper_formula_variants_and_steps_are_scored() {
+    // N40/N41 回归：公式等价写法应被接受，ML10 的关键步骤应各占一份。
+    let raw = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/model-test-reports/exam-papers/math-large.json"
+    ))
+    .unwrap();
+    let paper: Value = serde_json::from_str(&raw).unwrap();
+    let q = |id: &str| {
+        paper["questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["id"] == id)
+            .unwrap()
+            .clone()
+    };
+
+    let ml02 = q("ML02");
+    let formula = Regex::new(ml02["checks"][0]["val"].as_str().unwrap()).unwrap();
+    for variant in [
+        "π²/6",
+        "π^2/6",
+        "(π^2)/6",
+        r"\frac{\pi^2}{6}",
+        r"\dfrac{\pi^2}{6}",
+        r"\frac{1}{6}\pi^2",
+        r"\zeta(2)",
+        "ζ(2)",
+    ] {
+        assert!(formula.is_match(variant), "ML02 漏判公式变体: {variant}");
+    }
+    assert!(!formula.is_match("π^2/5"));
+
+    let ml10 = q("ML10");
+    assert_eq!(ml10["checks"].as_array().unwrap().len(), 4);
+    let full_derivation = r"令 x=\sin\theta，dx=\cos\theta d\theta，\
+        \sin^2\theta\cos^2\theta=\frac{1}{4}\sin^2 2\theta，\
+        降幂后积分得 \frac{\pi}{16}";
+    for check in ml10["checks"].as_array().unwrap() {
+        let re = Regex::new(check["val"].as_str().unwrap()).unwrap();
+        assert!(
+            re.is_match(full_derivation),
+            "ML10 步骤未计分: {}",
+            check["name"]
+        );
+    }
 }

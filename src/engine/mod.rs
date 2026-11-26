@@ -339,6 +339,8 @@ pub struct Session {
     /// 当前会话所属的项目工作区名（位于 workspace_root 下一层）。
     pub workspace: RwLock<String>,
     pub turn: AtomicU32,
+    /// 每次 `chat.send` 分配一个单调递增的 run id；旧回合用它判断自己是否已被新回合取代。
+    pub run_id: AtomicU64,
     pub snapshot: RwLock<Value>,
     pub locked_tools: Vec<Value>,
     pub locked_skills: Vec<Skill>,
@@ -357,6 +359,7 @@ impl Session {
             interrupt: std::sync::atomic::AtomicU8::new(0),
             workspace: RwLock::new("default".into()),
             turn: AtomicU32::new(0),
+            run_id: AtomicU64::new(0),
             snapshot: RwLock::new(Value::Null),
             locked_tools: tools,
             locked_skills: skills,
@@ -364,6 +367,15 @@ impl Session {
             error: RwLock::new(None),
             created_ms: now_ms(),
         }
+    }
+
+    /// 新回合独占会话：返回新的 run id，并让旧回合在下一个检查点退出。
+    pub fn begin_run(&self) -> u64 {
+        self.run_id.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn run_is_current(&self, run: u64) -> bool {
+        self.run_id.load(Ordering::SeqCst) == run
     }
 
     pub fn info(&self) -> Value {
@@ -1095,7 +1107,15 @@ impl Kernel {
     }
 
     /// 一次完整的 Agent 回合（§13）。
-    pub fn run_turn(self: &Arc<Self>, session: &Arc<Session>, text: String) -> Result<(), String> {
+    pub fn run_turn(
+        self: &Arc<Self>,
+        session: &Arc<Session>,
+        text: String,
+        run_id: u64,
+    ) -> Result<(), String> {
+        if !session.run_is_current(run_id) {
+            return Ok(());
+        }
         let mut cfg = self.cfg.read().clone();
         *session.state.write() = SessionState::Assembling;
         *session.error.write() = None;
@@ -1139,6 +1159,9 @@ impl Kernel {
 
         let mut last_status = "ok";
         for turn in 0..cfg.max_turns.max(1) {
+            if !session.run_is_current(run_id) {
+                return Ok(());
+            }
             let mode = session.interrupt.load(Ordering::SeqCst);
             if mode == 1 || mode == 3 || session.cancel.load(Ordering::SeqCst) {
                 // 在模型启动前就被停止：仍记录一条 interrupted 空消息，
@@ -1209,7 +1232,7 @@ impl Kernel {
             let mut model_attempt = 0u32;
             loop {
                 model_attempt += 1;
-                match self.run_model(session, &cfg, &retry_messages, retry_temperature) {
+                match self.run_model(session, &cfg, &retry_messages, retry_temperature, run_id) {
                     Ok(r) => {
                         model_res = Ok(r);
                         break;
@@ -1260,6 +1283,9 @@ impl Kernel {
                         break;
                     }
                 }
+            }
+            if !session.run_is_current(run_id) {
+                return Ok(());
             }
             let reply = match model_res {
                 Ok(r) => r,
@@ -1440,6 +1466,9 @@ impl Kernel {
             *session.state.write() = SessionState::ToolExecuting;
             let mut executed = 0usize;
             for (call_index, call) in calls.into_iter().enumerate() {
+                if !session.run_is_current(run_id) {
+                    return Ok(());
+                }
                 let mode = session.interrupt.load(Ordering::SeqCst);
                 if mode != 0 || session.cancel.load(Ordering::SeqCst) {
                     self.emit(
@@ -1575,6 +1604,9 @@ impl Kernel {
             }
         }
 
+        if !session.run_is_current(run_id) {
+            return Ok(());
+        }
         session.interrupt.store(0, Ordering::SeqCst);
         session.cancel.store(false, Ordering::SeqCst);
         // G3：status 必须反映三段校验的真实结果，不能 reviewed-but-unapproved 仍报 ok。
@@ -1600,6 +1632,7 @@ impl Kernel {
             EventKind::ChatFinished,
             json!({
                 "status": final_status,
+                "run": run_id,
                 "review": if rg.enabled {
                     json!({
                         "enabled": true,
@@ -2574,6 +2607,7 @@ impl Kernel {
         cfg: &Config,
         messages: &[crate::context::Message],
         temperature: Option<f64>,
+        run_id: u64,
     ) -> Result<ModelReply, String> {
         let proc = self
             .plugins
@@ -2596,7 +2630,15 @@ impl Kernel {
         let (req, rx) = proc
             .start_stream("chat", params)
             .map_err(|e| e.to_string())?;
-        *session.active_req.lock() = Some((cfg.provider_plugin.clone(), req));
+        {
+            let mut active = session.active_req.lock();
+            if !session.run_is_current(run_id) {
+                drop(active);
+                proc.finish_stream(req);
+                return Err("run 已被取代".into());
+            }
+            *active = Some((cfg.provider_plugin.clone(), req));
+        }
 
         let mut acc = String::new();
         let mut finish = "stop".to_string();
@@ -2604,6 +2646,14 @@ impl Kernel {
         let deadline = Instant::now() + Duration::from_secs(600);
         let mut first = true;
         loop {
+            if !session.run_is_current(run_id) {
+                proc.cancel(req);
+                proc.finish_stream(req);
+                if session.run_is_current(run_id) {
+                    *session.active_req.lock() = None;
+                }
+                return Err("run 已被取代".into());
+            }
             let mode = session.interrupt.load(Ordering::SeqCst);
             if mode != 0 || session.cancel.load(Ordering::SeqCst) {
                 proc.cancel(req);
@@ -2618,7 +2668,9 @@ impl Kernel {
             }
             if Instant::now() > deadline {
                 proc.finish_stream(req);
-                *session.active_req.lock() = None;
+                if session.run_is_current(run_id) {
+                    *session.active_req.lock() = None;
+                }
                 return Err("模型请求超时".into());
             }
             match rx.recv_timeout(Duration::from_millis(200)) {
@@ -2661,7 +2713,9 @@ impl Kernel {
                                 .and_then(|m| m.as_str())
                                 .unwrap_or("provider error");
                             proc.finish_stream(req);
-                            *session.active_req.lock() = None;
+                            if session.run_is_current(run_id) {
+                                *session.active_req.lock() = None;
+                            }
                             let _ = proc.record_failure();
                             return Err(e.to_string());
                         }
@@ -2670,7 +2724,9 @@ impl Kernel {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    *session.active_req.lock() = None;
+                    if session.run_is_current(run_id) {
+                        *session.active_req.lock() = None;
+                    }
                     let degrade = proc.record_failure();
                     if degrade {
                         self.emit(
@@ -2684,7 +2740,9 @@ impl Kernel {
             }
         }
         proc.finish_stream(req);
-        *session.active_req.lock() = None;
+        if session.run_is_current(run_id) {
+            *session.active_req.lock() = None;
+        }
         if acc.is_empty() && tool_calls.is_empty() && finish == "stop" {
             finish = "empty".into();
         }

@@ -1,6 +1,26 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.7` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.8` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.8] - 2026-11-27
+
+### Fixed
+- N40: ML02 formula checks now accept `π²/6`, `π^2/6`, `π^{2}/6`, `pi^2/6`, `(π^2)/6`, `(π²)/6`, `\frac{\pi^2}{6}`, `\dfrac{\pi^2}{6}`, `\frac{\pi^{2}}{6}`, `\frac{1}{6}\pi^2`, `\zeta(2)` and `ζ(2)`; ML10 also accepts `\frac{\pi}{16}` and `\dfrac{\pi}{16}`. Regression test: `math_paper_formula_variants_and_steps_are_scored`. This is still regex coverage, not numeric equivalence.
+- N41: ML10 is split into four one-point checks: substitution method, substitution expansion, reduction/double angle, and the `π/16` result. Both trig-substitution and Beta routes can earn their steps.
+- N42: stale turns no longer leak into a new client. `Session.run_id` gives each `chat.send` a generation; `run_turn` exits silently when superseded; `cancel_connection` invalidates the old run and marks the session `Cancelled`; `session.create` cleans an old holder; the `chat` CLI only accepts `chat.finished` with its own `run`. Reproduced 1/5 on rc.4.7, 5/5 clean on rc.4.8. Test: `killed_client_does_not_leak_or_block_next_run`.
+
+### Added
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.7.md` and `data/math-papers-rc.4.7.csv` (28 per-question scores); the report index is now 14 reports.
+
+### Changed
+- `chat.send` result adds `run`; `chat.finished.payload` adds `run`. Both are additive; old clients can ignore them, but clients that do not filter by run can still see stale events.
+- `session.create` now cancels an old same-session holder owned by another connection before taking over.
+
+### Documentation
+- Linux suite: 211 items, 210 passed, 1 ignored (83 lib, 34 plugin ×2, 5 kernel, 6 TUI, 4 WebUI ×2, 2 golden, 38 integration).
+- Linux release bench: kernel 2,581,016 B; warm P50 1.408/1.356/1.338 ms; cold P50 5.786/5.432/5.320 ms; all eight boolean gates true; reliability high on all three.
+- Windows x64: 10 exes, kernel 2,320,896 B, system DLLs only. Wine smoke passes `version`/`doctor`/bench/serve/chat and one N42 reconnect; Wine is not a Windows baseline.
+- Added bilingual rc.4.8 change notes; README, Windows guide, verification report and wire-format version now target rc.4.8.
 
 ## [1.2.1-rc.4.7] - 2026-11-26
 

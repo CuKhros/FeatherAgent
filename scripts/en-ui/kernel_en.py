@@ -39,6 +39,7 @@ EN = [
 "chat.send failed: {e}",
 "chat: denied {tool}; add --allow {tool} or --yes to permit",
 "chat: authorized {tool} (--allow/--yes)",
+"chat: ignored stale chat.finished (run={got:?}, current {expected})",
 "doctor options: --root <dir> / --check-storage / --stress-log <N>",
 "event.subscribe failed: {e}",
 "initialize failed: {e}",

@@ -1,6 +1,26 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.7` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.8` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.8] - 2026-11-27
+
+### 修复
+- N40：ML02 公式判据扩展为 `π²/6`、`π^2/6`、`π^{2}/6`、`pi^2/6`、`(π^2)/6`、`(π²)/6`、`\frac{\pi^2}{6}`、`\dfrac{\pi^2}{6}`、`\frac{\pi^{2}}{6}`、`\frac{1}{6}\pi^2`、`\zeta(2)`、`ζ(2)`；ML10 的 `π/16` 也接受 `\frac{\pi}{16}`、`\dfrac{\pi}{16}`。回归测试：`math_paper_formula_variants_and_steps_are_scored`。仍是正则覆盖，不是数值等价。
+- N41：ML10 拆成四条各 1 分的判据：换元方法、换元展开、降幂/倍角、结果 `π/16`。三角代换与 Beta 函数两条路线都能拿到对应步骤分。
+- N42：旧回合不再泄漏到新客户端。`Session.run_id` 为每次 `chat.send` 分配代次；`run_turn` 发现被取代即静默退出；`cancel_connection` 使旧 run 失效并置 `Cancelled`；`session.create` 清理旧 holder；`chat` CLI 只接受自己 `run` 的 `chat.finished`。rc.4.7 复现 1/5，rc.4.8 连续 5/5 干净。测试：`killed_client_does_not_leak_or_block_next_run`。
+
+### 新增
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.7.md` 与 `data/math-papers-rc.4.7.csv`（28 题逐题分数）；报告索引改为 14 份。
+
+### 变更
+- `chat.send` 返回值新增 `run`；`chat.finished.payload` 新增 `run`。两者都是增量字段，旧客户端可忽略；但不按 run 过滤的旧客户端仍可能看到旧回合事件。
+- `session.create` 发现同会话旧 holder 属于其他连接时，先取消旧回合再接管。
+
+### 文档
+- Linux 全量 211 项、210 通过、1 ignored（83 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、38 integration）。
+- Linux release bench：内核 2,581,016 B；热启动 P50 1.408/1.356/1.338 ms；冷启动 P50 5.786/5.432/5.320 ms；8 项布尔门禁全绿；reliability 三次均为 high。
+- Windows x64：10 个 exe，内核 2,320,896 B，仅系统 DLL。Wine 冒烟通过 `version`/`doctor`/bench/serve/chat 与一次 N42 重连；Wine 不是 Windows 基线。
+- 新增 rc.4.8 中英变更说明；README、Windows 指南、验证报告与 Wire Format 适用版本改为 rc.4.8。
 
 ## [1.2.1-rc.4.7] - 2026-11-26
 

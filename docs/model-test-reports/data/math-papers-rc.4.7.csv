@@ -1,0 +1,29 @@
+paper,question,domain,full,bare,fa,note
+math-small,MS1,微积分,4,4.0,4.0,
+math-small,MS2,数论,3,0.0,3.0,bare empty; FA 729 chars (N38)
+math-small,MS3,证明,4,4.0,4.0,
+math-small,MS4,线代,3,3.0,3.0,
+math-small,MS5,概率,3,0.0,1.0,bare empty
+math-small,MS6,微积分,3,1.5,1.5,
+math-small,MS7,微积分,3,0.0,3.0,bare empty
+math-small,MS8,组合,2,2.0,2.0,
+math-large,ML01,微积分,3,2.0,3.0,
+math-large,ML02,级数,3,2.0,1.0,FA 1568 chars; formula notation still missed (N40)
+math-large,ML03,微分方程,3,1.0,1.0,
+math-large,ML04,优化,4,1.3,1.3,
+math-large,ML05,线代,3,0.0,1.5,bare empty
+math-large,ML06,线代,3,2.0,2.0,
+math-large,ML07,三角,2,2.0,2.0,
+math-large,ML08,组合,4,0.0,4.0,bare empty
+math-large,ML09,极限,2,2.0,2.0,
+math-large,ML10,微积分,4,0.0,1.3,"bare empty; FA 1514 chars, shell allowed (N37/N41)"
+math-large,ML11,线代,3,3.0,3.0,
+math-large,ML12,复数,2,2.0,2.0,
+math-large,ML13,极限,2,2.0,2.0,
+math-large,ML14,数值,3,3.0,3.0,
+math-large,ML15,概率,3,3.0,3.0,
+math-large,ML16,组合,2,0.0,2.0,bare empty
+math-large,ML17,多重积分,2,2.0,2.0,
+math-large,ML18,信息论,3,0.0,2.0,bare empty
+math-large,ML19,微积分,2,2.0,2.0,
+math-large,ML20,线代,3,3.0,1.5,

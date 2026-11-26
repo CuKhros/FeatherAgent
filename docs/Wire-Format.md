@@ -1,6 +1,6 @@
 # FeatherAgent Frontend Contract · Wire Format v1.0
 
-> Applies to FeatherAgent **1.2.1-rc.4.7** (contract API `1.0`).
+> Applies to FeatherAgent **1.2.1-rc.4.8** (contract API `1.0`).
 > This document describes **the bytes actually on the wire**, not a design draft. Any third-party frontend (Python / Node / Go / C# / WebSocket bridge) should implement this rather than guessing framing.
 
 ## 1. Transport endpoints
@@ -66,7 +66,7 @@ featheragent serve --codec json      # debug / reference client
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.7","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.8","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -112,7 +112,7 @@ Event notification (no `id`, server-initiated):
 3. Send `session.create` (`params.session` optional, defaults to `cli`).
 4. Send `event.subscribe` (optional `kinds` array; omit for all).
 5. Send `chat.send` (`params.text` required; `params.session` must match step 3).
-6. Read frames in a loop and handle `method == "event"` until `params.kind == "chat.finished"`.
+6. Read frames in a loop and handle `method == "event"` until `params.kind == "chat.finished"` **and** its `payload.run` equals the `run` returned by your `chat.send`. Do not treat another run's finish as your own.
 
 ### 4.1 Minimal Python client (JSON codec)
 
@@ -349,6 +349,7 @@ Plugin management is entirely RPC; do not edit `data/plugins/registry.json`:
 A local file inside the install root returns `copied:false` and its canonical path; an outside file is copied to the default workspace. Browser bytes always land in the default workspace. The model receives only `result.path`, never the browser path or the outside source.
 
 - `chat.finished.status` adds `stopped`; old clients should treat both `stopped` and `cancelled` as "stopped by the user". Partial output is preserved as `model.message(finish=interrupted)`.
+- 1.2.1-rc.4.8: no new frame, endpoint, event kind, or error code. `chat.send` now returns `run` (u64) beside `session`, `accepted` and `turn`; `chat.finished.payload` adds `run` (u64). Both are additive. Clients that subscribe to a shared event stream should ignore `chat.finished` whose `run` is not their own; otherwise a force-killed old turn can surface as their `stopped` result. `session.create` may now cancel an old same-session holder owned by another connection before taking over; this is a behavior correction, not a new method.
 - 1.2.1-rc.4.7: no new frame, endpoint, event kind, or error code. A `permission_denied` `tool.result` now carries `hint` (string) telling the model not to retry the same tool and to finish in prose; old clients can ignore it. Judge evidence acceptance is semantic only: 6 CJK characters, 3 English words, or 10 ASCII alphanumeric characters; `review.verdict` fields are unchanged. The math-derivation requirement is system-prompt text, not a wire change.
 - 1.2.1-rc.4.6: no new frame, endpoint, event kind, or error code. `model.message` adds `truncated: bool` (true when the provider finish reason is `length`); old clients can ignore it. `config.get` / `config.set` accept the new `max_output` field (default 2048), which is additive. `review.verdict` is unchanged. `bench --json` is a CLI diagnostic, not a wire method: its `gates` object is now boolean-only, and `platform`, `write_gate_status`, `write_gate_raw`, thresholds and `reliability` moved to `diagnostics`; scripts must migrate their reads.
 - 1.2.1-rc.4.5: no new frame, endpoint, event kind, or error code. `review.verdict` keeps its fields; write-file tasks simply produce judge-only rubric items. `bench --json` keeps its shape and adds `write_gate_status` / `write_gate_raw` inside `gates`.

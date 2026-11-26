@@ -293,12 +293,16 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
     conn.client
         .call("event.subscribe", serde_json::json!({"kinds": []}))
         .map_err(|e| format!("event.subscribe failed: {e}"))?;
-    conn.client
+    let sent = conn
+        .client
         .call(
             "chat.send",
             serde_json::json!({"session": session, "text": text}),
         )
         .map_err(|e| format!("chat.send failed: {e}"))?;
+    // N42：连接是广播订阅者，可能收到上一条被杀回合的 chat.finished。
+    // 只认本次 chat.send 分配的 run id，避免把旧回合的 stopped/interrupted 当成本次结果。
+    let run_id = sent.get("run").and_then(|x| x.as_u64());
 
     let deadline = Instant::now() + Duration::from_secs(timeout);
     loop {
@@ -340,6 +344,15 @@ fn chat(args: &featheragent::util::Args) -> Result<(), String> {
                     .and_then(|p| p.get("kind"))
                     .and_then(|k| k.as_str());
                 if kind == Some("chat.finished") {
+                    if let Some(expected) = run_id {
+                        let got = v.pointer("/params/payload/run").and_then(|x| x.as_u64());
+                        if got != Some(expected) {
+                            eprintln!(
+                                "chat: ignored stale chat.finished (run={got:?}, current {expected})"
+                            );
+                            continue;
+                        }
+                    }
                     println!("{}", serde_json::to_string(&v).unwrap_or_default());
                     let status = v
                         .pointer("/params/payload/status")
