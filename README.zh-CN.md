@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2/rc.4.3/rc.4.4/rc.4.5 已复测；v1.2.1-rc.4.6 包待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2/rc.4.3/rc.4.4/rc.4.5/rc.4.6 已复测；v1.2.1-rc.4.7 包待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -113,7 +113,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.4.6-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.4.7-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 中文命令表
@@ -128,7 +128,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 10 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.4.6）
+## 平台门禁差异（v1.2.1-rc.4.7）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -157,12 +157,13 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.4.7 变更说明](docs/v1.2.1-rc.4.7-变更说明.zh-CN.md)** —— judge evidence 中英双门限、工具拒绝提示、数学推导完整性提示，以及两张数学卷归档（[English](docs/v1.2.1-rc.4.7-Changes.md)）
 - **[v1.2.1-rc.4.6 变更说明](docs/v1.2.1-rc.4.6-变更说明.zh-CN.md)** —— Windows 路径的 review JSON 容错、可配置输出上限与 `finish=length` 检测、只含布尔判定项的 `bench` gates 与 `diagnostics`、纳入 CPU 的 reliability，以及生成器/解析层/Web bundle 重构（[English](docs/v1.2.1-rc.4.6-Changes.md)）
 - **[代码堆积审计 v1.2.1-rc.4.6](docs/代码堆积审计-v1.2.1-rc.4.6.zh-CN.md)** —— 五处有证据的技术债、作为基线的过去形态、本轮重构范围与刻意未动的部分（[English](docs/Code-Audit-v1.2.1-rc.4.6.md)）
 - **[v1.2.1-rc.4.5 变更说明](docs/v1.2.1-rc.4.5-变更说明.zh-CN.md)** —— 写文件任务跳过硬判据并全交 judge、Windows 写入门禁 advisory、L17 粗体编号识别，以及 rc.4.4 报告与 5 份试卷归档（[English](docs/v1.2.1-rc.4.5-Changes.md)）
 - **[v1.2.1-rc.4.4 变更说明](docs/v1.2.1-rc.4.4-变更说明.zh-CN.md)** —— bench 停止/join 有界、临时目录清理、写文件判据交 judge、XML 开标签恢复、对比轴覆盖与 TUI 到顶滚动夹紧（[English](docs/v1.2.1-rc.4.4-Changes.md)）
 - **[v1.2.1-rc.4.3 变更说明](docs/v1.2.1-rc.4.3-变更说明.zh-CN.md)** —— 冷启动单次 IPC 探测、代码与文件输出区分、对比轴覆盖、写文件 review 证据，以及精选模型报告归档（[English](docs/v1.2.1-rc.4.3-Changes.md)）
-- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 12 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV 与 5 份可复用试卷（[English](docs/model-test-reports/README.md)）
+- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 13 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV 与 7 份可复用试卷（[English](docs/model-test-reports/README.md)）
 - **[v1.2.1-rc.4.2 变更说明](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md)** —— XML 风格工具调用恢复、Windows bench RPC 连接重试、`advisory_gates` 拆分、简洁与覆盖的提示词区分（[English](docs/v1.2.1-rc.4.2-Changes.md)）
 - **[v1.2.1-rc.4.1 变更说明](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md)** —— 路径/文件型 `must_include` 豁免、纯文本工具调用兜底与别名归一化、`data/web-artifacts` 可审计副本、`rubric-final` 留档；并注明 4B 长流程边界（[English](docs/v1.2.1-rc.4.1-Changes.md)）
 - **[v1.2.1-rc.4 变更说明](docs/v1.2.1-rc.4-变更说明.zh-CN.md)** —— `must_include` 匹配模式、主观判据/禁词校验、bench 唯一临时目录与结构化错误、reliability 感知启动门禁、重复工具调用抑制、搜索落盘、WebUI/TUI 文件附件（[English](docs/v1.2.1-rc.4-Changes.md)）
@@ -190,7 +191,9 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 状态
 
-`v1.2.1-rc.4.6` 修复 rc.4.5 复测的 N32–N35，并清掉代码审计确认的五处结构性技术债。judge 输出现在容忍 JSON 字符串里的 Windows 路径反斜杠（先标准解析，再只修字符串内部），证据路径统一用 `/`；`Config.max_output`（默认 2048）替换两处硬编码 512，并按 provider 传 `num_predict` / `max_tokens`，`finish=length` 以 `truncated` 暴露且让 review 角色失败重试。`bench --json` 的 `gates` 只保留布尔判定项，状态/原始读数/阈值移到 `diagnostics`；`reliability` 取内存与 CPU 更差者。review 解析层抽到 `src/review.rs`，中英 Rust UI 生成器按 rc.3.6 基线重建，英文 WebUI 改为带结构校验的独立 bundle。N32/N33/N35 仍需真机复测。
+`v1.2.1-rc.4.7` 修复 rc.4.6 复测的 N36–N39。judge evidence 现在接受 6 个汉字、3 个英文词或 10 个字符的标识符，9 个字的 `三条要点已写入文件` 不再让写文件任务降级。工具被拒的 `tool.result` 增加 `hint`，明确要求模型不要重复调用、改用文字完成；系统提示要求数学/证明题写出完整推导。公开试卷库新增 `math-small`（8 题/25 分）与 `math-large`（20 题/56 分）；rc.4.6 的 FA 得分为 19.5/25、40.7/56，裸跑为 16.5/25、31.7/56。N37 仍是跑卷前提（希望 sympy 辅助时需放行 `tool.shell`）；N38 由提示词缓解，仍需真实模型复测；N39 是评分覆盖面限制。
+
+`v1.2.1-rc.4.6` 修复 rc.4.5 复测的 N32–N35，并清掉代码审计确认的五处结构性技术债。judge 输出现在容忍 JSON 字符串里的 Windows 路径反斜杠（先标准解析，再只修字符串内部），证据路径统一用 `/`；`Config.max_output`（默认 2048）替换两处硬编码 512，并按 provider 传 `num_predict` / `max_tokens`，`finish=length` 以 `truncated` 暴露且让 review 角色失败重试。`bench --json` 的 `gates` 只保留布尔判定项，状态/原始读数/阈值移到 `diagnostics`；`reliability` 取内存与 CPU 更差者。review 解析层抽到 `src/review.rs`，中英 Rust UI 生成器按 rc.3.6 基线重建，英文 WebUI 改为带结构校验的独立 bundle。N32/N33/N35 已在 rc.4.6 真机复测确认。
 
 `v1.2.1-rc.4.5` 修复 rc.4.4 复测的 N29–N31。明确的写文件任务不再要求 guide 产出硬判据：判据全部转 judge，`parse_rubric` 在 `file_task` 时提前剥掉 `must_include`/`min_points`/`pattern` 等确定性键，`must_include:["-"]` 不再触发“术语至少 2 字”校验；`review_prepare` 不再对写文件任务做“零硬判据”重试。Windows 写入门禁把 10–20 ms 的边缘抖动标为 `advisory`，保留 `write_gate_raw`，超过 20 ms 仍 fail；Linux 仍按 100 µs 严格判定。测试侧 L17 列表判据识别 `**1.**` 粗体编号。rc.4.5 新增 1 项单测，并把 `REVIEW_WRITE` 集成夹具改为复现 N29 的坏符号硬键。
 
@@ -212,6 +215,6 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **206 项测试：205 通过、1 个默认 ignored**（80 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、36 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,578,496 B（2.46 MiB）**；热启动 P50 **1.276 / 1.275 / 1.285 ms**；冷启动 P50 **4.469 / 5.033 / 5.272 ms**；布尔门禁全绿，`diagnostics.platform:"linux"`、`write_gate_status:"pass"`、`write_gate_raw:true`、`reliability:"high"`、`reliability_basis:"mem=17%,cpu=68%"`。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
+Linux 自动化共 **208 项测试：207 通过、1 个默认 ignored**（83 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、36 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,578,264 B（2.46 MiB）**；热启动 P50 **1.287 / 1.294 / 1.285 ms**；冷启动 P50 **4.651 / 4.588 / 4.518 ms**；写入 P95 **7.641 / 7.531 / 5.949 µs**；8 项布尔门禁全绿，`diagnostics.platform:"linux"`、`write_gate_status:"pass"`、`write_gate_raw:true`；`reliability:"medium"`（`mem=18%,cpu=77%` / `mem=18%,cpu=77%` / `mem=17%,cpu=71%`），故 `boot_gate_trusted=false`、`boot_gate_status:"advisory"`，热启动原始值仍远低于 20 ms。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2、rc.4.3、rc.4.4、rc.4.5 五轮复测。rc.4.4 复测确认 N23 已修、N25 不再出现，遗留 N29–N31。rc.4.5 复测确认 N30（写 P95 10.4–10.8 ms 判 advisory）与 N31（粗体编号），确认 N29 路由生效但引出 N32（judge JSON `invalid escape`，3/3 degraded），并发现 N33（答案截断）、N34（`*_raw` 混进 `gates`）、N35（reliability 不看 CPU）。大试卷 2 为 FA 48.0/60、裸跑 45.0/60，FA 优势主要是避免空响应，内容质量接近。本候选版修复 N32–N35。v1.2.1-rc.4.6 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。N32/N33/N35 仍需真机确认。Wine 6.0.3 冒烟通过 `version` 与三次 `bench --json`；冷启动/RSS/写入门禁受 Wine 开销影响，不作 Windows 基线。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1、rc.4.2、rc.4.3、rc.4.4、rc.4.5、rc.4.6 六轮复测。rc.4.5 复测引出 N32（judge JSON `invalid escape`，3/3 degraded）、N33（答案截断）、N34（`*_raw` 混进 `gates`）、N35（reliability 不看 CPU）。rc.4.6 复测在真机确认四项全修：不再出现 escape 且 `votes=1`；M15/M20 分别增长 10.8×/9.0× 且 `truncated=false`；`gates` 8 项全布尔、`diagnostics` 承载 raw/status/阈值；`cpu_load_pct` 随负载变为 25/41。同时暴露 N36（9 字中文 evidence 被 10 字门限误杀）、N37（数学题想调 `tool.shell` 但未放行）、N38（偶发只写标题就停）、N39（评分对公式写法敏感）。数学卷 FA 19.5/25 vs 裸跑 16.5/25，FA 40.7/56 vs 裸跑 31.7/56。本候选修复 N36，并缓解 N37/N38；N37 仍需在跑卷时放行 `tool.shell`，N38 仍需真实模型复测。v1.2.1-rc.4.7 的 Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。Wine 6.0.3 冒烟通过 `version` 与三次 `bench --json`；冷启动/RSS/写入门禁受 Wine 开销影响，不作 Windows 基线。

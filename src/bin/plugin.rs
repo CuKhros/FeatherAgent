@@ -974,7 +974,7 @@ fn review_gate_plugin(method: &str, params: &Value) -> Result<Value, String> {
                 .collect::<String>();
             let rubric = params.get("rubric").cloned().unwrap_or(json!([]));
             Ok(json!({"messages": json!([
-                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。你只审消息里给出的这些判据，不要引入未给出的条目。带 judge_only:true 的条目是描述型（只有 criterion/check）：按 criterion 判断答案是否满足，并给答案原文作 evidence。带 must_include / must_not_include / min_points / pattern / regex 的确定性条目已由 hardcheck 判定；只有在 judge_only 模式下它们才会出现在这里，此时按硬键核对。必须逐项返回，id 一个都不能少，漏项视为不合格。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案中的连续原文\"}],\"evidence\":\"答案中的连续原文\"}。每条 evidence 必须逐字复制答案里连续的至少 10 个字，禁止改写、禁止抄提示词、禁止用“总结/通过/ok”占位；顶层 evidence 同样要求。evidence 不在答案里出现视为 judge 失败并重试。引用路径时一律用正斜杠 `/`，不要输出反斜杠；JSON 字符串里的反斜杠必须写成 `\\\\`。不要给总分，不要放水。"},
+                {"role": "system", "content": "你是 Review-Gate 的审批者（judge）。你只审消息里给出的这些判据，不要引入未给出的条目。带 judge_only:true 的条目是描述型（只有 criterion/check）：按 criterion 判断答案是否满足，并给答案原文作 evidence。带 must_include / must_not_include / min_points / pattern / regex 的确定性条目已由 hardcheck 判定；只有在 judge_only 模式下它们才会出现在这里，此时按硬键核对。必须逐项返回，id 一个都不能少，漏项视为不合格。输出一个 JSON 对象：{\"pass\":false,\"items\":[{\"id\":\"c1\",\"pass\":true,\"evidence\":\"答案中的连续原文\"}],\"evidence\":\"答案中的连续原文\"}。每条 evidence 必须逐字复制答案里连续的至少 6 个汉字（英文至少 3 个词），禁止改写、禁止抄提示词、禁止用“总结/通过/ok”占位；顶层 evidence 同样要求。evidence 不在答案里出现视为 judge 失败并重试。引用路径时一律用正斜杠 `/`，不要输出反斜杠；JSON 字符串里的反斜杠必须写成 `\\\\`。不要给总分，不要放水。"},
                 {"role": "user", "content": format!("[REVIEW-JUDGE]\n用户输入：\n{input}\n\n验收清单：\n{}\n\n待审答案：\n{answer}", serde_json::to_string(&rubric).unwrap_or_default())}
             ]), "model_visible": true}))
         }

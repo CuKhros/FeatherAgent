@@ -1,6 +1,26 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.6` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.7` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.7] - 2026-11-26
+
+### Fixed
+- N36: judge evidence now uses a Chinese/English-aware floor: at least 6 CJK characters, 3 English words, or 10 ASCII alphanumeric characters. The 9-character `三条要点已写入文件` quote is accepted; placeholders and prompt echoes are still rejected. Tests: `verdict_accepts_short_chinese_evidence`, `verdict_accepts_three_word_english_evidence`.
+- N37: a `permission_denied` `tool.result` carries a `hint` telling the model not to retry the same tool and to finish in prose; the system prompt repeats that rule and requires full math/proof derivations.
+- N38: the system prompt requires math/proof answers to cover givens, each transformation and the conclusion; title-only or final-answer-only stops are explicitly discouraged. This is prompt mitigation, not an automatic continuation gate.
+- N39: documented formula-spelling sensitivity in the math-paper scoring rules; ML02 accepts `π^2/6`, `pi^2/6` and `\frac{\pi^2}{6}`.
+
+### Added
+- Public exam-papers library adds `math-small` (8 questions / 25 points) and `math-large` (20 / 56), now 7 papers / 90 questions / 252 points.
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.6.md` and `data/math-papers-rc.4.6.csv`; the report index is now 13 reports.
+
+### Changed
+- `tool.result` for denied tools adds `hint`; `review.verdict` fields are unchanged.
+- English and Chinese change notes for rc.4.7; README status and Windows guide now target rc.4.7.
+
+### Documentation
+- Linux suite: 208 items, 207 passed, 1 ignored (83 lib, 34 plugin ×2, 5 kernel, 6 TUI, 4 WebUI ×2, 2 golden, 36 integration).
+- N37 still requires `tool.shell` to be allowed when a math run should use sympy; N38 and N36 still need a Windows real-model retest.
 
 ## [1.2.1-rc.4.6] - 2026-11-26
 

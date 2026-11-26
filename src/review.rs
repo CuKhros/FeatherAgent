@@ -60,14 +60,45 @@ fn quote_norm(s: &str) -> String {
         .join("")
 }
 
-/// evidence 必须能在答案里找到连续 ≥10 字（答案不足 10 字时按答案长度算）。
+const EVIDENCE_MIN_CJK: usize = 6;
+const EVIDENCE_MIN_WORDS: usize = 3;
+const EVIDENCE_QUOTE_CHARS: usize = 6;
+
+/// N36：中文短句 9 字（如“三条要点已写入文件”）不应被英文式的 10 字门限误杀。
+/// 判据改为“至少 6 个汉字，或至少 3 个英文词”，仍拒绝“总结/通过/ok”这类占位。
+fn evidence_shape(s: &str) -> (usize, usize) {
+    let cjk = s
+        .chars()
+        .filter(|c| matches!(*c as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF))
+        .count();
+    let words = s
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| {
+            let mut chars = w.chars();
+            let Some(first) = chars.next() else {
+                return false;
+            };
+            first.is_ascii_alphabetic() && w.chars().count() >= 2
+        })
+        .count();
+    (cjk, words)
+}
+
+fn evidence_is_substantive(s: &str) -> bool {
+    let (cjk, words) = evidence_shape(s);
+    let ascii_alnum = s.chars().filter(|c| c.is_ascii_alphanumeric()).count();
+    // 长标识符/路径（如 REVIEW-FINAL）也算有效证据；纯占位词仍然过不了这一关。
+    cjk >= EVIDENCE_MIN_CJK || words >= EVIDENCE_MIN_WORDS || ascii_alnum >= 10
+}
+
+/// evidence 必须能在答案里找到连续 ≥6 字（答案不足 6 字时按答案长度算）。
 fn evidence_quotes(answer: &str, evidence: &str) -> bool {
     let a: Vec<char> = quote_norm(answer).chars().collect();
     let e: Vec<char> = quote_norm(evidence).chars().collect();
     if a.is_empty() {
         return true;
     }
-    let need = 10.min(a.len());
+    let need = EVIDENCE_QUOTE_CHARS.min(a.len());
     if e.len() < need {
         return false;
     }
@@ -749,15 +780,15 @@ pub fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, 
             .trim()
             .to_string();
         // evidence 太短说明 judge 只是在占位（例如“总结”），属 judge 失败，交给上层重试。
-        if evidence.chars().count() < 10 {
+        if !evidence_is_substantive(&evidence) {
             return Err(format!(
-                "审批项 {id} 的 evidence 过短（少于 10 字）：{evidence:?}"
+                "审批项 {id} 的 evidence 过短（须至少 6 个汉字或 3 个英文词）：{evidence:?}"
             ));
         }
         // evidence 必须能在答案里找到连续原文：抄提示词、写空话都不算证据。
         if !evidence_quotes(answer, &evidence) {
             return Err(format!(
-                "审批项 {id} 的 evidence 不是答案原文（须为答案中连续 ≥10 字）：{evidence:?}"
+                "审批项 {id} 的 evidence 不是答案原文（须为答案中连续 ≥6 字）：{evidence:?}"
             ));
         }
         if !pass {
@@ -789,12 +820,14 @@ pub fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, 
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .trim();
-    if summary.chars().count() < 10 {
-        return Err(format!("审批总结 evidence 过短（少于 10 字）：{summary:?}"));
+    if !evidence_is_substantive(summary) {
+        return Err(format!(
+            "审批总结 evidence 过短（须至少 6 个汉字或 3 个英文词）：{summary:?}"
+        ));
     }
     if !evidence_quotes(answer, summary) {
         return Err(format!(
-            "审批总结 evidence 不是答案原文（须为答案中连续 ≥10 字）：{summary:?}"
+            "审批总结 evidence 不是答案原文（须为答案中连续 ≥6 字）：{summary:?}"
         ));
     }
     let pass = failed.is_empty() && v.get("pass").and_then(|x| x.as_bool()).unwrap_or(false);
@@ -919,5 +952,23 @@ mod tests {
         let raw = "```json\n[{\"id\":\"c1\"}]\n```";
         let v = parse_json_value(raw).expect("array");
         assert!(v.is_array());
+    }
+
+    #[test]
+    fn verdict_accepts_short_chinese_evidence() {
+        let rubric = json!([{"id": "c1", "criterion": "写入文件", "check": "三条要点"}]);
+        let answer = "已完成写入，三条要点已写入文件。";
+        let raw = r#"{"pass":true,"items":[{"id":"c1","pass":true,"evidence":"三条要点已写入文件"}],"evidence":"三条要点已写入文件"}"#;
+        let v = parse_verdict(raw, &rubric, answer).expect("nine-char Chinese evidence is enough");
+        assert_eq!(v["pass"], true);
+    }
+
+    #[test]
+    fn verdict_accepts_three_word_english_evidence() {
+        let rubric = json!([{"id": "c1", "criterion": "answer", "check": "value"}]);
+        let answer = "The answer is four.";
+        let raw = r#"{"pass":true,"items":[{"id":"c1","pass":true,"evidence":"The answer is four"}],"evidence":"The answer is four"}"#;
+        let v = parse_verdict(raw, &rubric, answer).expect("three English words are enough");
+        assert_eq!(v["pass"], true);
     }
 }

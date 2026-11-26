@@ -1,0 +1,469 @@
+{
+ "id": "math-large",
+ "name": "数学大卷 · 综合二十题",
+ "size": "large",
+ "full_score": 56,
+ "desc": "微积分 / 级数 / 微分方程 / 线代 / 概率统计 / 数论 / 组合 / 优化，覆盖本科数学主干，难度显著高于通用卷",
+ "questions": [
+  {
+   "id": "ML01",
+   "domain": "微积分",
+   "prompt": "求 ∫ x·ln x dx。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "分部积分",
+     "type": "regex",
+     "val": "分部|parts",
+     "w": 1
+    },
+    {
+     "name": "结果含 x²lnx",
+     "type": "regex",
+     "val": "x\\^?2.*ln|x².*ln",
+     "w": 1
+    },
+    {
+     "name": "常数 C",
+     "type": "regex",
+     "val": "\\+ ?C",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML02",
+   "domain": "级数",
+   "prompt": "求 ∑(n=1→∞) 1/n² 的值，并说明这是什么经典问题。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "π²/6",
+     "type": "regex",
+     "val": "π\\^?2\\s*/\\s*6|pi\\^?2/6|\\\\frac\\{\\\\pi\\^2\\}\\{6\\}",
+     "w": 1
+    },
+    {
+     "name": "巴塞尔",
+     "type": "regex",
+     "val": "巴塞尔|Basel",
+     "w": 1
+    },
+    {
+     "name": "收敛",
+     "type": "regex",
+     "val": "收敛|converg",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML03",
+   "domain": "微分方程",
+   "prompt": "解一阶线性微分方程 y' + y = e^x，给出通解。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "积分因子",
+     "type": "regex",
+     "val": "积分因子|integrating factor|e\\^x",
+     "w": 1
+    },
+    {
+     "name": "e^x/2",
+     "type": "regex",
+     "val": "e\\^?x\\s*/\\s*2|1/2 ?e\\^?x",
+     "w": 1
+    },
+    {
+     "name": "Ce^-x",
+     "type": "regex",
+     "val": "C ?e\\^?-x|Ce\\^-x",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML04",
+   "domain": "优化",
+   "prompt": "用拉格朗日乘子法求 f(x,y)=x²+xy+y² 在约束 x+y=1 下的最小值。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "拉格朗日",
+     "type": "regex",
+     "val": "拉格朗日|Lagrang",
+     "w": 1
+    },
+    {
+     "name": "x=y=1/2",
+     "type": "regex",
+     "val": "1/2|0\\.5",
+     "w": 1
+    },
+    {
+     "name": "最小值 3/4",
+     "type": "regex",
+     "val": "3/4|0\\.75",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML05",
+   "domain": "线代",
+   "prompt": "求行列式 det([[1,2,3],[0,1,4],[5,6,0]]) 的值。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "答案 1",
+     "type": "regex",
+     "val": "\\b1\\b",
+     "w": 1
+    },
+    {
+     "name": "展开过程",
+     "type": "regex",
+     "val": "展开|expand|余子式|minor",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML06",
+   "domain": "线代",
+   "prompt": "求 A=[[1,2],[3,4]] 的逆矩阵。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "行列式 -2",
+     "type": "regex",
+     "val": "-2|−2",
+     "w": 1
+    },
+    {
+     "name": "元素 -2/3/1",
+     "type": "regex",
+     "val": "-2|3|1",
+     "w": 1
+    },
+    {
+     "name": "1/det 因子",
+     "type": "regex",
+     "val": "1/-2|-1/2|1/\\(-2\\)",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML07",
+   "domain": "三角",
+   "prompt": "求 sin15° 的精确值（含根号）。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "根号6",
+     "type": "regex",
+     "val": "√6|sqrt6|\\\\sqrt\\{6\\}",
+     "w": 1
+    },
+    {
+     "name": "除以4",
+     "type": "regex",
+     "val": "/ ?4|\\\\frac",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML08",
+   "domain": "组合",
+   "prompt": "证明：任意 6 个人中，必有 3 人互相认识或互相不认识（R(3,3)=6）。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "拉姆齐",
+     "type": "regex",
+     "val": "拉姆齐|Ramsey|R\\(3,3\\)",
+     "w": 1
+    },
+    {
+     "name": "鸽巢/抽屉",
+     "type": "regex",
+     "val": "鸽巢|抽屉|pigeonhole",
+     "w": 1
+    },
+    {
+     "name": "5 条边",
+     "type": "regex",
+     "val": "5 ?条|至少 ?3|三边",
+     "w": 1
+    },
+    {
+     "name": "分情况",
+     "type": "regex",
+     "val": "分情况|case|两种",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML09",
+   "domain": "极限",
+   "prompt": "求连根式 √(6+√(6+√(6+…))) 的收敛值。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "设 x",
+     "type": "regex",
+     "val": "设 ?x|x ?=",
+     "w": 1
+    },
+    {
+     "name": "答案 3",
+     "type": "regex",
+     "val": "\\b3\\b",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML10",
+   "domain": "微积分",
+   "prompt": "求定积分 ∫₀¹ x²√(1−x²) dx。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "三角代换",
+     "type": "regex",
+     "val": "sin|三角代换|trig",
+     "w": 1
+    },
+    {
+     "name": "π/16",
+     "type": "regex",
+     "val": "π/16|pi/16",
+     "w": 1
+    },
+    {
+     "name": "Beta 函数",
+     "type": "regex",
+     "val": "Beta|B 函数|换元",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML11",
+   "domain": "线代",
+   "prompt": "求矩阵 [[0,1],[1,0]] 的 n 次幂（分 n 奇偶讨论）。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "n 偶数单位阵",
+     "type": "regex",
+     "val": "偶.*I|even.*identity|单位阵|单位矩阵",
+     "w": 1
+    },
+    {
+     "name": "n 奇数原矩阵",
+     "type": "regex",
+     "val": "奇.*A|odd",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML12",
+   "domain": "复数",
+   "prompt": "求 e^(iπ) + 1 的值，并说明它关联哪个著名等式。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "答案 0",
+     "type": "regex",
+     "val": "\\b0\\b",
+     "w": 1
+    },
+    {
+     "name": "欧拉",
+     "type": "regex",
+     "val": "欧拉|Euler",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML13",
+   "domain": "极限",
+   "prompt": "求 lim(n→∞)(1+1/n)^n，并说明它定义了什么常数。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "e",
+     "type": "regex",
+     "val": "\\be\\b",
+     "w": 1
+    },
+    {
+     "name": "2\\.718",
+     "type": "regex",
+     "val": "2\\.718",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML14",
+   "domain": "数值",
+   "prompt": "用牛顿法对 x³−2x−5=0 从 x₀=2 迭代一次，给出 x₁ 的值。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "f' = 3x²-2",
+     "type": "regex",
+     "val": "3x\\^?2 ?- ?2",
+     "w": 1
+    },
+    {
+     "name": "x1 = 2.1",
+     "type": "regex",
+     "val": "2\\.1|21/10",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML15",
+   "domain": "概率",
+   "prompt": "已知 P(A)=0.5，P(B)=0.4，P(A∩B)=0.2，求 P(A|B) 与 P(B|A)。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "P(A|B)=0.5",
+     "type": "regex",
+     "val": "0\\.5|1/2",
+     "w": 1
+    },
+    {
+     "name": "P(B|A)=0.4",
+     "type": "regex",
+     "val": "0\\.4|2/5",
+     "w": 1
+    },
+    {
+     "name": "条件概率公式",
+     "type": "regex",
+     "val": "P\\(A\\|B\\)|条件概率|conditional",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML16",
+   "domain": "组合",
+   "prompt": "求 (1+x)^10 展开式中 x³ 的系数。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "答案 120",
+     "type": "regex",
+     "val": "\\b120\\b",
+     "w": 1
+    },
+    {
+     "name": "二项式",
+     "type": "regex",
+     "val": "二项式|binomial|C\\(10",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML17",
+   "domain": "多重积分",
+   "prompt": "计算二重积分 ∬(x+y) dxdy，区域为 [0,1]×[0,1]。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "答案 1",
+     "type": "regex",
+     "val": "\\b1\\b",
+     "w": 1
+    },
+    {
+     "name": "累次积分",
+     "type": "regex",
+     "val": "累次|iterated|先对|∫₀|\\\\int_0",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML18",
+   "domain": "信息论",
+   "prompt": "8 个球中 1 个较重，用天平最少称几次？用信息论说明下界。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "2 次",
+     "type": "regex",
+     "val": "\\b2\\b|两",
+     "w": 1
+    },
+    {
+     "name": "3^n 或 log3",
+     "type": "regex",
+     "val": "3\\^?n|log|信息量|三分",
+     "w": 1
+    },
+    {
+     "name": "方案",
+     "type": "regex",
+     "val": "3 ?对 ?3|三分|分成三",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML19",
+   "domain": "微积分",
+   "prompt": "讨论 f(x)=|x| 在 x=0 处的连续性与可导性。",
+   "full": 2,
+   "checks": [
+    {
+     "name": "连续",
+     "type": "regex",
+     "val": "连续|continuous",
+     "w": 1
+    },
+    {
+     "name": "不可导",
+     "type": "regex",
+     "val": "不可导|not differentiable|左右导数不",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "ML20",
+   "domain": "线代",
+   "prompt": "求矩阵 [[1,2,3],[2,4,6],[1,1,1]] 的秩。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "秩 2",
+     "type": "regex",
+     "val": "秩 ?= ?2|rank ?= ?2|\\b2\\b",
+     "w": 1
+    },
+    {
+     "name": "线性相关",
+     "type": "regex",
+     "val": "相关|dependent|成比例",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}

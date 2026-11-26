@@ -1,15 +1,17 @@
-# FeatherAgent 1.2.1-rc.4.6 · Windows x64 Test Guide
+# FeatherAgent 1.2.1-rc.4.7 · Windows x64 Test Guide
 
-> Package under test: `FeatherAgent-1.2.1-rc.4.6-windows-x64.zip`
-> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.5 retest (N32–N35)
-> Note: v1.2.1-rc.4.6 fixes N32–N35 from the rc.4.5 retest and removes five structural debts found by a code audit. N32: Windows path backslashes in judge output no longer break JSON (parse standard JSON first, then repair only string-local invalid escapes, and send evidence paths with forward slashes). N33: the hard-coded 512 output cap becomes `Config.max_output` (default 2048), sent as `num_predict`/`max_tokens`; `finish=length` fails a review role and retries. N34: `bench --json` `gates` is boolean-only, with status/raw/thresholds moved to `diagnostics`. N35: `reliability` takes the worse of memory and CPU. The rc.4.5 N29–N31 fixes, rc.4.4 N23–N27, TUI top clamping and all earlier fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 is only a startup/protocol smoke test, and cold-spawn/RSS/write-gate under Wine are not Windows conclusions.
+> Package under test: `FeatherAgent-1.2.1-rc.4.7-windows-x64.zip`
+> Baseline: v1.1.9 real-hardware retest report (Q1/Q2), rc.4.6 retest (N36–N39)
+> Note: v1.2.1-rc.4.7 fixes N36–N39 from the rc.4.6 retest. N36: judge evidence now needs 6 CJK characters, 3 English words, or 10 ASCII characters, so the 9-character `三条要点已写入文件` is no longer rejected; verbatim-answer, placeholder and prompt-echo rules are unchanged. N37: a `permission_denied` `tool.result` carries `hint` telling the model not to retry and to finish in prose; the system prompt requires full math/proof derivations. N38: prompt mitigation for title-only stops, still pending a real-model retest. N39: math scoring is formula-spelling sensitive; ML02 accepts `π^2/6`, `pi^2/6` and `\frac{\pi^2}{6}`. The rc.4.6 N32–N35 fixes, rc.4.5 N29–N31, rc.4.4 N23–N27, TUI top clamping and all earlier fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 is only a startup/protocol smoke test, and cold-spawn/RSS/write-gate under Wine are not Windows conclusions.
+>
+> rc.4.6 note: the rc.4.6 product fixes and structural refactor are described in its own section below; it also removes five structural debts found by a code audit. N32: Windows path backslashes in judge output no longer break JSON (parse standard JSON first, then repair only string-local invalid escapes, and send evidence paths with forward slashes). N33: the hard-coded 512 output cap becomes `Config.max_output` (default 2048), sent as `num_predict`/`max_tokens`; `finish=length` fails a review role and retries. N34: `bench --json` `gates` is boolean-only, with status/raw/thresholds moved to `diagnostics`. N35: `reliability` takes the worse of memory and CPU. The rc.4.5 N29–N31 fixes, rc.4.4 N23–N27, TUI top clamping and all earlier fixes remain in force. The package still contains ten exes (five Chinese + five `-en`). **Windows conclusions must come from your real-hardware retest**; Wine 6.0.3 is only a startup/protocol smoke test, and cold-spawn/RSS/write-gate under Wine are not Windows conclusions.
 
 ## 1. Unzip and start
 
 Unzip into a writable directory (not `Program Files`):
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.6\
+D:\FeatherAgent-1.2.1-rc.4.7\
 ```
 
 First launch may take 1–2 minutes: Windows antivirus scans each plugin binary on first execution, and the kernel prints:
@@ -20,10 +22,10 @@ First launch may take 1–2 minutes: Windows antivirus scans each plugin binary 
 ...
 ```
 
-Wait for `serve ready: 1.2.1-rc.4.6`, then continue.
+Wait for `serve ready: 1.2.1-rc.4.7`, then continue.
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.6
+cd D:\FeatherAgent-1.2.1-rc.4.7
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -167,7 +169,7 @@ v1.2.1-rc.2.1 regression checks:
 
 1. Native Ollama: open Settings in the TUI and WebUI. The model list must populate from `GET /api/tags`; a `GET /models` 404 must no longer empty the list.
 2. In the TUI `/settings`, verify all nine review fields are visible and reachable: enabled, max rounds, guide model/temp, exec model/temp, judge model/temp. Save with `Ctrl+S`, restart the TUI, and confirm the values reload from `config.json`. Resize the terminal small and confirm the selected field scrolls into view.
-3. With a real 7B guide/judge, enable review-gate and send `REVIEW_START`. `review.guide` must contain `must_include`; `review.verdict.items[]` must carry `criterion` and `check`; passing evidence must quote at least 10 characters of the answer. Final `chat.finished.status` must be `ok` only when approved.
+3. With a real 7B guide/judge, enable review-gate and send `REVIEW_START`. `review.guide` must contain `must_include`; `review.verdict.items[]` must carry `criterion` and `check`; passing evidence must quote at least 6 CJK characters (3 English words) of the answer. Final `chat.finished.status` must be `ok` only when approved.
 4. Force an unapproved review (or set `review_gate.max_rounds=1` with a model that cannot satisfy the rubric). `chat.finished.status` must be `unapproved` (or `degraded` when guide/judge fails twice), not `ok`.
 5. Review with 4B only: if the model cannot produce a literal rubric, the turn must end `degraded`; it must not silently pass.
 
@@ -208,6 +210,14 @@ v1.2.1-rc.4 regression checks:
 6. **N9: advisory boot gate.** Under memory/CPU pressure (`reliability` medium or low), `diagnostics.boot_gate_status` must be `"advisory"`, `diagnostics.boot_gate_raw` must preserve the raw result, `gates.boot_lt_*` carries the effective result, and `reliability` appears in `metrics.env` and `diagnostics`; `boot_gate_trusted` appears under `advisory_gates`, not inside `gates`.
 7. **N1–N3 regression.** Keep the rc.3.6 checks: term-only `must_include` with connection-word rejection, P50 ≤ P90 with `metrics_consistent`, and empty/tool-format retries with `model.retry`.
 8. **Bilingual package.** All ten exes must start. English CLI/TUI/WebUI must show English; Chinese editions must remain Chinese.
+
+v1.2.1-rc.4.7 regression checks:
+
+1. **N36: short Chinese evidence.** With review-gate on, run the rc.4.5/4.6 write task three times: `请用工具把三条关于「内存管理」的要点写入 workspace/notes3.txt，每条一行，以「- 」开头`. A 9-character Chinese item evidence such as `三条要点已写入文件` must be accepted; no `evidence 过短（少于 10 字）` may appear. `unapproved` is allowed when the content genuinely fails, but short Chinese evidence alone must not produce `degraded`. Also feed `总结` / `通过` as evidence and confirm they are still rejected.
+2. **N37: behavior after a denied tool.** Without allowing `tool.shell`, send `求 ∫₀¹ x²√(1−x²) dx，写出推导`; the `permission_denied` `tool.result` must carry `hint`, the same tool should not be retried repeatedly, and the model should switch to prose. Then start `.\featheragent.exe chat --root . --text "用工具计算 ∫₀¹ x²√(1−x²) dx" --allow tool.shell` and confirm the shell call executes. If the harness supports it, allow `tool.shell` for math papers too.
+3. **N38: no title-only stop.** Run `math-small` MS2 and `math-large` ML02 once each with a full-derivation request. Record answer length, `finish`, `truncated` and `done_reason`; they should no longer stop at 37/109 characters. If the model still stops early, record the model name and raw events instead of blaming `num_predict`.
+4. **N39: formula spelling.** Answer ML02 with `π²/6`, `pi^2/6` and `\frac{\pi^2}{6}`; all three should satisfy the π²/6 check. Record other formula variants as scoring coverage, not math correctness.
+5. **rc.4.6 N32–N35 regression.** Rerun N32/N33/N34/N35 below and confirm path tolerance, output cap, gate layering and CPU sampling did not regress.
 
 v1.2.1-rc.4.6 regression checks:
 
@@ -295,13 +305,13 @@ v1.2.1 additional checks:
 - N14: 4B models can drift on multi-task long flows; use a ≥7B exec model and repeat the test baseline. Single 4B runs are observational.
 - Old `<workspace_root>/<session>/` empty directories are not auto-cleaned; delete manually after confirming they are empty.
 - WebUI Markdown/icons were verified in a real Linux browser; TUI Markdown is unit-tested only and still needs PTY confirmation.
-- Wine smoke (unzipped rc.4.6 package, temporary `bcryptprimitives` stub): `version` prints `FeatherAgent 1.2.1-rc.4.6 (contract 1.0)`; three `bench --json` runs complete. Warm P50 is **81.3 / 82.1 / 87.1 ms**; cold spawn **580.2 / 584.8 / 543.7 ms** and RSS **18,432 KiB** are red because Wine's process startup is much slower. Write P95 is **4.676 / 4.587 / 4.586 ms** with `write_gate_status:"pass"` and `write_gate_raw:true`; `gates` is all boolean, `diagnostics.platform:"windows"`, `cpu_load_source:"GetSystemTimes/250ms"`, `reliability_basis:"mem=20%,cpu=0/0/1%"`. The stub was in the test directory only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
+- Wine smoke (temporary `bcryptprimitives` stub beside the test install): `version` prints `FeatherAgent 1.2.1-rc.4.7 (contract 1.0)`; three `bench --json` runs complete. Warm P50 **81.046 / 86.858 / 83.932 ms**; cold spawn **438.557 / 453.222 / 491.561 ms**, with only `cold_spawn_lt_250ms` red because Wine's process startup is much slower; RSS **9,728 / 9,728 / 9,600 KiB**; write P95 **4,554.2 / 4,648.0 / 4,567.6 µs** with `write_gate_status:"pass"` and `write_gate_raw:true`; `gates` is all boolean, `diagnostics.platform:"windows"`, `cpu_load_source:"GetSystemTimes/250ms"`, `reliability:"high"`, `reliability_basis:"mem=23%,cpu=3%" / "mem=23%,cpu=4%" / "mem=23%,cpu=2%"`. The stub was in the test directory only and is **not** in the package. Wine remains a smoke test, not a Windows conclusion.
 - Still untested: high-DPI/Chinese rendering, real Ollama 7B/4B metrics, proxy environments, network/sync drives, 24h soak.
 
 ## 8. Artifact verification
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.6-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.7-windows-x64.zip -Algorithm SHA256
 ```
 
 Use the release assets and manifest for the authoritative byte count/hash. All ten exes depend only on Windows system DLLs; the root contains `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, and `CHANGELOG.md`.

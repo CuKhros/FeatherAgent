@@ -1493,11 +1493,7 @@ impl Kernel {
                             json!({
                                 "name": call.name,
                                 "denied": true,
-                                "result": {
-                                    "error": "permission_denied",
-                                    "reason": "user_denied",
-                                    "tool": call.name,
-                                },
+                                "result": permission_denied_result(&call.name, "user_denied"),
                             }),
                         );
                         executed += 1;
@@ -1515,11 +1511,7 @@ impl Kernel {
                             json!({
                                 "name": call.name,
                                 "denied": true,
-                                "result": {
-                                    "error": "permission_denied",
-                                    "reason": e,
-                                    "tool": call.name,
-                                },
+                                "result": permission_denied_result(&call.name, &e),
                             }),
                         );
                         executed += 1;
@@ -2458,7 +2450,7 @@ impl Kernel {
                         let note = json!({
                             "role": "user",
                             "content": format!(
-                                "[审批结果不合格] {last}\n必须逐项返回全部验收项，id 一个都不能少：{}。每条 evidence 必须是答案中连续 ≥10 字原文。",
+                                "[审批结果不合格] {last}\n必须逐项返回全部验收项，id 一个都不能少：{}。每条 evidence 必须是答案中连续 ≥6 个汉字（英文至少 3 个词）的原文。",
                                 expected_ids.join(", ")
                             )
                         });
@@ -3385,6 +3377,16 @@ fn evidence_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// 工具被拒时给模型一个明确的收束信号：不要反复申请同一工具，改用文字完成。
+fn permission_denied_result(tool: &str, reason: &str) -> Value {
+    json!({
+        "error": "permission_denied",
+        "reason": reason,
+        "tool": tool,
+        "hint": "该工具未获授权，不要重复调用同一工具；请用文字完成当前任务，或明确说明需要用户授权。"
+    })
+}
+
 /// review-gate 只审最终答复，写文件任务却应该审“文件里到底写了什么”。
 /// 把本轮成功写入的内容附在待审答案前，并明确标成验收证据，避免模型为了
 /// 让 judge 看到内容而在最终答复里复述全文。
@@ -3621,6 +3623,15 @@ fn tool_format_correction() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_denial_tells_model_not_to_retry() {
+        let v = permission_denied_result("tool.shell", "not_allowed");
+        assert_eq!(v["error"], "permission_denied");
+        assert_eq!(v["tool"], "tool.shell");
+        assert_eq!(v["reason"], "not_allowed");
+        assert!(v["hint"].as_str().unwrap_or("").contains("不要重复调用"));
+    }
 
     #[test]
     fn truncated_review_output_is_an_error() {

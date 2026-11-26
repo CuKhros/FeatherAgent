@@ -1,6 +1,26 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.6` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.7` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.7] - 2026-11-26
+
+### 修复
+- N36：judge evidence 改为中英双门限：至少 6 个汉字、3 个英文词或 10 个 ASCII 字母/数字字符。9 个字的 `三条要点已写入文件` 通过；占位词与抄提示词仍被拒绝。测试：`verdict_accepts_short_chinese_evidence`、`verdict_accepts_three_word_english_evidence`。
+- N37：`permission_denied` 的 `tool.result` 增加 `hint`，要求模型不要重复调用同一工具、改用文字完成；系统提示同步要求数学/证明题写完整推导。
+- N38：系统提示要求数学/证明答案覆盖已知、每一步变换与结论，明确反对只写标题或最终答案就停。此项是提示词缓解，不是自动续写硬门禁。
+- N39：在数学卷评分说明中记录公式写法敏感；ML02 接受 `π^2/6`、`pi^2/6` 与 `\frac{\pi^2}{6}`。
+
+### 新增
+- 公开试卷库新增 `math-small`（8 题/25 分）与 `math-large`（20 题/56 分），共 7 份/90 题/252 分。
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.6.md` 与 `data/math-papers-rc.4.6.csv`；报告索引改为 13 份。
+
+### 变更
+- 被拒工具的 `tool.result` 增加 `hint`；`review.verdict` 字段不变。
+- 新增 rc.4.7 中英变更说明；README 状态与 Windows 指南改为 rc.4.7。
+
+### 文档
+- Linux 全量 208 项、207 通过、1 ignored（83 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、36 integration）。
+- N37 仍需在希望 sympy 辅助时放行 `tool.shell`；N38 与 N36 仍需 Windows 真实模型复测。
 
 ## [1.2.1-rc.4.6] - 2026-11-26
 

@@ -1,7 +1,7 @@
 {
   "manifest": {
     "name": "review-gate",
-    "version": "1.2.1-rc.4.6",
+    "version": "1.2.1-rc.4.7",
     "api": ">=1.0 <2.0",
     "capabilities": [
       "loop.review-gate",

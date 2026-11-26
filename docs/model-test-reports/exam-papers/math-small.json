@@ -1,0 +1,217 @@
+{
+ "id": "math-small",
+ "name": "数学小卷 · 高等数学八题",
+ "size": "small",
+ "full_score": 25,
+ "desc": "微积分 / 线性代数 / 数论 / 概率 / 组合，单题难度高于通用小卷，适合快速压测推理深度",
+ "questions": [
+  {
+   "id": "MS1",
+   "domain": "微积分",
+   "prompt": "求不定积分 ∫ x²·e^x dx，写出完整推导。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "分部积分",
+     "type": "regex",
+     "val": "分部|integration by parts",
+     "w": 1
+    },
+    {
+     "name": "结果含 e^x",
+     "type": "regex",
+     "val": "e\\^?x|eˣ",
+     "w": 1
+    },
+    {
+     "name": "结果含 x²",
+     "type": "regex",
+     "val": "x\\^?2|x²",
+     "w": 1
+    },
+    {
+     "name": "常数 C",
+     "type": "regex",
+     "val": "\\+ ?C",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS2",
+   "domain": "数论",
+   "prompt": "解同余方程 3x ≡ 5 (mod 7)，给出 x 的最小正整数解。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "答案 4",
+     "type": "regex",
+     "val": "\\b4\\b",
+     "w": 1
+    },
+    {
+     "name": "逆元/模运算",
+     "type": "regex",
+     "val": "逆元|inverse|mod|模",
+     "w": 1
+    },
+    {
+     "name": "验证",
+     "type": "regex",
+     "val": "验证|代入|check",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS3",
+   "domain": "证明",
+   "prompt": "用反证法证明 √2 是无理数。",
+   "full": 4,
+   "checks": [
+    {
+     "name": "反证假设",
+     "type": "regex",
+     "val": "假设|反证|contradiction",
+     "w": 1
+    },
+    {
+     "name": "互素",
+     "type": "regex",
+     "val": "互素|既约|coprime|最简",
+     "w": 1
+    },
+    {
+     "name": "奇偶矛盾",
+     "type": "regex",
+     "val": "偶|even",
+     "w": 1
+    },
+    {
+     "name": "结论矛盾",
+     "type": "regex",
+     "val": "矛盾|contradiction",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS4",
+   "domain": "线代",
+   "prompt": "求矩阵 A = [[2,1],[1,2]] 的两个特征值。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "特征值 1",
+     "type": "regex",
+     "val": "λ? ?= ?1|\\b1\\b",
+     "w": 1
+    },
+    {
+     "name": "特征值 3",
+     "type": "regex",
+     "val": "\\b3\\b",
+     "w": 1
+    },
+    {
+     "name": "特征方程",
+     "type": "regex",
+     "val": "det|特征方程|λ²|λ\\^2",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS5",
+   "domain": "概率",
+   "prompt": "三个公平六面骰子同时投掷，点数之和为 10 的概率是多少？给出分数。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "分子 27",
+     "type": "regex",
+     "val": "\\b27\\b",
+     "w": 1
+    },
+    {
+     "name": "分母 216",
+     "type": "regex",
+     "val": "\\b216\\b",
+     "w": 1
+    },
+    {
+     "name": "约分 1/8",
+     "type": "regex",
+     "val": "1 ?/ ?8|0\\.125",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS6",
+   "domain": "微积分",
+   "prompt": "求极限 lim(x→0) (sin x − x)/x³。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "答案 -1/6",
+     "type": "regex",
+     "val": "-1/6|−1/6|-\\s?0\\.166",
+     "w": 1
+    },
+    {
+     "name": "泰勒展开或洛必达",
+     "type": "regex",
+     "val": "泰勒|Taylor|洛必达|L'H",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS7",
+   "domain": "微积分",
+   "prompt": "设 f(x)=x³−3x，求极值点、单调区间与凹凸区间。",
+   "full": 3,
+   "checks": [
+    {
+     "name": "驻点 ±1",
+     "type": "regex",
+     "val": "x ?= ?[±\\-]?1|1 和 -1|-1 和 1",
+     "w": 1
+    },
+    {
+     "name": "极大/极小",
+     "type": "regex",
+     "val": "极大|极小|max|min",
+     "w": 1
+    },
+    {
+     "name": "拐点 0",
+     "type": "regex",
+     "val": "拐点|inflection|凹凸",
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "MS8",
+   "domain": "组合",
+   "prompt": "从 8 人中选 3 人组成小组，其中必须包含指定的某 1 人，共有多少种选法？",
+   "full": 2,
+   "checks": [
+    {
+     "name": "答案 21",
+     "type": "regex",
+     "val": "\\b21\\b",
+     "w": 1
+    },
+    {
+     "name": "组合数",
+     "type": "regex",
+     "val": "C\\(7|c\\(7|组合|choose",
+     "w": 1
+    }
+   ]
+  }
+ ]
+}
