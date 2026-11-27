@@ -40,8 +40,9 @@ Reports that only contain build/UI defect checklists are intentionally excluded.
 | [v1.2.1-rc.4.5](reports/Windows真机复测报告-v1.2.1-rc.4.5.md) | Large exam 2 (20 questions, 60 points): 48.0/60 vs 45.0/60; 1,653 s vs 1,059 s; judge JSON escaped Windows paths and degraded 3/3; two FA answers truncated at 136 and 390 characters | Separates "avoiding empty responses" from actual answer quality, and exposes N32–N35 |
 | [v1.2.1-rc.4.6](reports/Windows真机复测报告-v1.2.1-rc.4.6.md) | math-small 19.5/25 vs 16.5/25; math-large 40.7/56 vs 31.7/56; one FA empty response vs five bare on the large paper; N32–N35 confirmed on real hardware; N36's 9-character evidence rejected by the 10-character floor | First two-paper math comparison; confirms four fixes and exposes N36–N39 |
 | [v1.2.1-rc.4.7](reports/Windows真机复测报告-v1.2.1-rc.4.7.md) | math-small 21.5/25 vs 14.5/25; math-large 41.6/56 vs 32.3/56; FA time 126 s / 446 s with `tool.shell` allowed; N37 and N38 confirmed; N36 not measured because a leaked turn kept returning `interrupted`; N40/N41 exposed | Quantifies the shell-allowance gain in score and time; isolates formula-notation and per-step scoring noise |
+| [v1.2.1-rc.4.8](reports/Windows真机复测报告-v1.2.1-rc.4.8.md) | Targeted ML02/ML10: N40 3/3, N41 4/4 by content; N42 5/5 clean; N43/N44/N45 exposed; ML10 length span 140–3514 | Confirms formula, step and stale-turn fixes; isolates judge empty evidence, malformed XML tail and self-reversal |
 
-Fourteen reports are preserved in their original Chinese wording. Local Windows usernames were replaced before publication. Commands, ports, model names, and event traces are unchanged.
+Fifteen reports are preserved in their original Chinese wording. Local Windows usernames were replaced before publication. Commands, ports, model names, and event traces are unchanged.
 
 ## Exam papers
 
@@ -57,6 +58,7 @@ Fourteen reports are preserved in their original Chinese wording. Local Windows 
 | [`data/large-2-rc.4.5.csv`](data/large-2-rc.4.5.csv) | Per-question scores, latency and answer lengths for the 20-question large-2 paper (bare vs FeatherAgent) |
 | [`data/math-papers-rc.4.6.csv`](data/math-papers-rc.4.6.csv) | Per-question scores for the 28 questions in math-small and math-large (bare vs FeatherAgent) |
 | [`data/math-papers-rc.4.7.csv`](data/math-papers-rc.4.7.csv) | Per-question rc.4.7 scores for the same 28 questions, with the shell-allowance run and N37/N38/N40/N41 notes |
+| [`data/math-papers-rc.4.8-targeted.csv`](data/math-papers-rc.4.8-targeted.csv) | Targeted rc.4.8 ML02/ML10 rows with status, output length and N44/N45/N46 notes |
 
 ## Caveats
 

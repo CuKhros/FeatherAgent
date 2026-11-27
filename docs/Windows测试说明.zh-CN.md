@@ -1,8 +1,8 @@
-# FeatherAgent 1.2.1-rc.4.8 · Windows x64 开源候选版测试说明
+# FeatherAgent 1.2.1-rc.4.9 · Windows x64 开源候选版测试说明
 
-> 被测包：`FeatherAgent-1.2.1-rc.4.8-windows-x64.zip`
-> 基线：v1.1.9 真机复测报告（Q1/Q2）、rc.4.7 复测（N37/N38 确认，N40–N42 新暴露）
-> 说明：v1.2.1-rc.4.8 修复 rc.4.7 复测的 N40–N42。N40：ML02 公式判据扩展为 `π²/6`、`π^2/6`、`(π^2)/6`、`pi^2/6`、`\frac{\pi^2}{6}`、`\dfrac{\pi^2}{6}`、`\frac{1}{6}\pi^2`、`\zeta(2)`、`ζ(2)` 等；ML10 的 `π/16` 也接受 `\frac{\pi}{16}`、`\dfrac{\pi}{16}`。N41：ML10 拆为换元、展开、降幂/倍角、结果四步，各 1 分。N42：每次 `chat.send` 分配 run id，旧回合被取代后静默退出；客户端断开时使旧 run 失效并置 `Cancelled`；`session.create` 清理旧 holder；`chat` CLI 只接受自己 `run` 的 `chat.finished`。rc.4.7 的 N37/N38 已在真机确认有收益；N36 仍待干净环境复核。rc.4.6 的 N32–N35、rc.4.5 的 N29–N31、rc.4.4 的 N23–N27、TUI 到顶夹紧和更早修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 冒烟仅作启动与协议检查，冷启动/RSS/写入门禁不作 Windows 结论。
+> 被测包：`FeatherAgent-1.2.1-rc.4.9-windows-x64.zip`
+> 基线：rc.4.8 真机复测报告（N42 5/5 干净；N40 3/3、N41 4/4；N43–N45 新暴露）
+> 说明：v1.2.1-rc.4.9 修复 rc.4.8 复测的 N43–N45。N43：judge 返回空 evidence 时不再落入“evidence 过短”，而是单独判为该票无效，回注明示“不是判据不合格”，该票预算 2→3 次；过短/非原文仍 2 次。N44：正文已生成、仅尾部伪 XML 标记畸形时，provider 保留正文并发 `review.warn`，`done` 携带完整 `text`，引擎不再整轮 failed；只有正文被截空且无工具调用才失败。N45：系统提示要求“要么调用工具并等待结果，要么相信已有推导”，禁止先给正确结论再用未执行的验证自我推翻。N46 只做节奏收敛，是观察项，不设硬长度门限。rc.4.8 的 N40–N42、rc.4.7 的 N37/N38 等更早修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 冒烟仅作启动与协议检查，冷启动/RSS/写入门禁不作 Windows 结论。
 >
 > v1.2.1-rc.4.6 说明：N32–N35 的产品修复与结构重构内容见 rc.4.6 段落，该版还清掉代码审计确认的五处结构性技术债。N32：judge 输出里的 Windows 路径反斜杠不再把 JSON 打坏（标准解析失败后只修字符串内部非法转义，证据路径改用正斜杠）；N33：输出上限从硬编码 512 改为 `Config.max_output` 默认 2048，并按 provider 传 `num_predict`/`max_tokens`，`finish=length` 会让 review 角色失败重试；N34：`bench --json` 的 `gates` 只保留布尔判定项，状态/原始读数/阈值移到 `diagnostics`；N35：`reliability` 取内存与 CPU 更差者。rc.4.5 的 N29–N31、rc.4.4 的 N23–N27、TUI 到顶夹紧和更早修复继续有效。包内仍是 10 个 exe（5 中文 + 5 `-en`）。**Windows 真机结论以你的复测为准**；Wine 6.0.3 冒烟仅作启动与协议检查，冷启动/RSS/写入门禁不作 Windows 结论。
 
@@ -11,7 +11,7 @@
 解压到有写权限的目录（不要放 `Program Files`）：
 
 ```powershell
-D:\FeatherAgent-1.2.1-rc.4.8\
+D:\FeatherAgent-1.2.1-rc.4.9\
 ```
 
 首次启动可能 1–2 分钟：Windows 首次执行每个插件二进制会触发杀毒扫描，内核会打印：
@@ -22,10 +22,10 @@ D:\FeatherAgent-1.2.1-rc.4.8\
 ...
 ```
 
-看到 `serve ready: 1.2.1-rc.4.8` 后再操作。
+看到 `serve ready: 1.2.1-rc.4.9` 后再操作。
 
 ```powershell
-cd D:\FeatherAgent-1.2.1-rc.4.8
+cd D:\FeatherAgent-1.2.1-rc.4.9
 .\featheragent.exe help
 .\featheragent.exe serve --root . --provider provider-ollama --model qwen3.5:4b
 ```
@@ -211,6 +211,15 @@ v1.2.1-rc.4 回归核对：
 7. **N1–N3 回归。** 保留 rc.3.6 检查：`must_include` 术语化与连接词拒绝、P50 ≤ P90 且 `metrics_consistent`、空响应/工具格式重试的 `model.retry`。
 8. **中英双版。** 10 个 exe 均可启动；英文 CLI/TUI/WebUI 显示英文，中文版保持中文。
 
+v1.2.1-rc.4.9 回归核对：
+
+1. **N43：空 evidence 是无效票。** 开启 review-gate，用 7B judge 跑一次普通任务；若能构造/观察到 `evidence 为空`，该票必须重试至多 3 次，`review.warn` 文案含“evidence 为空”且不含“evidence 过短”。连续 3 次仍空才按该票失败处理；不要把它记成判据不合格。另用 `总结` / `通过` 触发“过短/不是原文”，该票预算仍为 2 次。
+2. **N44：畸形 XML 尾不丢正文。** 用会先输出正文、再吐 `<function...>` 畸形片段的 provider（或 `MALFORMED_XML_TAIL` mock）跑一次：`model.message` 必须保留畸形标记之前的正文，不含 `<function`，并出现 `review.warn`（`kind:"malformed_tool_markup"`）；`chat.finished.status` 必须是 `ok`。若正文被截空且无工具调用，仍应 failed。
+3. **N45：不自我推翻。** 用 `math-large` ML10 或同类题跑 2 次：若模型先给出 `π/16`，允许它调用工具验证，但必须等 `tool.result` 再下结论；不得出现“让我用 Python 验证”后没有工具结果就否定自己。记录是否调用、最终结论与 `finish`。
+4. **N46（观察项）。** 同一题连跑 3 次，记录字数与步骤数；本版不把长度当通过条件，只观察是否收束、是否重复凑篇幅。
+5. **rc.4.8 N40–N42 回归。** 重跑下方 N40/N41/N42；N42 仍要求 5/5 只收自己的 `chat.finished(ok)`。
+6. **rc.4.7 N37/N38 回归。** 重跑下方 N37/N38，确认放行 `tool.shell` 的数学收益与 MS2/ML02 字数没有回退。
+
 v1.2.1-rc.4.8 回归核对：
 
 1. **N40：公式写法。** 用 `math-large` ML02 跑一次，并在答案/评分器中确认以下写法至少能被公式判据接受：`π²/6`、`π^2/6`、`(π^2)/6`、`pi^2/6`、`\frac{\pi^2}{6}`、`\dfrac{\pi^2}{6}`、`\frac{1}{6}\pi^2`、`\zeta(2)`、`ζ(2)`；`π^2/5` 不得误命中。记录实际答案文本与三项判据的命中情况，不要把规则覆盖面当数学正确率。
@@ -304,13 +313,13 @@ v1.2.1 追加核对：
 - N14：4B 在多任务长流程上会漂移；建议用 ≥7B exec，并对基线多次取样。单次 4B 结果只作观测。
 - 旧版 `<workspace_root>/<session>/` 空目录不会自动清理；确认无内容后手动删。
 - WebUI Markdown/图标已在 Linux 真实浏览器验证；TUI Markdown 只做单测，仍需 PTY 真机确认。
-- Wine 冒烟（临时 `bcryptprimitives` stub，旁挂于测试目录）：`version` 打印 `FeatherAgent 1.2.1-rc.4.8 (contract 1.0)`；`doctor` 通过；三次 `bench --json` 均完整结束。热启动 P50 **80.621 / 81.726 / 80.013 ms**；冷启动 **375.035 / 429.808 / 409.811 ms**，仅 `cold_spawn_lt_250ms` 与 RSS 因 Wine 进程开销判红；RSS **18,432 / 18,560 / 18,304 KiB**；写入 P95 **4,520.8 / 4,552.2 / 4,442.0 µs**，`write_gate_status:"pass"`、`write_gate_raw:true`；`gates` 全为布尔，`diagnostics.platform:"windows"`、`reliability:"high"`（`mem=19%,cpu=0/4/3%`）。`serve` + `chat` 返回 `status=ok`；一次 N42 强杀/重连冒烟也返回 `status=ok`、`run=3`。stub 只在测试目录，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
+- Wine 冒烟（临时 `bcryptprimitives` stub，旁挂于测试目录）：`version` 打印 `FeatherAgent 1.2.1-rc.4.9 (contract 1.0)`；`doctor` 通过；三次 `bench --json` 均完整结束。热启动 P50 **131.149 / 127.305 / 124.322 ms**；冷启动 **619.458 / 506.898 / 518.759 ms**；RSS **9,472 / 9,600 / 9,600 KiB**；写入 P95 **4,539.3 / 4,677.1 / 4,768.1 µs**。8 项门禁通过 6 项：`boot_lt_100ms` 与 `cold_spawn_lt_250ms` 因 Wine 进程开销判红，RSS 与写入门禁通过；`diagnostics.platform:"windows"`、`write_gate_status:"pass"`、`write_gate_raw:true`；`gates` 全为布尔，`reliability:"high"`（`mem=20%,cpu=2%`）。`serve` + `chat` 返回 `status=ok`；一次 N42 强杀/重连冒烟也返回 `status=ok`、`run=3`。stub 只在测试目录，**未打进包**。Wine 仍只是冒烟，不是 Windows 结论。
 - 仍需复测：高 DPI/中文渲染、真实 Ollama 7B/4B 指标、代理环境、网络盘/同步盘、24h 浸泡。
 
 ## 8. 产物校验
 
 ```powershell
-Get-FileHash .\FeatherAgent-1.2.1-rc.4.8-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\FeatherAgent-1.2.1-rc.4.9-windows-x64.zip -Algorithm SHA256
 ```
 
 以 Release 资产与 manifest 的字节数/哈希为准；包内 10 个 exe 只依赖 Windows 系统 DLL，根目录含 `LICENSE`、`SECURITY.md`、`CONTRIBUTING.md`、`CHANGELOG.md`。

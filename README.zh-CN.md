@@ -65,7 +65,7 @@
 | 平台 | 架构 | 构建方式 | 发布形态 | 当前状态 |
 |---|---|---|---|---|
 | Linux x64 | x86_64 | 原生 `cargo` / `scripts/build-linux.sh` | 三产物 tar.gz | **已实测**（自动化测试、TUI PTY、WebUI、mock/Ollama 联调） |
-| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2–rc.4.7 已复测；v1.2.1-rc.4.8 包待复测） |
+| Windows x64 | x86_64 | mingw-w64 交叉编译 / `scripts/build-windows.sh` | 10 exe 单 zip（5 中文 + 5 英文 `-en`） | **已实测**（v1.1.9 真机；rc.4.2–rc.4.8 已复测；v1.2.1-rc.4.9 包待复测） |
 | Linux arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows arm64 | aarch64 | 未提供构建脚本 | 无 | 未支持、未实测 |
 | Windows x86 | i686 | 未提供构建脚本 | 无 | 未支持、未实测 |
@@ -113,7 +113,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 快速开始（Windows x64 测试包）
 
-`FeatherAgent-1.2.1-rc.4.8-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
+`FeatherAgent-1.2.1-rc.4.9-windows-x64.zip` 解压到有写权限的目录（不要放 `Program Files`），然后：
 
 ```powershell
 .\featheragent.exe help                       # 中文命令表
@@ -128,7 +128,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 10 个 exe 只依赖 Windows 系统 DLL（无 VC++ 运行库 / 无 MinGW 运行时）。`serve` 启动会立即打印 banner；首次启动可能 1–2 分钟（杀毒软件扫描插件二进制），期间会打印 `[init]` 进度；`runtime\ipc\ready` 未出现时 `chat` 会提示“内核未就绪（启动中）”，不是通道故障。构建：`scripts/build-windows.sh`（mingw-w64 + `x86_64-pc-windows-gnu` + 静态 CRT）；打包：`scripts/package-windows.sh`。详见 [Windows 测试说明](docs/Windows测试说明.zh-CN.md)。
 
-## 平台门禁差异（v1.2.1-rc.4.8）
+## 平台门禁差异（v1.2.1-rc.4.9）
 
 | 门禁 | Linux | Windows | 说明 |
 |---|---|---|---|
@@ -157,6 +157,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[总体设计 v1.1](docs/FeatherAgent架构设计文档-v1.1.zh-CN.md)** —— 全文（含 v1.0 → v1.1 修订说明、勘误 R1、技术清单、路线图与风险对策）
 - **[验证报告](docs/验证报告.zh-CN.md)** —— 测试矩阵、实测门禁数字、已修缺陷、未测项与偏差
 - **[前端契约 · Wire Format](docs/前端契约-WireFormat.zh-CN.md)** —— 4 字节小端长度 + MsgPack/JSON、端点发现、握手顺序、错误码
+- **[v1.2.1-rc.4.9 变更说明](docs/v1.2.1-rc.4.9-变更说明.zh-CN.md)** —— judge 空 evidence 作为无效票重试、畸形 XML 尾降级为 warn、数学推导“验证或相信”规则，以及 rc.4.8 报告/定向 CSV 归档（[English](docs/v1.2.1-rc.4.9-Changes.md)）
 - **[v1.2.1-rc.4.8 变更说明](docs/v1.2.1-rc.4.8-变更说明.zh-CN.md)** —— 扩展公式变体与 ML10 分步判据、强杀残留 turn 的 run id 隔离，以及 rc.4.7 报告/CSV 归档（[English](docs/v1.2.1-rc.4.8-Changes.md)）
 - **[v1.2.1-rc.4.7 变更说明](docs/v1.2.1-rc.4.7-变更说明.zh-CN.md)** —— judge evidence 中英双门限、工具拒绝提示、数学推导完整性提示，以及两张数学卷归档（[English](docs/v1.2.1-rc.4.7-Changes.md)）
 - **[v1.2.1-rc.4.6 变更说明](docs/v1.2.1-rc.4.6-变更说明.zh-CN.md)** —— Windows 路径的 review JSON 容错、可配置输出上限与 `finish=length` 检测、只含布尔判定项的 `bench` gates 与 `diagnostics`、纳入 CPU 的 reliability，以及生成器/解析层/Web bundle 重构（[English](docs/v1.2.1-rc.4.6-Changes.md)）
@@ -164,7 +165,7 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 - **[v1.2.1-rc.4.5 变更说明](docs/v1.2.1-rc.4.5-变更说明.zh-CN.md)** —— 写文件任务跳过硬判据并全交 judge、Windows 写入门禁 advisory、L17 粗体编号识别，以及 rc.4.4 报告与 5 份试卷归档（[English](docs/v1.2.1-rc.4.5-Changes.md)）
 - **[v1.2.1-rc.4.4 变更说明](docs/v1.2.1-rc.4.4-变更说明.zh-CN.md)** —— bench 停止/join 有界、临时目录清理、写文件判据交 judge、XML 开标签恢复、对比轴覆盖与 TUI 到顶滚动夹紧（[English](docs/v1.2.1-rc.4.4-Changes.md)）
 - **[v1.2.1-rc.4.3 变更说明](docs/v1.2.1-rc.4.3-变更说明.zh-CN.md)** —— 冷启动单次 IPC 探测、代码与文件输出区分、对比轴覆盖、写文件 review 证据，以及精选模型报告归档（[English](docs/v1.2.1-rc.4.3-Changes.md)）
-- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 13 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV 与 7 份可复用试卷（[English](docs/model-test-reports/README.md)）
+- **[模型测试报告归档](docs/model-test-reports/README.zh-CN.md)** —— 15 份含可复核本地模型数据的 Windows 真机报告，附结构化 CSV 与 7 份可复用试卷（[English](docs/model-test-reports/README.md)）
 - **[v1.2.1-rc.4.2 变更说明](docs/v1.2.1-rc.4.2-变更说明.zh-CN.md)** —— XML 风格工具调用恢复、Windows bench RPC 连接重试、`advisory_gates` 拆分、简洁与覆盖的提示词区分（[English](docs/v1.2.1-rc.4.2-Changes.md)）
 - **[v1.2.1-rc.4.1 变更说明](docs/v1.2.1-rc.4.1-变更说明.zh-CN.md)** —— 路径/文件型 `must_include` 豁免、纯文本工具调用兜底与别名归一化、`data/web-artifacts` 可审计副本、`rubric-final` 留档；并注明 4B 长流程边界（[English](docs/v1.2.1-rc.4.1-Changes.md)）
 - **[v1.2.1-rc.4 变更说明](docs/v1.2.1-rc.4-变更说明.zh-CN.md)** —— `must_include` 匹配模式、主观判据/禁词校验、bench 唯一临时目录与结构化错误、reliability 感知启动门禁、重复工具调用抑制、搜索落盘、WebUI/TUI 文件附件（[English](docs/v1.2.1-rc.4-Changes.md)）
@@ -192,6 +193,8 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 ## 状态
 
+`v1.2.1-rc.4.9` 处理 rc.4.8 复测的 N43–N45。judge 空 evidence 现在单独判定为该票无效，预算从 2 次增至 3 次，回注明示“不是判据不合格”；正文已生成、仅尾部伪 XML 标记畸形时，provider 保留正文并发 `review.warn`，`done` 事件携带完整 `text`，引擎不再整轮 failed；数学/推导提示明确“要么调用工具并等待结果，要么相信已有推导”，禁止先给正确结论再用未执行的验证自我推翻。N46 只做提示词收敛，不设硬长度门限。Linux 全量 217 项：216 通过、1 ignored；新增空 evidence 与 XML 尾两个集成回归。
+
 `v1.2.1-rc.4.8` 处理 rc.4.7 复测的 N40–N42。ML02 现在接受 LaTeX/Unicode/ζ 变体（`\dfrac`、`\zeta(2)`、`π²/6`、`(π^2)/6`、反写乘积），ML10 拆为换元、展开、降幂/倍角、`π/16` 四步计分。N42 已在 rc.4.7 复现（5 次里 1 次把旧回合的 `stopped` 交给下一个客户端），用每次 `chat.send` 的 run id 修复：旧回合静默退出，断连使旧 run 失效，`session.create` 清理旧 holder，CLI 按 `run` 过滤 `chat.finished`；rc.4.8 连续 5/5 强杀/重连干净。rc.4.7 复测同时确认 N37 的实际收益（放行 `tool.shell` 后数学小卷 19.5→21.5、大卷 40.7→41.6，FA 126s/446s）与 N38 的恢复（MS2 37→729、ML02 109→1568 字）；N36 仍需干净环境复测。评分仍是正则覆盖面，不是数值等价。
 
 `v1.2.1-rc.4.7` 修复 rc.4.6 复测的 N36–N39。judge evidence 现在接受 6 个汉字、3 个英文词或 10 个字符的标识符，9 个字的 `三条要点已写入文件` 不再让写文件任务降级。工具被拒的 `tool.result` 增加 `hint`，明确要求模型不要重复调用、改用文字完成；系统提示要求数学/证明题写出完整推导。公开试卷库新增 `math-small`（8 题/25 分）与 `math-large`（20 题/56 分）；rc.4.6 的 FA 得分为 19.5/25、40.7/56，裸跑为 16.5/25、31.7/56。N37 仍是跑卷前提（希望 sympy 辅助时需放行 `tool.shell`）；N38 由提示词缓解，仍需真实模型复测；N39 是评分覆盖面限制。
@@ -218,6 +221,6 @@ scripts/build-linux.sh                                  # 版本门禁 + --locke
 
 `v1.2.1-rc.3` 把插件设置改成声明式：插件在 `plugins/<name>/plugin.json` 的 `manifest.settings` 里写清 root、标题、说明和字段（`bool|int|number|string|enum`，带区间/选项），内核通过 `plugin.settings` RPC 原样转述，并在 `config.set` 里按声明校验，TUI 与 WebUI 都能通用渲染任意插件的表单。同时修掉 rc.2.1 复测的 H1–H4：短语判据四类硬校验、judge evidence 必须是答案中连续 ≥10 字原文、畸形工具名返回“未知工具 + 可用清单”的纠错，S3 t5/t6 明确只调用一次工具。
 
-Linux 自动化共 **211 项测试：210 通过、1 个默认 ignored**（83 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、38 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,581,016 B（2.46 MiB）**；热启动 P50 **1.408 / 1.356 / 1.338 ms**；冷启动 P50 **5.786 / 5.432 / 5.320 ms**；RSS **3,712 / 3,584 / 3,456 KiB**；写入 P95 **2.844 / 2.824 / 2.794 µs**；8 项布尔门禁全绿，`diagnostics.platform:"linux"`、`write_gate_status:"pass"`、`write_gate_raw:true`；`reliability` 三次均为 high（`mem=17%,cpu=63%` / `mem=17%,cpu=62%` / `mem=17%,cpu=62%`），故 `boot_gate_trusted=true`、`boot_gate_status:"pass"`，热启动原始值远低于 20 ms。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
+Linux 自动化共 **217 项测试：216 通过、1 个默认 ignored**（87 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、41 integration）；英文 worker/WebUI 别名复用同一测试模块，因此 plugin 与 WebUI 用例各执行两次。ignored 的需公网用例需公网环境。`fmt` 与 `clippy -D warnings` 通过。Release bench：内核 **2,581,680 B（2.46 MiB）**；热启动 P50 **1.383 / 1.366 / 1.384 ms**；冷启动 P50 **6.497 / 6.355 / 7.418 ms**；RSS **1,792 / 1,920 / 1,920 KiB**；写入 P95 **14.654 / 11.109 / 12.620 µs**；8 项布尔门禁全绿，`diagnostics.platform:"linux"`、`write_gate_status:"pass"`、`write_gate_raw:true`；`reliability` 三次均为 high（每次 `mem=17%,cpu=13%`），故 `boot_gate_trusted=true`、`boot_gate_status:"pass"`，热启动原始值远低于 20 ms。设置页已在 rc.3 两端实测：TUI 用 PTY，WebUI 走 WebSocket。
 
-Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1～rc.4.7 复测。rc.4.6 复测确认 N32–N35、暴露 N36–N39；rc.4.7 复测确认 N37 的实际收益（放行 `tool.shell` 后 FA 21.5/25、41.6/56，耗时 126s/446s）与 N38 的恢复，但因残留 turn 连续 `interrupted` 未能测到 N36，并暴露 N40（公式写法评分）、N41（部分分过粗）、N42（强杀后残留 turn）。rc.4.8 候选版扩展公式判据、把 ML10 拆成四步、用 run id 隔离旧回合。Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。Wine 6.0.3 冒烟通过 `version`、`doctor`、三次 `bench --json`、`serve` + `chat`，以及一次 N42 强杀/重连；冷启动/RSS/写入门禁受 Wine 开销影响，不作 Windows 基线。真实的 Windows 命名管道强杀时序仍需用户真机复测。
+Windows x64 已完成 v1.1.3～v1.1.9 九轮真机演进，并经过 rc.4.1～rc.4.8 复测。rc.4.6 复测确认 N32–N35、暴露 N36–N39；rc.4.7 复测确认 N37 的实际收益（放行 `tool.shell` 后 FA 21.5/25、41.6/56，耗时 126s/446s）与 N38 的恢复，但因残留 turn 连续 `interrupted` 未能测到 N36，并暴露 N40（公式写法评分）、N41（部分分过粗）、N42（强杀后残留 turn）。rc.4.8 候选版扩展公式判据、把 ML10 拆成四步、用 run id 隔离旧回合；其真机复测 5/5 干净，同时暴露 N43–N45。rc.4.9 候选版把空 evidence 作为无效票重试、保留畸形 XML 尾之前的正文，并补充数学推导验证规则。Windows 包含 10 个 exe（5 中文 + 5 英文 `-en`），来自交叉编译；自动化测试只在 Linux 跑。Wine 6.0.3 冒烟通过 `version`、`doctor`、三次 `bench --json`、`serve` + `chat`，以及一次 N42 强杀/重连；冷启动/RSS/写入门禁受 Wine 开销影响，不作 Windows 基线。真实的 Windows 命名管道强杀时序仍需用户真机复测。

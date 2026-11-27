@@ -2423,7 +2423,8 @@ impl Kernel {
             let mut messages = base_messages.clone();
             let mut got: Option<Value> = None;
             let mut last = String::new();
-            for attempt in 1..=2u32 {
+            let mut max_attempts = 2u32;
+            for attempt in 1..=3u32 {
                 attempts_total += 1;
                 let raw = self.review_model_call(
                     session,
@@ -2465,6 +2466,11 @@ impl Kernel {
                     }
                     Err(e) => {
                         last = e.to_string();
+                        // N43：空 evidence 表示这一票无效，多给一次机会；
+                        // “过短/不是原文”仍然是普通不合格，维持原来的 2 次预算。
+                        if crate::review::verdict_error_is_empty_evidence(&last) {
+                            max_attempts = 3;
+                        }
                         self.emit(
                             &session.id,
                             EventKind::ReviewWarn,
@@ -2475,26 +2481,37 @@ impl Kernel {
                                 "model": model,
                                 "vote": vote,
                                 "attempts": attempts_total,
-                                "retry": attempt < 2,
+                                "retry": attempt < max_attempts,
                             }),
                         );
                         // K2：把缺项/不合格原因明确回注，只让 judge 补这一票，
                         // 而不是原样重发；每次都必须逐项返回全部描述型条目。
+                        let evidence_hint = if crate::review::verdict_error_is_empty_evidence(&last)
+                        {
+                            "你上一次的 evidence 是空字符串：这是无效票，不是判据不合格。必须从待审答案中原样复制一段非空连续原文。"
+                        } else {
+                            "每条 evidence 必须是答案中连续 ≥6 个汉字（英文至少 3 个词）的原文。"
+                        };
                         let note = json!({
                             "role": "user",
                             "content": format!(
-                                "[审批结果不合格] {last}\n必须逐项返回全部验收项，id 一个都不能少：{}。每条 evidence 必须是答案中连续 ≥6 个汉字（英文至少 3 个词）的原文。",
+                                "[审批结果不合格] {last}\n必须逐项返回全部验收项，id 一个都不能少：{}。{evidence_hint}",
                                 expected_ids.join(", ")
                             )
                         });
                         if let Some(arr) = messages.as_array_mut() {
                             arr.push(note);
                         }
+                        if attempt >= max_attempts {
+                            break;
+                        }
                     }
                 }
             }
             let Some(verdict) = got else {
-                return Err(format!("judge 第 {vote} 票连续 2 次未产出合规审批：{last}"));
+                return Err(format!(
+                    "judge 第 {vote} 票连续 {max_attempts} 次未产出合规审批：{last}"
+                ));
             };
             vote_verdicts.push(verdict);
             // 前两票逐项一致就收敛，省掉第三票。
@@ -2702,8 +2719,30 @@ impl Kernel {
                             if let Some(f) = p.get("finish_reason").and_then(|f| f.as_str()) {
                                 finish = f.to_string();
                             }
+                            if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
+                                if !t.is_empty() {
+                                    acc = t.to_string();
+                                }
+                            }
                             if let Some(tc) = p.get("tool_calls") {
                                 tool_calls = crate::context::parse::from_value(tc);
+                            }
+                            if let Some(w) = p.get("warn").and_then(|w| w.as_str()) {
+                                // N44：正文已生成、只是尾部伪 XML 标记无法解析。
+                                // 保留答案，把 provider 错误降级为 review.warn，不再整轮 failed。
+                                self.emit(
+                                    &session.id,
+                                    EventKind::ReviewWarn,
+                                    json!({
+                                        "text": format!(
+                                            "模型收尾的伪 XML 工具标记无法解析，已保留正文并继续：{w}"
+                                        ),
+                                        "source": "provider",
+                                        "kind": "malformed_tool_markup",
+                                        "model": cfg.model,
+                                        "retry": false,
+                                    }),
+                                );
                             }
                             break;
                         }

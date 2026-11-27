@@ -779,6 +779,13 @@ pub fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, 
             .unwrap_or("")
             .trim()
             .to_string();
+        // N43：空 evidence 是“这一票无效”，不是“判据不合格”。两者必须分开报错，
+        // 上层才会把空串当成可重试的无效票，而不是直接给整轮判 degraded。
+        if evidence.is_empty() {
+            return Err(format!(
+                "审批项 {id} 的 evidence 为空：该票无效，必须重试并逐字复制答案原文，不是判据不合格"
+            ));
+        }
         // evidence 太短说明 judge 只是在占位（例如“总结”），属 judge 失败，交给上层重试。
         if !evidence_is_substantive(&evidence) {
             return Err(format!(
@@ -820,6 +827,12 @@ pub fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, 
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .trim();
+    if summary.is_empty() {
+        return Err(
+            "审批总结 evidence 为空：该票无效，必须重试并逐字复制答案原文，不是判据不合格"
+                .to_string(),
+        );
+    }
     if !evidence_is_substantive(summary) {
         return Err(format!(
             "审批总结 evidence 过短（须至少 6 个汉字或 3 个英文词）：{summary:?}"
@@ -837,6 +850,11 @@ pub fn parse_verdict(text: &str, rubric: &Value, answer: &str) -> Result<Value, 
         "failed": failed,
         "evidence": summary,
     }))
+}
+
+/// N43：空 evidence 是无效票，值得多给一次重试；过短/非原文仍按普通不合格处理。
+pub fn verdict_error_is_empty_evidence(error: &str) -> bool {
+    error.contains("evidence 为空")
 }
 
 /// 标准 JSON 解析失败时，修复字符串里的非法反斜杠转义与裸控制字符。
@@ -970,5 +988,36 @@ mod tests {
         let raw = r#"{"pass":true,"items":[{"id":"c1","pass":true,"evidence":"The answer is four"}],"evidence":"The answer is four"}"#;
         let v = parse_verdict(raw, &rubric, answer).expect("three English words are enough");
         assert_eq!(v["pass"], true);
+    }
+
+    #[test]
+    fn verdict_empty_evidence_is_invalid_vote_not_short_evidence() {
+        let rubric = json!([{"id": "c3", "criterion": "写入文件", "check": "三条要点"}]);
+        let answer = "已完成写入，三条要点已写入文件。";
+        let raw = r#"{"pass":true,"items":[{"id":"c3","pass":true,"evidence":""}],"evidence":"三条要点已写入文件"}"#;
+        let err = parse_verdict(raw, &rubric, answer).expect_err("empty evidence");
+        assert!(err.contains("evidence 为空"), "{err}");
+        assert!(!err.contains("evidence 过短"), "{err}");
+        assert!(verdict_error_is_empty_evidence(&err));
+    }
+
+    #[test]
+    fn verdict_short_evidence_stays_a_normal_failure() {
+        let rubric = json!([{"id": "c3", "criterion": "写入文件", "check": "三条要点"}]);
+        let answer = "已完成写入，三条要点已写入文件。";
+        let raw = r#"{"pass":true,"items":[{"id":"c3","pass":true,"evidence":"总结"}],"evidence":"三条要点已写入文件"}"#;
+        let err = parse_verdict(raw, &rubric, answer).expect_err("short evidence");
+        assert!(err.contains("evidence 过短"), "{err}");
+        assert!(!verdict_error_is_empty_evidence(&err));
+    }
+
+    #[test]
+    fn verdict_empty_summary_is_invalid_vote() {
+        let rubric = json!([{"id": "c1", "criterion": "answer", "check": "value"}]);
+        let answer = "The answer is four.";
+        let raw = r#"{"pass":true,"items":[{"id":"c1","pass":true,"evidence":"The answer is four"}],"evidence":""}"#;
+        let err = parse_verdict(raw, &rubric, answer).expect_err("empty summary");
+        assert!(err.contains("审批总结 evidence 为空"), "{err}");
+        assert!(verdict_error_is_empty_evidence(&err));
     }
 }

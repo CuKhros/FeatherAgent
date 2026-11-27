@@ -421,6 +421,11 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
                 if judge_text.contains("REVIEW_MISSING_FIRST") && !retried && items.len() > 1 {
                     items.pop();
                 }
+                if judge_text.contains("REVIEW_EMPTY_EVIDENCE") && !retried {
+                    if let Some(last) = items.last_mut() {
+                        last["evidence"] = json!("");
+                    }
+                }
                 let pass = items
                     .iter()
                     .all(|x| x.get("pass").and_then(|y| y.as_bool()).unwrap_or(false));
@@ -496,7 +501,10 @@ fn provider_mock(method: &str, params: &Value, io: &Arc<Io>, id: u64) -> Result<
             if last_user.contains("REVIEW_M1") || last_user.contains("REVIEW_SUBJ") {
                 return Ok(("REVIEW-FINAL".into(), 0));
             }
-            if last_user.contains("REVIEW_K1") || last_user.contains("REVIEW_MISSING_FIRST") {
+            if last_user.contains("REVIEW_K1")
+                || last_user.contains("REVIEW_MISSING_FIRST")
+                || last_user.contains("REVIEW_EMPTY_EVIDENCE")
+            {
                 return Ok(("REVIEW-FINAL".into(), 0));
             }
             let short: String = last_user.chars().take(60).collect();
@@ -733,6 +741,9 @@ fn provider_http(
             let mut native_calls: Vec<Value> = Vec::new();
             let mut openai_calls: BTreeMap<u64, (String, String)> = BTreeMap::new();
             let mut upstream_finish = "stop".to_string();
+            // N44：正文已经流完、只是在收尾的伪 XML 工具标记上触发 provider 解析错误。
+            // 保留正文，把错误降级成 warn，不要因为尾部标记把整轮置 failed。
+            let mut upstream_warn: Option<String> = None;
             let result = net::stream_post_lines_auth(&url, &body, api_key, |line| {
                 if io.is_cancelled(req) {
                     return false;
@@ -780,6 +791,12 @@ fn provider_http(
                             upstream_finish = "tool_calls".into();
                             return false;
                         }
+                    }
+                    if !acc.trim().is_empty() {
+                        // N44：正文已经生成，只有收尾的伪 XML 标记畸形；不要发射
+                        // error 事件（否则 run_turn 会立刻 return Err 并整轮 failed）。
+                        upstream_warn = Some(msg.to_string());
+                        return false;
                     }
                     io.emit(req, json!({"kind": "error", "message": msg}));
                     return false;
@@ -859,6 +876,9 @@ fn provider_http(
                         "arguments": c.arguments
                     }));
                     upstream_finish = "tool_calls".into();
+                } else if !acc.trim().is_empty() {
+                    // N44：正文已进入回调，HTTP 错误体只是尾部 XML；保留正文并告警。
+                    upstream_warn = Some(e);
                 } else {
                     io.emit(req, json!({"kind": "error", "message": e}));
                     return Err(e);
@@ -876,10 +896,19 @@ fn provider_http(
                 native_calls.push(json!({"name": name, "arguments": args}));
             }
             let calls = featheragent::context::parse::from_value(&Value::Array(native_calls));
-            if acc.trim().is_empty() && calls.is_empty() {
-                let msg = format!(
-                    "{label} 返回空响应（content 与 tool_calls 均为空）；已拒绝以 status=ok 静默通过。请检查 base_url/Key/代理/模型是否就绪"
-                );
+            let answer_text = if upstream_warn.is_some() {
+                featheragent::context::parse::strip_malformed_tool_markup(&acc)
+            } else {
+                acc
+            };
+            if answer_text.trim().is_empty() && calls.is_empty() {
+                let msg = if let Some(w) = &upstream_warn {
+                    format!("{label} 返回的正文只剩畸形的工具标记，无法保留有效答案：{w}")
+                } else {
+                    format!(
+                        "{label} 返回空响应（content 与 tool_calls 均为空）；已拒绝以 status=ok 静默通过。请检查 base_url/Key/代理/模型是否就绪"
+                    )
+                };
                 io.emit(req, json!({"kind": "error", "message": msg}));
                 return Err(msg);
             }
@@ -898,11 +927,22 @@ fn provider_http(
                     .map(|c| json!({"name": c.name, "arguments": c.arguments}))
                     .collect(),
             );
-            io.emit(
-                req,
-                json!({"kind": "done", "finish_reason": finish, "tool_calls": calls_json}),
-            );
-            Ok(json!({"text": acc, "finish_reason": finish, "tool_calls": calls_json}))
+            let mut done = json!({
+                "kind": "done",
+                "finish_reason": finish,
+                "tool_calls": calls_json.clone(),
+                "text": answer_text.clone(),
+            });
+            if let Some(w) = &upstream_warn {
+                done["warn"] = json!(w);
+            }
+            io.emit(req, done);
+            Ok(json!({
+                "text": answer_text,
+                "finish_reason": finish,
+                "tool_calls": calls_json,
+                "warn": upstream_warn,
+            }))
         }
         "fim" => {
             if openai {

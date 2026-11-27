@@ -231,7 +231,7 @@ impl ContextEngine {
 
         // ---- 稳定前缀 ----
         let mut system = format!(
-            "你是 FeatherAgent 的助手，服务于本地 {} 模型。默认简洁、工具优先、不要臆造；工具优先只用于获取或变更必要信息。用户要代码、文本、方案或译文时，默认直接写在回答里，不要为了展示工具能力而写入文件；只有用户明确要求保存、写入或生成文件时才调用文件工具。用户要求列举、比较、穷举、区别或说明全部要点时，必须覆盖全部要点；先确认用户要求的数量与对比轴，第一层条目直接对齐这些轴。问“区别/对比/差异”时，先列出机制/连接、可靠性/一致性、性能与开销、典型场景，再按用户要求的条数逐轴展开；每个维度至少一行、双方各写关键取值。未指定维度时优先覆盖上述四类，不要用同一维度的近义表述凑数；这类题不受默认简洁限制，不能只写一个维度或写到一半。文件工具成功返回后不要反复读取同一文件自检，最终答复报告路径或结果即可。数学、证明、推导类任务必须写出可复核过程：从已知/假设到每一步变换再到结论，不能只写标题或最终答案就停；工具被拒绝时不要重复调用同一工具，改用文字完成推导。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
+            "你是 FeatherAgent 的助手，服务于本地 {} 模型。默认简洁、工具优先、不要臆造；工具优先只用于获取或变更必要信息。用户要代码、文本、方案或译文时，默认直接写在回答里，不要为了展示工具能力而写入文件；只有用户明确要求保存、写入或生成文件时才调用文件工具。用户要求列举、比较、穷举、区别或说明全部要点时，必须覆盖全部要点；先确认用户要求的数量与对比轴，第一层条目直接对齐这些轴。问“区别/对比/差异”时，先列出机制/连接、可靠性/一致性、性能与开销、典型场景，再按用户要求的条数逐轴展开；每个维度至少一行、双方各写关键取值。未指定维度时优先覆盖上述四类，不要用同一维度的近义表述凑数；这类题不受默认简洁限制，不能只写一个维度或写到一半。文件工具成功返回后不要反复读取同一文件自检，最终答复报告路径或结果即可。数学、证明、推导类任务必须写出可复核过程：从已知/假设到每一步变换再到结论，不能只写标题或最终答案就停。已有推导且有把握时，直接给出并守住结论；需要验证时可以调用工具，但一旦调用就必须等工具结果再下结论，不能在没有工具结果时凭想象否定已有推导。要么调用工具并等待结果，要么相信并保留已有推导，严禁先给正确结论又用未执行的“验证”自我推翻。推导完成后收束到最终结论，不要用大段重复验算凑篇幅，也不要在结论前草率停下。工具被拒绝时不要重复调用同一工具，改用文字完成推导。当前工作目录是一个项目工作区根；文件工具用普通相对路径或 `workspace/` 前缀均可，都会落在该项目内，不要用前导斜杠。",
             profile.name
         );
         if let Some(note) = &self.cfg.workspace_note {
@@ -770,9 +770,10 @@ mod tests {
             ));
         }
         let profile = ModelProfile {
-            // The stable system prefix now carries the math/proof completeness rule;
-            // keep this layering test above the tiny 900-token edge it was written for.
-            context_window: 1200,
+            // The stable system prefix now carries the math/proof completeness and
+            // verification rules; keep this layering test above the tiny edge it was
+            // written for so the history layer still has room.
+            context_window: 1600,
             max_output: 128,
             ..Default::default()
         };
@@ -845,6 +846,19 @@ mod tests {
         assert!(prompt.contains("不要反复读取同一文件自检"), "{prompt}");
         assert!(prompt.contains("数学、证明、推导类任务"), "{prompt}");
         assert!(prompt.contains("不能只写标题或最终答案就停"), "{prompt}");
+        assert!(
+            prompt.contains("一旦调用就必须等工具结果再下结论"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("不能在没有工具结果时凭想象否定已有推导"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("严禁先给正确结论又用未执行的“验证”自我推翻"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("不要用大段重复验算凑篇幅"), "{prompt}");
         assert!(prompt.contains("工具被拒绝时不要重复调用"), "{prompt}");
     }
 

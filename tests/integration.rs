@@ -169,6 +169,14 @@ fn last_model_text(seen: &[Value]) -> String {
         .unwrap_or_default()
 }
 
+fn malformed_xml_stream() -> String {
+    concat!(
+        "{\"message\":{\"content\":\"巴塞尔问题：∑ 1/n² = π²/6，收敛。\"},\"done\":false}\n",
+        "{\"message\":{\"content\":\"\\n<function=tool.fs.write>\\n{broken}\\n\"},\"done\":false}\n",
+        "{\"error\":{\"message\":\"XML syntax error on line 4\"}}\n"
+    ).to_string()
+}
+
 struct MockOpenAi {
     base: String,
     requests: Arc<std::sync::Mutex<Vec<String>>>,
@@ -203,6 +211,10 @@ impl MockOpenAi {
                                 "application/json",
                                 "{\"data\":[{\"embedding\":[1.0,0.0]}]}".to_string(),
                             )
+                        } else if path.starts_with("/api/chat")
+                            && body.contains("MALFORMED_XML_TAIL")
+                        {
+                            ("application/x-ndjson", malformed_xml_stream())
                         } else if path.starts_with("/api/chat") {
                             (
                                 "application/x-ndjson",
@@ -2011,4 +2023,88 @@ fn math_paper_formula_variants_and_steps_are_scored() {
             check["name"]
         );
     }
+}
+
+#[test]
+fn provider_malformed_xml_tail_keeps_answer_and_warns() {
+    let mock = MockOpenAi::new();
+    let base = mock.base.clone();
+    let (_h, conn) = start("n44", move |cfg| {
+        cfg.provider_plugin = "provider-ollama".into();
+        cfg.base_url = base;
+        cfg.max_turns = 2;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sn44"}))
+        .unwrap();
+    let seen = send_and_wait(&conn, "sn44", "MALFORMED_XML_TAIL", Duration::from_secs(20));
+    let text = last_model_text(&seen);
+    assert!(text.contains("巴塞尔问题"), "正文应保留: {text}");
+    assert!(!text.contains("<function"), "畸形标记应被剔除: {text}");
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("伪 XML"))
+                    .unwrap_or(false)
+        }),
+        "应收敛为 review.warn: {seen:?}"
+    );
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("ok"),
+        "不应因尾部标记整轮 failed: {seen:?}"
+    );
+}
+
+#[test]
+fn review_gate_empty_evidence_retries_and_approves() {
+    let (_h, conn) = start("review-empty-evidence", |cfg| {
+        cfg.review_gate.enabled = true;
+        cfg.review_gate.max_rounds = 1;
+    });
+    conn.client
+        .call("session.create", json!({"id": "sempty"}))
+        .unwrap();
+    let seen = send_and_wait(
+        &conn,
+        "sempty",
+        "REVIEW_EMPTY_EVIDENCE",
+        Duration::from_secs(20),
+    );
+    assert!(
+        seen.iter().any(|v| {
+            v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("review.warn")
+                && v.pointer("/params/payload/text")
+                    .and_then(|x| x.as_str())
+                    .map(|t| t.contains("evidence 为空") && !t.contains("evidence 过短"))
+                    .unwrap_or(false)
+        }),
+        "空 evidence 应作为无效票重试，而不是过短证据: {seen:?}"
+    );
+    let finished = seen
+        .iter()
+        .find(|v| v.pointer("/params/kind").and_then(|k| k.as_str()) == Some("chat.finished"))
+        .expect("缺少 chat.finished");
+    assert_eq!(
+        finished
+            .pointer("/params/payload/status")
+            .and_then(|x| x.as_str()),
+        Some("ok"),
+        "重试后不应 degraded: {seen:?}"
+    );
+    assert_eq!(
+        finished
+            .pointer("/params/payload/review/status")
+            .and_then(|x| x.as_str()),
+        Some("approved"),
+        "重试产出合规 evidence 后应 approved: {seen:?}"
+    );
 }

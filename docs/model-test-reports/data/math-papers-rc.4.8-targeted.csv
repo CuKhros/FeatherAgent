@@ -1,0 +1,4 @@
+paper,question,domain,full,bare,fa,status,chars,note
+math-large,ML02,级数,3,,3.0,failed,727,"N40 公式变体 3/3；同轮尾部畸形 XML 使 status=failed（N44）"
+math-large,ML10,微积分,4,,4.0,ok,1550,"N41 四步按内容 4/4；测试脚本正则转义失误（N41 note）"
+math-large,ML10,微积分,4,,4.0,ok,3514,"第二次；同题长度分布 140/973/1136/1550/3514，出现自我推翻与反复验算（N45/N46）"

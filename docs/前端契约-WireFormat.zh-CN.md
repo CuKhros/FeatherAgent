@@ -1,6 +1,6 @@
 # FeatherAgent 前端契约 · Wire Format v1.0
 
-> 适用版本：FeatherAgent **1.2.1-rc.4.8**（契约 API `1.0`）
+> 适用版本：FeatherAgent **1.2.1-rc.4.9**（契约 API `1.0`）
 > 本文描述**真正在线上传输的字节**，不是设计草案。任何第三方前端（Python / Node / Go / C# / WebSocket 桥）都应按本文实现，不要再靠试错猜测分帧。
 
 ## 1. 传输端点
@@ -68,7 +68,7 @@ featheragent serve --codec json      # 调试/第三方参考客户端
 
 ```json
 {"jsonrpc":"2.0","id":1,"result":{
-  "version":"1.2.1-rc.4.8","contract":"1.0","transport":"pipe",
+  "version":"1.2.1-rc.4.9","contract":"1.0","transport":"pipe",
   "codec":"json",
   "paths":{"install_root":"...","data":"...","workspace":"...","runtime":"..."}
 }}
@@ -350,6 +350,7 @@ Windows 命名管道在 Python 里可用 `open(r'\\.\pipe\featheragent-...', 'r+
 安装目录内的本地文件返回 `copied:false` 和 canonical 路径；目录外文件复制到默认工作区。浏览器字节总是落到默认工作区。模型只拿 `result.path`，不拿浏览器路径或目录外原路径。
 
 - `chat.finished.status` 新增 `stopped`；旧客户端应把 `stopped` 与 `cancelled` 都视为“被用户停止”。部分输出以 `model.message(finish=interrupted)` 保留。
+- 1.2.1-rc.4.9：没有新增帧、端点、事件类型或错误码。`review.warn` 仍是既有事件，payload 增量携带 `source`、`kind`、`model`、`retry`（旧客户端可忽略）。provider 插件的流式 `done` 现在带完整 `text` 与可选 `warn`；这是内核与内置插件之间的协议，不是前端 wire 字段。`review.verdict` 字段不变；N43 与 N45 是解析/提示词行为，不是 wire 变更。
 - 1.2.1-rc.4.8：没有新增帧、端点、事件类型或错误码。`chat.send` 返回值在 `session`、`accepted`、`turn` 之外新增 `run`（u64）；`chat.finished.payload` 新增 `run`（u64），都是增量。订阅共享事件流的客户端应忽略 `run` 不是自己那次 `chat.send` 的 `chat.finished`；否则被强杀的旧回合可能被当成自己的 `stopped` 结果。`session.create` 现在可能先取消同会话旧 holder（属于其他连接）再接管；这是行为修正，不是新方法。
 - 1.2.1-rc.4.7：没有新增帧、端点、事件类型或错误码。`permission_denied` 的 `tool.result` 新增 `hint` 字符串，提示模型不要重复调用同一工具、改用文字完成；旧客户端可忽略。judge evidence 的接受条件只是语义调整（6 个汉字 / 3 个英文词 / 10 个 ASCII 字母数字字符），`review.verdict` 字段不变。数学推导要求是系统提示文本，不是 wire 变更。
 - 1.2.1-rc.4.6：没有新增帧、端点、事件类型或错误码。`model.message` 增加 `truncated: bool`（provider 结束原因为 `length` 时为 true），旧客户端可忽略。`config.get` / `config.set` 接受新增的 `max_output` 字段（默认 2048），属增量。`review.verdict` 字段不变。`bench --json` 是 CLI 诊断输出，不是 wire 方法：`gates` 现在只含布尔判定项，`platform`、`write_gate_status`、`write_gate_raw`、阈值与 `reliability` 移到 `diagnostics`；脚本需迁移读取位置。

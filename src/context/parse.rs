@@ -394,6 +394,19 @@ fn xml_tool_call(text: &str) -> Option<ToolCall> {
     })
 }
 
+/// N44：正文后跟了无法解析的伪 XML 工具标记时，只保留标记前的正文。
+/// 仅在 provider 已报告 XML/工具格式错误、且 `extract` 无法恢复调用时调用；
+/// 正常答案里作为示例出现的 `<function` 不应被误删。
+pub fn strip_malformed_tool_markup(text: &str) -> String {
+    let mut cut = text.len();
+    for marker in ["<function", "<parameter", "<tool_call", "</parameter"] {
+        if let Some(i) = text.find(marker) {
+            cut = cut.min(i);
+        }
+    }
+    text[..cut].trim_end().to_string()
+}
+
 /// 读取伪标签里的 `key=value` 或 `key name="value"` 属性值。
 fn xml_attr(tag: &str, key: &str) -> Option<String> {
     let inner = tag
@@ -634,6 +647,18 @@ mod tests {
         assert_eq!(c[0].name, "tool.fs.write");
         assert_eq!(c[0].arguments["path"], "workspace/notes.txt");
         assert_eq!(c[0].arguments["content"], "done");
+    }
+
+    #[test]
+    fn malformed_xml_tail_is_stripped_after_content_is_kept() {
+        let text = concat!(
+            "巴塞尔问题：∑ 1/n² = π²/6，收敛。\n<function=tool.fs.write>\n{broken}\n",
+            "</",
+            "parameter>"
+        );
+        let clean = strip_malformed_tool_markup(text);
+        assert_eq!(clean, "巴塞尔问题：∑ 1/n² = π²/6，收敛。");
+        assert!(!clean.contains("<function"));
     }
 
     #[test]

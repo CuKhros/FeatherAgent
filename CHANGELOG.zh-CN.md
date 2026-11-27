@@ -1,6 +1,26 @@
 # Changelog
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.8` 是当前公开仓库候选版，尚未替代稳定版。
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循语义化版本。`v1.2.1-rc.4.9` 是当前公开仓库候选版，尚未替代稳定版。
+
+## [1.2.1-rc.4.9] - 2026-11-27
+
+### 修复
+- N43：judge 的空 evidence 不再并入“evidence 过短”。`parse_verdict` 先判空串并返回“该票无效”；引擎只在空 evidence 时把该票预算从 2 次提高到 3 次，回注明确“不是判据不合格”。测试：`verdict_empty_evidence_is_invalid_vote_not_short_evidence`、`review_gate_empty_evidence_retries_and_approves`。
+- N44：正文已生成、仅尾部伪 XML 标记畸形时，provider 保留正文并发 `review.warn`，不再发 `error` 让整轮 failed。`done` 带完整 `text` 和可选 `warn`；`strip_malformed_tool_markup` 只截尾，不动正常正文。测试：`malformed_xml_tail_is_stripped_after_content_is_kept`、`provider_malformed_xml_tail_keeps_answer_and_warns`。
+- N45：数学/推导提示加入“已有推导且有把握就直接守住；要验证就调用工具并等结果；不能在无工具结果时凭想象否定已有推导”。测试：`system_prompt_separates_content_output_from_file_creation`。
+
+### 新增
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.8.md` 与 `data/math-papers-rc.4.8-targeted.csv`；报告索引改为 15 份。
+
+### 变更
+- `review.warn` payload 增量增加 `source` / `kind` / `model` / `retry`；`parse_verdict` 错误文案区分“evidence 为空”和“过短”。
+- N46 只做提示词收敛，不新增硬长度门禁。
+
+### 文档
+- Linux 全量 217 项、216 通过、1 ignored（87 lib、34 plugin ×2、5 kernel、6 TUI、4 WebUI ×2、2 golden、41 integration，其中 40 通过、1 ignored）；`scripts/ci.sh` 通过。
+- Linux release bench：内核 2,581,680 B；热启动 P50 1.383/1.366/1.384 ms；冷启动 P50 6.497/6.355/7.418 ms；8 项布尔门禁全绿；reliability 三次均为 high。
+- Windows x64：10 个 exe，内核 2,320,896 B，仅系统 DLL。Wine 冒烟通过 `version`/`doctor`/三次 bench/serve/chat 与一次 N42 重连（`run=3`）；Wine 8 项门禁过 6 项，`boot_lt_100ms` 与 `cold_spawn_lt_250ms` 判红；Wine 不是 Windows 基线。
+- 新增 rc.4.9 中英变更说明；README、Windows 指南、验证报告与 Wire Format 适用版本改为 rc.4.9。
 
 ## [1.2.1-rc.4.8] - 2026-11-27
 

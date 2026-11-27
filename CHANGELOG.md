@@ -1,6 +1,26 @@
 # Changelog
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.8` is the current public release candidate and does not replace a stable release.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning. `v1.2.1-rc.4.9` is the current public release candidate and does not replace a stable release.
+
+## [1.2.1-rc.4.9] - 2026-11-27
+
+### Fixed
+- N43: empty judge evidence is no longer grouped with “evidence too short”. `parse_verdict` checks the empty string first and returns “invalid vote”; the engine raises only that vote's budget from two to three attempts and the retry note says it is not a failed criterion. Tests: `verdict_empty_evidence_is_invalid_vote_not_short_evidence`, `review_gate_empty_evidence_retries_and_approves`.
+- N44: when the body is already generated and only the trailing pseudo-XML marker is malformed, the provider keeps the body, emits `review.warn`, and no longer sends `error` that fails the round. `done` carries the full `text` and optional `warn`; `strip_malformed_tool_markup` only cuts the tail. Tests: `malformed_xml_tail_is_stripped_after_content_is_kept`, `provider_malformed_xml_tail_keeps_answer_and_warns`.
+- N45: the math/proof prompt now says: keep a sound derivation; if you choose to verify, call the tool and wait; never negate an existing derivation without a tool result. Test: `system_prompt_separates_content_output_from_file_creation`.
+
+### Added
+- `docs/model-test-reports/reports/Windows真机复测报告-v1.2.1-rc.4.8.md` and `data/math-papers-rc.4.8-targeted.csv`; the report index is now 15 reports.
+
+### Changed
+- `review.warn` payload adds `source` / `kind` / `model` / `retry`; `parse_verdict` distinguishes “evidence 为空” from “evidence 过短”.
+- N46 gets prompt pacing only; no hard length gate.
+
+### Documentation
+- Linux suite: 217 items, 216 passed, 1 ignored (87 lib, 34 plugin ×2, 5 kernel, 6 TUI, 4 WebUI ×2, 2 golden, 41 integration with 40 passed and 1 ignored); `scripts/ci.sh` passed.
+- Linux release bench: kernel 2,581,680 B; warm P50 1.383/1.366/1.384 ms; cold P50 6.497/6.355/7.418 ms; all eight boolean gates true; reliability high on all three.
+- Windows x64: 10 exes, kernel 2,320,896 B, system DLLs only. Wine smoke passed `version`/`doctor`/three bench runs/serve/chat and one N42 reconnect (`run=3`); 6 of 8 Wine gates passed, with `boot_lt_100ms` and `cold_spawn_lt_250ms` red; Wine is not a Windows baseline.
+- Added bilingual rc.4.9 change notes; README, Windows guide, verification report and wire-format version now target rc.4.9.
 
 ## [1.2.1-rc.4.8] - 2026-11-27
 

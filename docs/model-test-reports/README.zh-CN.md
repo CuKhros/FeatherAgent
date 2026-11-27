@@ -40,8 +40,9 @@
 | [v1.2.1-rc.4.5](reports/Windows真机复测报告-v1.2.1-rc.4.5.md) | 大试卷 2（20 题 / 60 分）：48.0/60 vs 45.0/60；1,653s vs 1,059s；judge 因 Windows 路径非法转义 3/3 degraded；FA 两题截断为 136 / 390 字 | 区分“避免空响应”与“内容质量”，并暴露 N32–N35 |
 | [v1.2.1-rc.4.6](reports/Windows真机复测报告-v1.2.1-rc.4.6.md) | 数学小卷 19.5/25 vs 16.5/25；大卷 40.7/56 vs 31.7/56；大卷 FA 1 题空响应 vs 裸跑 5 题；N32–N35 真机通过；N36 的 9 字 evidence 被 10 字门限误杀 | 首次数学双卷对照，确认四项修复，暴露 N36–N39 |
 | [v1.2.1-rc.4.7](reports/Windows真机复测报告-v1.2.1-rc.4.7.md) | 数学小卷 21.5/25 vs 14.5/25；大卷 41.6/56 vs 32.3/56；放行 `tool.shell` 后 FA 耗时 126s / 446s；N37、N38 真机确认；N36 因残留 turn 连续 `interrupted` 未取得读数；暴露 N40/N41 | 量化放行 shell 的分数与耗时收益；把公式写法与分步判据噪声单独暴露出来 |
+| [v1.2.1-rc.4.8](reports/Windows真机复测报告-v1.2.1-rc.4.8.md) | ML02/ML10 定向：N40 3/3、N41 按内容 4/4；N42 5/5 干净；暴露 N43/N44/N45；ML10 长度跨度 140–3514 | 确认公式、分步与残留 turn 修复；分离 judge 空 evidence、畸形 XML 尾与自我推翻 |
 
-共 14 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
+共 15 份报告保留原始中文表述。公开前已替换本机 Windows 用户名；命令、端口、模型名和事件记录都未改动。
 
 ## 试卷库
 
@@ -57,6 +58,7 @@
 | [`data/large-2-rc.4.5.csv`](data/large-2-rc.4.5.csv) | 大试卷 2 的 20 题逐题分数、耗时与答案长度（裸跑 vs FeatherAgent） |
 | [`data/math-papers-rc.4.6.csv`](data/math-papers-rc.4.6.csv) | 数学小卷/大卷 28 题的逐题分数（裸跑 vs FeatherAgent） |
 | [`data/math-papers-rc.4.7.csv`](data/math-papers-rc.4.7.csv) | 同一 28 题在 rc.4.7 放行 shell 后的逐题分数，附 N37/N38/N40/N41 备注 |
+| [`data/math-papers-rc.4.8-targeted.csv`](data/math-papers-rc.4.8-targeted.csv) | rc.4.8 的 ML02/ML10 定向行，含 status、输出长度与 N44/N45/N46 备注 |
 
 ## 读数据时要注意
 
